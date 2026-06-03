@@ -139,7 +139,7 @@ public sealed class DockerArtifactProviderTests
     }
 
     [Fact]
-    public async Task BuildAsyncEmitsPrereleaseMajorAndMajorMinorTagsWithSuffix()
+    public async Task BuildAsyncKeepsFullPrereleaseTagAndNormalizesShorthandTags()
     {
         var invocations = new List<DockerInvocation>();
         var provider = new DockerArtifactProvider(
@@ -167,9 +167,9 @@ public sealed class DockerArtifactProviderTests
             CommitSha: "abcdef123456",
             Values: new Dictionary<string, object?>())
         {
-            Version = new VersionResult("0.1.0-local", 0, 1, 0, "local", "abcdef123456", "abcdef", true, false)
+            Version = new VersionResult("0.1.322-qa.5", 0, 1, 322, "qa.5", "abcdef123456", "abcdef", true, false)
             {
-                DockerVersion = "0.1.0-local",
+                DockerVersion = "0.1.322-qa.5",
             },
             ShortSha = "abcdef",
         };
@@ -178,9 +178,58 @@ public sealed class DockerArtifactProviderTests
 
         Assert.True(result.Success);
         Assert.Single(invocations);
-        Assert.Contains("ghcr.io/acme/widget:0.1.0-local", invocations[0].Arguments);
-        Assert.Contains("ghcr.io/acme/widget:0.1-local", invocations[0].Arguments);
-        Assert.Contains("ghcr.io/acme/widget:0-local", invocations[0].Arguments);
+        Assert.Contains("ghcr.io/acme/widget:0.1.322-qa.5", invocations[0].Arguments);
+        Assert.Contains("ghcr.io/acme/widget:0.1-qa", invocations[0].Arguments);
+        Assert.Contains("ghcr.io/acme/widget:0-qa", invocations[0].Arguments);
+    }
+
+    [Fact]
+    public async Task BuildAsyncDefersCleanupUntilAfterPushWhenPushIsAllowed()
+    {
+        var invocations = new List<DockerInvocation>();
+
+        var provider = new DockerArtifactProvider(
+            runDockerAsync: (args, workingDirectory, envOverrides, standardInput, cancellationToken) =>
+            {
+                var arguments = args.ToArray();
+                invocations.Add(new DockerInvocation(arguments, envOverrides, standardInput));
+                return Task.FromResult((0, string.Empty));
+            },
+            isBuildxAvailableAsync: (_, _, _) => Task.FromResult(true));
+
+        var artifact = new ArtifactConfig(
+            "docker",
+            "sample",
+            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                """
+                {
+                  "image": "ghcr.io/acme/widget",
+                  "cleanup": { "local": true }
+                }
+                """)!);
+
+        var context = new ExecutionContext(
+            RepositoryRoot: Path.GetTempPath(),
+            Branch: "main",
+            CommitSha: "abcdef123456",
+            Values: new Dictionary<string, object?>())
+        {
+            Version = new VersionResult("1.2.3", 1, 2, 3, null, "abcdef123456", "abcdef", false, true)
+            {
+                DockerVersion = "1.2.3",
+            },
+            ShortSha = "abcdef",
+        };
+
+        var buildResult = await provider.BuildAsync(artifact, context, CancellationToken.None);
+        var pushResult = await provider.PushAsync(artifact, context, CancellationToken.None);
+
+        Assert.True(buildResult.Success);
+        Assert.True(pushResult.Success);
+        Assert.Contains(invocations, invocation => invocation.Arguments.Count >= 2 && invocation.Arguments[0] == "build");
+        Assert.Contains(invocations, invocation => invocation.Arguments.Count >= 2 && invocation.Arguments[0] == "push");
+        Assert.Contains(invocations, invocation => invocation.Arguments.Count >= 3 && invocation.Arguments[0] == "image" && invocation.Arguments[1] == "rm");
+        Assert.Equal("image", invocations[^1].Arguments[0]);
     }
 
     [Fact]

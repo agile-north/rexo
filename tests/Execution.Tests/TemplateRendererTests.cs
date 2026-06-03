@@ -109,6 +109,31 @@ public sealed class TemplateRendererTests
     }
 
     [Fact]
+    public void RenderResolvesVersionPreReleaseComponents()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = ExecutionContext.Empty("C:\\repo") with
+        {
+            Version = new VersionResult(
+                SemVer: "0.1.322-qa.5",
+                Major: 0,
+                Minor: 1,
+                Patch: 322,
+                PreRelease: "qa.5",
+                CommitSha: "abc1234",
+                ShortSha: "abc1234",
+                IsPreRelease: true,
+                IsStable: false),
+        };
+
+        Assert.Equal("qa.5", renderer.Render("{{version.preReleaseTag}}", ctx));
+        Assert.Equal("qa", renderer.Render("{{version.preReleaseLabel}}", ctx));
+        Assert.Equal("5", renderer.Render("{{version.preReleaseNumber}}", ctx));
+        Assert.Equal("-qa", renderer.Render("{{version.preReleaseLabelWithDash}}", ctx));
+        Assert.Equal("-qa.5", renderer.Render("{{version.preReleaseTagWithDash}}", ctx));
+    }
+
+    [Fact]
     public void RenderLeavesMissingVariableAsEmpty()
     {
         var renderer = new TemplateRenderer();
@@ -266,6 +291,22 @@ public sealed class TemplateRendererTests
         var renderer = new TemplateRenderer();
         var ctx = MakeContext(args: new Dictionary<string, string> { ["branch"] = "feature/my-feature" });
         Assert.Equal("feature-my-feature", renderer.Render("{{args.branch | replace(/,-)}}", ctx));
+    }
+
+    [Fact]
+    public void ReplaceFilterDoesNotInterpretRegexSyntax()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string> { ["value"] = "fooXXXbar" });
+        Assert.Equal("fooXXXbar", renderer.Render("{{args.value | replace(/foo.*bar/, 'baz')}}", ctx));
+    }
+
+    [Fact]
+    public void ReplacePatternFilterSupportsRegexCaptureGroups()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string> { ["pair"] = "foo=123" });
+        Assert.Equal("123-foo", renderer.Render("{{args.pair | replacePattern(/(\\w+)=(\\d+)/, '$2-$1')}}", ctx));
     }
 
     [Fact]

@@ -45,12 +45,19 @@ Supported filters:
 - `prefix(text)` — Prepend text if value is non-empty
 - `suffix(text)` — Append text if value is non-empty
 - `trim` — Remove leading/trailing whitespace
-- `replace(pattern, replacement)` — Regex replace
+- `replace(pattern, replacement)` — Literal string replace.
+- `replacePattern(regex, replacement)` — Regex replace. The regex must be a regex literal like `/foo(\d+)/`, and the replacement may use capture groups such as `$1`.
 
 Chain filters with pipes:
 
 ```
 {{args.dir | suffix('/dotnet-build.sarif') | prefix('/p:ErrorLog=')}}
+```
+
+Regex replace example:
+
+```
+{{args.branch | replacePattern(/feature\/(.*)/, '$1')}}
 ```
 
 ---

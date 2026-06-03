@@ -70,7 +70,10 @@ public sealed class DockerArtifactProvider : IArtifactProvider
 
                 if (settings.CleanupLocal && tags.Count > 0)
                 {
-                    await CleanupLocalImagesAsync(tags, context.RepositoryRoot, envOverrides, cancellationToken);
+                    if (!ShouldPush(settings, context, out _))
+                    {
+                        await CleanupLocalImagesAsync(tags, context.RepositoryRoot, envOverrides, cancellationToken);
+                    }
                 }
 
                 return new ArtifactBuildResult(
@@ -145,6 +148,10 @@ public sealed class DockerArtifactProvider : IArtifactProvider
             if (!ShouldPush(settings, context, out var skipReason))
             {
                 Console.WriteLine($"  Skipping docker push for '{artifact.Name}': {skipReason}");
+                if (settings.CleanupLocal && tags.Count > 0)
+                {
+                    await CleanupLocalImagesAsync(tags, context.RepositoryRoot, envOverrides, cancellationToken);
+                }
                 return new ArtifactPushResult(artifact.Name, true, Array.Empty<string>());
             }
 
@@ -153,6 +160,11 @@ public sealed class DockerArtifactProvider : IArtifactProvider
                 var auth = await PrepareDockerAuthAsync(settings, context.RepositoryRoot, dotEnv, cancellationToken);
                 if (!auth.Success)
                 {
+                    if (settings.CleanupLocal && tags.Count > 0)
+                    {
+                        await CleanupLocalImagesAsync(tags, context.RepositoryRoot, envOverrides, cancellationToken);
+                    }
+
                     return new ArtifactPushResult(artifact.Name, false, Array.Empty<string>());
                 }
 
@@ -170,6 +182,10 @@ public sealed class DockerArtifactProvider : IArtifactProvider
             finally
             {
                 CleanupDockerConfigDirectory(tempDockerConfig);
+                if (settings.CleanupLocal && tags.Count > 0)
+                {
+                    await CleanupLocalImagesAsync(tags, context.RepositoryRoot, envOverrides, cancellationToken);
+                }
             }
 
             return new ArtifactPushResult(artifact.Name, pushed.Count > 0, pushed);
@@ -962,19 +978,19 @@ public sealed class DockerArtifactProvider : IArtifactProvider
     private static string FormatMajorMinorTag(VersionResult version, BuildClassification classification)
     {
         var value = $"{version.Major}.{version.Minor}";
-        if (!string.IsNullOrWhiteSpace(version.PreRelease))
+        if (!string.IsNullOrWhiteSpace(version.PreReleaseLabel))
         {
-            return value + "-" + version.PreRelease;
+            return value + "-" + version.PreReleaseLabel;
         }
 
-        return classification == BuildClassification.NonPublic && string.IsNullOrWhiteSpace(version.PreRelease)
+        return classification == BuildClassification.NonPublic && string.IsNullOrWhiteSpace(version.PreReleaseLabel)
             ? value + "-pre"
             : value;
     }
 
     private static string FormatMajorTag(VersionResult version) =>
-        !string.IsNullOrWhiteSpace(version.PreRelease)
-            ? $"{version.Major}-{version.PreRelease}"
+        !string.IsNullOrWhiteSpace(version.PreReleaseLabel)
+            ? $"{version.Major}-{version.PreReleaseLabel}"
             : version.Major.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     private static bool BranchMatches(string pattern, string branch)

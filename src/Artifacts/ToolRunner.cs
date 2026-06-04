@@ -167,23 +167,42 @@ public static class ToolRunner
             process.StandardInput.Close();
         }
 
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+        var stdoutBuffer = new System.Text.StringBuilder();
+        var stderrBuffer = new System.Text.StringBuilder();
+
+        var stdoutTask = ReadStreamAsync(
+            process.StandardOutput,
+            stdoutBuffer,
+            line => Console.WriteLine(line),
+            cancellationToken);
+        var stderrTask = ReadStreamAsync(
+            process.StandardError,
+            stderrBuffer,
+            line => Console.Error.WriteLine(line),
+            cancellationToken);
+
         await process.WaitForExitAsync(cancellationToken);
-        var stdout = await stdoutTask;
-        var stderr = await stderrTask;
+        await stdoutTask;
+        await stderrTask;
 
-        if (!string.IsNullOrWhiteSpace(stdout))
-        {
-            Console.WriteLine(stdout);
-        }
-
-        if (!string.IsNullOrWhiteSpace(stderr))
-        {
-            Console.Error.WriteLine(stderr);
-        }
+        var stdout = stdoutBuffer.ToString();
+        var stderr = stderrBuffer.ToString();
 
         return (process.ExitCode, stdout + stderr);
+    }
+
+    private static async Task ReadStreamAsync(
+        System.IO.TextReader reader,
+        System.Text.StringBuilder buffer,
+        Action<string> onLine,
+        CancellationToken cancellationToken)
+    {
+        string? line;
+        while ((line = await reader.ReadLineAsync(cancellationToken)) is not null)
+        {
+            buffer.AppendLine(line);
+            onLine(line);
+        }
     }
 
     /// <summary>Returns <c>true</c> when the artifact's <c>useDocker</c> setting is explicitly <c>false</c>.</summary>

@@ -10,6 +10,7 @@ using YamlDotNet.Serialization;
 
 public sealed partial class RepoConfigurationLoader
 {
+    public const string DisableSchemaValidationEnvVar = "REXO_DISABLE_SCHEMA_VALIDATION";
     public const string RawGitHubBaseUrl = "https://raw.githubusercontent.com/agile-north/rexo/";
     public const string SupportedRexoSchemaPath = "rexo.schema.json";
     public const string SupportedRexoSchemaPathInRexoFolder = ".rexo/rexo.schema.json";
@@ -34,8 +35,11 @@ public sealed partial class RepoConfigurationLoader
         }
 
         var jsonText = await ReadAsJsonAsync(configPath, cancellationToken);
-        ValidateMetadata(configPath, jsonText);
-        await ValidateSchemaAsync(configPath, jsonText, cancellationToken);
+        if (!IsSchemaValidationDisabled())
+        {
+            ValidateMetadata(configPath, jsonText);
+            await ValidateSchemaAsync(configPath, jsonText, cancellationToken);
+        }
 
         var config = JsonSerializer.Deserialize<RepoConfig>(jsonText, JsonOptions);
 
@@ -122,7 +126,11 @@ public sealed partial class RepoConfigurationLoader
             }
 
             var baseJsonText = await ReadAsJsonAsync(basePath, cancellationToken);
-            ValidateMetadata(basePath, baseJsonText);
+            if (!IsSchemaValidationDisabled())
+            {
+                ValidateMetadata(basePath, baseJsonText);
+                await ValidateSchemaAsync(basePath, baseJsonText, cancellationToken);
+            }
             var baseConfig = JsonSerializer.Deserialize<RepoConfig>(baseJsonText, JsonOptions)
                 ?? throw new InvalidOperationException($"Extended config '{basePath}' is empty or invalid.");
 
@@ -224,6 +232,8 @@ public sealed partial class RepoConfigurationLoader
         return new RepoOutputsConfig
         {
             Emit = child.Emit ?? @base.Emit,
+            Command = MergeCommandOutputsConfig(@base.Command, child.Command),
+            Ci = MergeCiOutputsConfig(@base.Ci, child.Ci),
             Root = child.Root ?? @base.Root,
             Tests = MergeTestOutputsConfig(@base.Tests, child.Tests),
             Analysis = MergeAnalysisOutputsConfig(@base.Analysis, child.Analysis),
@@ -232,6 +242,58 @@ public sealed partial class RepoConfigurationLoader
             Manifests = child.Manifests ?? @base.Manifests,
             Logs = child.Logs ?? @base.Logs,
             Temp = child.Temp ?? @base.Temp,
+        };
+    }
+
+    private static RepoCommandOutputConfig? MergeCommandOutputsConfig(
+        RepoCommandOutputConfig? @base,
+        RepoCommandOutputConfig? child)
+    {
+        if (@base is null) return child;
+        if (child is null) return @base;
+
+        return new RepoCommandOutputConfig
+        {
+            Stdout = child.Stdout ?? @base.Stdout,
+            Json = child.Json ?? @base.Json,
+            JsonFile = child.JsonFile ?? @base.JsonFile,
+        };
+    }
+
+    private static RepoCiOutputsConfig? MergeCiOutputsConfig(
+        RepoCiOutputsConfig? @base,
+        RepoCiOutputsConfig? child)
+    {
+        if (@base is null) return child;
+        if (child is null) return @base;
+
+        return new RepoCiOutputsConfig
+        {
+            Emit = child.Emit ?? @base.Emit,
+            Provider = child.Provider ?? @base.Provider,
+            GitHubActions = MergeGitHubActionsCiOutputsConfig(@base.GitHubActions, child.GitHubActions),
+            Prefix = child.Prefix ?? @base.Prefix,
+            KeyCasing = child.KeyCasing ?? @base.KeyCasing,
+            Scope = child.Scope ?? @base.Scope,
+            IncludeStepOutputs = child.IncludeStepOutputs ?? @base.IncludeStepOutputs,
+            EmitEmptyValues = child.EmitEmptyValues ?? @base.EmitEmptyValues,
+            Redact = child.Redact ?? @base.Redact,
+            FailOnError = child.FailOnError ?? @base.FailOnError,
+            MaxValueLength = child.MaxValueLength ?? @base.MaxValueLength,
+            MaxVariables = child.MaxVariables ?? @base.MaxVariables,
+        };
+    }
+
+    private static RepoGitHubActionsCiOutputsConfig? MergeGitHubActionsCiOutputsConfig(
+        RepoGitHubActionsCiOutputsConfig? @base,
+        RepoGitHubActionsCiOutputsConfig? child)
+    {
+        if (@base is null) return child;
+        if (child is null) return @base;
+
+        return new RepoGitHubActionsCiOutputsConfig
+        {
+            Scope = child.Scope ?? @base.Scope,
         };
     }
 
@@ -857,5 +919,26 @@ public sealed partial class RepoConfigurationLoader
             default:
                 return value.ToString();
         }
+    }
+
+    private static bool IsSchemaValidationDisabled()
+    {
+        var value = Environment.GetEnvironmentVariable(DisableSchemaValidationEnvVar);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        return value.Trim() switch
+        {
+            "1" => true,
+            "true" => true,
+            "TRUE" => true,
+            "yes" => true,
+            "YES" => true,
+            "on" => true,
+            "ON" => true,
+            _ => bool.TryParse(value, out var parsed) && parsed,
+        };
     }
 }

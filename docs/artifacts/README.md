@@ -6,7 +6,7 @@ This folder contains provider-specific artifact documentation.
 
 1. Start here to choose a provider.
 2. Open the provider page for settings, auth resolution, and examples.
-3. Use [../CONFIGURATION.md](../CONFIGURATION.md) for the complete top-level rexo.json model.
+3. Use [../configuration/README.md](../configuration/README.md) for the complete top-level rexo.json model.
 
 ## Provider index
 

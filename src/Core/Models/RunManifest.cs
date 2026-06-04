@@ -1,5 +1,7 @@
 namespace Rexo.Core.Models;
 
+using System.Text.Json.Serialization;
+
 public sealed record RunManifest
 {
     public string SchemaVersion { get; init; } = "1.0";
@@ -40,6 +42,7 @@ public sealed record RunManifest
     public string? InformationalVersion { get; init; }
 
     /// <summary>NuGet-compatible version string derived from the resolved version.</summary>
+    [JsonPropertyName("nugetVersion")]
     public string? NuGetVersion { get; init; }
 }
 

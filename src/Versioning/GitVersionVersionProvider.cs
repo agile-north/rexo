@@ -94,7 +94,10 @@ public sealed class GitVersionVersionProvider : IVersionProvider
             var major = TryGetInt(root, "Major") ?? 0;
             var minor = TryGetInt(root, "Minor") ?? 0;
             var patch = TryGetInt(root, "Patch") ?? 0;
-            var prerelease = TryGetString(root, "PreReleaseTag");
+            var preReleaseTag = TryGetString(root, "PreReleaseTag");
+            var preReleaseLabel = TryGetString(root, "PreReleaseLabel");
+            var preReleaseNumber = TryGetInt(root, "PreReleaseNumber");
+            var prerelease = preReleaseTag;
             var sha = TryGetString(root, "Sha") ?? context.CommitSha ?? "unknown";
             var shortSha = TryGetString(root, "ShortSha") ?? context.ShortSha ?? "unknown";
 
@@ -109,7 +112,11 @@ public sealed class GitVersionVersionProvider : IVersionProvider
                 CommitSha: sha,
                 ShortSha: shortSha,
                 IsPreRelease: isPrerelease,
-                IsStable: !isPrerelease);
+                IsStable: !isPrerelease)
+            {
+                PreReleaseLabel = preReleaseLabel,
+                PreReleaseNumber = preReleaseNumber,
+            };
         }
         catch (JsonException)
         {

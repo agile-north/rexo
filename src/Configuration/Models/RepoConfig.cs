@@ -132,6 +132,12 @@ public sealed record RepoOutputsConfig
     /// <summary>When false, Rexo does not collect or write any output files (manifests, step outputs). Default: <c>true</c>.</summary>
     public bool? Emit { get; init; }
 
+    /// <summary>Defaults for command stdout and JSON output. CLI flags still override these values.</summary>
+    public RepoCommandOutputConfig? Command { get; init; }
+
+    /// <summary>CI-native manifest emission settings.</summary>
+    public RepoCiOutputsConfig? Ci { get; init; }
+
     /// <summary>Root artifacts directory. Default: <c>artifacts</c>.</summary>
     public string? Root { get; init; }
 
@@ -155,6 +161,64 @@ public sealed record RepoOutputsConfig
 
     /// <summary>Temporary scratch directory. Default: <c>.rexo/temp</c>.</summary>
     public string? Temp { get; init; }
+}
+
+public sealed record RepoCommandOutputConfig
+{
+    /// <summary>When true, command results are written to stdout by default. Default: <c>true</c>.</summary>
+    public bool? Stdout { get; init; }
+
+    /// <summary>When true, command results are rendered as JSON by default. Default: <c>false</c>.</summary>
+    public bool? Json { get; init; }
+
+    /// <summary>Optional default file path for machine-readable command results.</summary>
+    public string? JsonFile { get; init; }
+}
+
+public sealed record RepoCiOutputsConfig
+{
+    /// <summary>When true, emit CI-native variables after command execution. Default: <c>true</c>.</summary>
+    public bool? Emit { get; init; }
+
+    /// <summary>CI provider selection. Default: <c>auto</c>.</summary>
+    public string? Provider { get; init; }
+
+    /// <summary>Provider-specific GitHub Actions settings.</summary>
+    [JsonPropertyName("github-actions")]
+    public RepoGitHubActionsCiOutputsConfig? GitHubActions { get; init; }
+
+    /// <summary>Prefix applied to emitted variable names. Default: <c>REXO_</c>.</summary>
+    public string? Prefix { get; init; }
+
+    /// <summary>Key casing format for emitted variables. Default: <c>upperSnake</c>.</summary>
+    public string? KeyCasing { get; init; }
+
+    /// <summary>Emission scope. Accepts <c>safe</c>, <c>full</c>, or an object with <c>mode</c>, <c>include</c>, and <c>exclude</c> masks.</summary>
+    public JsonElement? Scope { get; init; }
+
+    /// <summary>When true, emit raw step outputs in addition to the safe summary payload. Default: <c>false</c>.</summary>
+    public bool? IncludeStepOutputs { get; init; }
+
+    /// <summary>When true, emit variables even when the normalized value is empty/null. Default: <c>false</c>.</summary>
+    public bool? EmitEmptyValues { get; init; }
+
+    /// <summary>When true, redact sensitive values before emission. Default: <c>true</c>.</summary>
+    public bool? Redact { get; init; }
+
+    /// <summary>When true, CI emission errors fail the command. Default: <c>false</c>.</summary>
+    public bool? FailOnError { get; init; }
+
+    /// <summary>Maximum emitted value length. Default: <c>8192</c>.</summary>
+    public int? MaxValueLength { get; init; }
+
+    /// <summary>Maximum number of emitted variables. Default: <c>1000</c>.</summary>
+    public int? MaxVariables { get; init; }
+}
+
+public sealed record RepoGitHubActionsCiOutputsConfig
+{
+    /// <summary>GitHub Actions file target. One of <c>env</c>, <c>output</c>, or <c>state</c>. Default: <c>env</c>.</summary>
+    public string? Scope { get; init; }
 }
 
 public sealed record RepoTestOutputPathsConfig

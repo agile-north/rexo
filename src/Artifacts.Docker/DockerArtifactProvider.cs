@@ -70,7 +70,10 @@ public sealed class DockerArtifactProvider : IArtifactProvider
 
                 if (settings.CleanupLocal && tags.Count > 0)
                 {
-                    await CleanupLocalImagesAsync(tags, context.RepositoryRoot, envOverrides, cancellationToken);
+                    if (!ShouldPush(settings, context, out _))
+                    {
+                        await CleanupLocalImagesAsync(tags, context.RepositoryRoot, envOverrides, cancellationToken);
+                    }
                 }
 
                 return new ArtifactBuildResult(
@@ -145,6 +148,10 @@ public sealed class DockerArtifactProvider : IArtifactProvider
             if (!ShouldPush(settings, context, out var skipReason))
             {
                 Console.WriteLine($"  Skipping docker push for '{artifact.Name}': {skipReason}");
+                if (settings.CleanupLocal && tags.Count > 0)
+                {
+                    await CleanupLocalImagesAsync(tags, context.RepositoryRoot, envOverrides, cancellationToken);
+                }
                 return new ArtifactPushResult(artifact.Name, true, Array.Empty<string>());
             }
 
@@ -153,6 +160,11 @@ public sealed class DockerArtifactProvider : IArtifactProvider
                 var auth = await PrepareDockerAuthAsync(settings, context.RepositoryRoot, dotEnv, cancellationToken);
                 if (!auth.Success)
                 {
+                    if (settings.CleanupLocal && tags.Count > 0)
+                    {
+                        await CleanupLocalImagesAsync(tags, context.RepositoryRoot, envOverrides, cancellationToken);
+                    }
+
                     return new ArtifactPushResult(artifact.Name, false, Array.Empty<string>());
                 }
 
@@ -170,6 +182,10 @@ public sealed class DockerArtifactProvider : IArtifactProvider
             finally
             {
                 CleanupDockerConfigDirectory(tempDockerConfig);
+                if (settings.CleanupLocal && tags.Count > 0)
+                {
+                    await CleanupLocalImagesAsync(tags, context.RepositoryRoot, envOverrides, cancellationToken);
+                }
             }
 
             return new ArtifactPushResult(artifact.Name, pushed.Count > 0, pushed);
@@ -962,19 +978,19 @@ public sealed class DockerArtifactProvider : IArtifactProvider
     private static string FormatMajorMinorTag(VersionResult version, BuildClassification classification)
     {
         var value = $"{version.Major}.{version.Minor}";
-        if (!string.IsNullOrWhiteSpace(version.PreRelease))
+        if (!string.IsNullOrWhiteSpace(version.PreReleaseLabel))
         {
-            return value + "-" + version.PreRelease;
+            return value + "-" + version.PreReleaseLabel;
         }
 
-        return classification == BuildClassification.NonPublic && string.IsNullOrWhiteSpace(version.PreRelease)
+        return classification == BuildClassification.NonPublic && string.IsNullOrWhiteSpace(version.PreReleaseLabel)
             ? value + "-pre"
             : value;
     }
 
     private static string FormatMajorTag(VersionResult version) =>
-        !string.IsNullOrWhiteSpace(version.PreRelease)
-            ? $"{version.Major}-{version.PreRelease}"
+        !string.IsNullOrWhiteSpace(version.PreReleaseLabel)
+            ? $"{version.Major}-{version.PreReleaseLabel}"
             : version.Major.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     private static bool BranchMatches(string pattern, string branch)
@@ -1318,16 +1334,42 @@ public sealed class DockerArtifactProvider : IArtifactProvider
             process.StandardInput.Close();
         }
 
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
-        var stdout = await stdoutTask;
-        var stderr = await stderrTask;
+        var stdoutBuffer = new StringBuilder();
+        var stderrBuffer = new StringBuilder();
 
-        if (!string.IsNullOrWhiteSpace(stdout)) Console.WriteLine(stdout);
-        if (!string.IsNullOrWhiteSpace(stderr)) Console.Error.WriteLine(stderr);
+        var stdoutTask = ReadStreamAsync(
+            process.StandardOutput,
+            stdoutBuffer,
+            line => Console.WriteLine(line),
+            cancellationToken);
+        var stderrTask = ReadStreamAsync(
+            process.StandardError,
+            stderrBuffer,
+            line => Console.Error.WriteLine(line),
+            cancellationToken);
+
+        await process.WaitForExitAsync(cancellationToken);
+        await stdoutTask;
+        await stderrTask;
+
+        var stdout = stdoutBuffer.ToString();
+        var stderr = stderrBuffer.ToString();
 
         return (process.ExitCode, stdout + stderr);
+    }
+
+    private static async Task ReadStreamAsync(
+        TextReader reader,
+        StringBuilder buffer,
+        Action<string> onLine,
+        CancellationToken cancellationToken)
+    {
+        string? line;
+        while ((line = await reader.ReadLineAsync(cancellationToken)) is not null)
+        {
+            buffer.AppendLine(line);
+            onLine(line);
+        }
     }
 
     private static string? GetSetting(ArtifactConfig artifact, string key) =>

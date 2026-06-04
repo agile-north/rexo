@@ -2,7 +2,7 @@
 
 ## What this page covers
 
-This page is a provider-specific companion to the detailed Docker settings section in [../CONFIGURATION.md](../CONFIGURATION.md#docker-artifact-settings-type-docker).
+This page is a provider-specific companion to the detailed configuration reference in [../configuration/README.md](../configuration/README.md).
 
 ## Lifecycle mapping
 
@@ -12,7 +12,7 @@ This page is a provider-specific companion to the detailed Docker settings secti
 
 ## Settings coverage
 
-Docker has the largest settings surface (targets, push gates, classification, tag policy, stages, secrets). Use the canonical reference in [../CONFIGURATION.md](../CONFIGURATION.md#docker-artifact-settings-type-docker).
+Docker has the largest settings surface (targets, push gates, classification, tag policy, stages, secrets). Use the canonical reference in [../configuration/README.md](../configuration/README.md).
 
 ## Auth
 

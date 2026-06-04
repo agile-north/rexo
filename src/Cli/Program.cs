@@ -50,21 +50,22 @@ public static class Program
 
         // Set up the full service graph
         var (registry, executor, config) = await CliBootstrapper.BuildServicesAsync(workingDir, debug, setOverrides, cancellationToken);
+        var outputSettings = ResolveCommandOutputSettings(config, json, jsonFile, quiet);
 
         return command switch
         {
-            "version" => await RunBuiltinAsync(executor, "version", EmptyInvocation(workingDir, json, jsonFile), verbose, quiet, cancellationToken),
-            "doctor" => await RunBuiltinAsync(executor, "doctor", EmptyInvocation(workingDir, json, jsonFile), verbose, quiet, cancellationToken),
-            "capabilities" => await RunBuiltinAsync(executor, "capabilities", EmptyInvocation(workingDir, json, jsonFile), verbose, quiet, cancellationToken),
-            "init" => await RunInitBuiltinAsync(executor, cleanArgs, workingDir, json, jsonFile, verbose, quiet, cancellationToken),
-            "new" => await RunInitBuiltinAsync(executor, cleanArgs, workingDir, json, jsonFile, verbose, quiet, cancellationToken),
-            "list" => await RunBuiltinAsync(executor, "list", EmptyInvocation(workingDir, json, jsonFile), verbose, quiet, cancellationToken),
-            "explain" => await RunExplainAsync(executor, cleanArgs, workingDir, json, jsonFile, verbose, quiet, cancellationToken),
-            "config" => await RunConfigSubcommandAsync(cleanArgs, executor, workingDir, json, jsonFile, verbose, quiet, cancellationToken),
-            "policies" => await RunPoliciesSubcommandAsync("policies", cleanArgs, executor, workingDir, json, jsonFile, verbose, quiet, cancellationToken),
+            "version" => await RunBuiltinAsync(executor, "version", EmptyInvocation(workingDir, outputSettings), config, outputSettings, verbose, quiet, cancellationToken),
+            "doctor" => await RunBuiltinAsync(executor, "doctor", EmptyInvocation(workingDir, outputSettings), config, outputSettings, verbose, quiet, cancellationToken),
+            "capabilities" => await RunBuiltinAsync(executor, "capabilities", EmptyInvocation(workingDir, outputSettings), config, outputSettings, verbose, quiet, cancellationToken),
+            "init" => await RunInitBuiltinAsync(executor, cleanArgs, workingDir, config, outputSettings, verbose, quiet, cancellationToken),
+            "new" => await RunInitBuiltinAsync(executor, cleanArgs, workingDir, config, outputSettings, verbose, quiet, cancellationToken),
+            "list" => await RunBuiltinAsync(executor, "list", EmptyInvocation(workingDir, outputSettings), config, outputSettings, verbose, quiet, cancellationToken),
+            "explain" => await RunExplainAsync(executor, cleanArgs, workingDir, config, outputSettings, verbose, quiet, cancellationToken),
+            "config" => await RunConfigSubcommandAsync(cleanArgs, executor, workingDir, config, outputSettings, verbose, quiet, cancellationToken),
+            "policies" => await RunPoliciesSubcommandAsync("policies", cleanArgs, executor, workingDir, config, outputSettings, verbose, quiet, cancellationToken),
             "ui" => await RunUiAsync(executor, config, workingDir, cancellationToken),
-            "run" => await RunConfiguredAsync(cleanArgs, executor, config, workingDir, json, jsonFile, verbose, quiet, cancellationToken),
-            _ => await RunDirectAsync(command, cleanArgs, executor, config, workingDir, json, jsonFile, verbose, quiet, cancellationToken),
+            "run" => await RunConfiguredAsync(cleanArgs, executor, config, workingDir, config, outputSettings, verbose, quiet, cancellationToken),
+            _ => await RunDirectAsync(command, cleanArgs, executor, config, workingDir, config, outputSettings, verbose, quiet, cancellationToken),
         };
     }
 
@@ -294,6 +295,8 @@ public static class Program
         DefaultCommandExecutor executor,
         string command,
         CommandInvocation invocation,
+        RepoConfig? config,
+        CommandOutputSettings outputSettings,
         bool verbose,
         bool quiet,
         CancellationToken cancellationToken)
@@ -303,10 +306,7 @@ public static class Program
         var completedAt = DateTimeOffset.UtcNow;
         var exitCode = await WriteResultAsync(result, invocation, verbose, quiet, cancellationToken);
 
-        if (!string.IsNullOrWhiteSpace(invocation.JsonFile))
-        {
-            await WriteRunManifestAsync(result, command, invocation.WorkingDirectory, startedAt, completedAt, invocation.JsonFile!, cancellationToken);
-        }
+        await WriteRunManifestAsync(result, command, invocation.WorkingDirectory, startedAt, completedAt, invocation.JsonFile, config, outputSettings, cancellationToken);
 
         return exitCode;
     }
@@ -315,8 +315,8 @@ public static class Program
         DefaultCommandExecutor executor,
         IReadOnlyList<string> args,
         string workingDir,
-        bool json,
-        string? jsonFile,
+        RepoConfig? config,
+        CommandOutputSettings outputSettings,
         bool verbose,
         bool quiet,
         CancellationToken cancellationToken)
@@ -332,19 +332,19 @@ public static class Program
         var invocation = new CommandInvocation(
             new Dictionary<string, string> { ["command"] = commandName },
             new Dictionary<string, string?>(),
-            json,
-            jsonFile,
-            workingDir);
+            outputSettings.Json,
+            outputSettings.JsonFile,
+            workingDir)
+        {
+            Stdout = outputSettings.Stdout,
+        };
 
         var startedAt = DateTimeOffset.UtcNow;
         var result = await ExecuteCommandAsync(executor, "explain", invocation, cancellationToken);
         var completedAt = DateTimeOffset.UtcNow;
         var exitCode = await WriteResultAsync(result, invocation, verbose, quiet, cancellationToken);
 
-        if (!string.IsNullOrWhiteSpace(invocation.JsonFile))
-        {
-            await WriteRunManifestAsync(result, "explain", workingDir, startedAt, completedAt, invocation.JsonFile!, cancellationToken);
-        }
+        await WriteRunManifestAsync(result, "explain", workingDir, startedAt, completedAt, invocation.JsonFile, config, outputSettings, cancellationToken);
 
         return exitCode;
     }
@@ -354,8 +354,8 @@ public static class Program
         IReadOnlyList<string> args,
         DefaultCommandExecutor executor,
         string workingDir,
-        bool json,
-        string? jsonFile,
+        RepoConfig? config,
+        CommandOutputSettings outputSettings,
         bool verbose,
         bool quiet,
         CancellationToken cancellationToken)
@@ -376,17 +376,17 @@ public static class Program
             parsedArgs["name"] = args[2];
         }
 
-        var invocation = new CommandInvocation(parsedArgs, new Dictionary<string, string?>(), json, jsonFile, workingDir);
+        var invocation = new CommandInvocation(parsedArgs, new Dictionary<string, string?>(), outputSettings.Json, outputSettings.JsonFile, workingDir)
+        {
+            Stdout = outputSettings.Stdout,
+        };
 
         var startedAt = DateTimeOffset.UtcNow;
         var result = await ExecuteCommandAsync(executor, subCommand, invocation, cancellationToken);
         var completedAt = DateTimeOffset.UtcNow;
         var exitCode = await WriteResultAsync(result, invocation, verbose, quiet, cancellationToken);
 
-        if (!string.IsNullOrWhiteSpace(invocation.JsonFile))
-        {
-            await WriteRunManifestAsync(result, subCommand, workingDir, startedAt, completedAt, invocation.JsonFile!, cancellationToken);
-        }
+        await WriteRunManifestAsync(result, subCommand, workingDir, startedAt, completedAt, invocation.JsonFile, config, outputSettings, cancellationToken);
 
         return exitCode;
     }
@@ -395,8 +395,8 @@ public static class Program
         IReadOnlyList<string> args,
         DefaultCommandExecutor executor,
         string workingDir,
-        bool json,
-        string? jsonFile,
+        RepoConfig? config,
+        CommandOutputSettings outputSettings,
         bool verbose,
         bool quiet,
         CancellationToken cancellationToken)
@@ -409,17 +409,14 @@ public static class Program
         }
 
         var subCommand = $"config {args[1].ToLowerInvariant()}";
-        var invocation = EmptyInvocation(workingDir, json, jsonFile);
+        var invocation = EmptyInvocation(workingDir, outputSettings);
 
         var startedAt = DateTimeOffset.UtcNow;
         var result = await ExecuteCommandAsync(executor, subCommand, invocation, cancellationToken);
         var completedAt = DateTimeOffset.UtcNow;
         var exitCode = await WriteResultAsync(result, invocation, verbose, quiet, cancellationToken);
 
-        if (!string.IsNullOrWhiteSpace(invocation.JsonFile))
-        {
-            await WriteRunManifestAsync(result, subCommand, workingDir, startedAt, completedAt, invocation.JsonFile!, cancellationToken);
-        }
+        await WriteRunManifestAsync(result, subCommand, workingDir, startedAt, completedAt, invocation.JsonFile, config, outputSettings, cancellationToken);
 
         return exitCode;
     }
@@ -439,8 +436,8 @@ public static class Program
         DefaultCommandExecutor executor,
         RepoConfig? config,
         string workingDir,
-        bool json,
-        string? jsonFile,
+        RepoConfig? effectiveConfig,
+        CommandOutputSettings outputSettings,
         bool verbose,
         bool quiet,
         CancellationToken cancellationToken)
@@ -480,7 +477,10 @@ public static class Program
                 }
             }
 
-            var invocation = new CommandInvocation(parsedArgs, parsedOptions, json, jsonFile, workingDir);
+            var invocation = new CommandInvocation(parsedArgs, parsedOptions, outputSettings.Json, outputSettings.JsonFile, workingDir)
+            {
+                Stdout = outputSettings.Stdout,
+            };
             var startedAt = DateTimeOffset.UtcNow;
             var result = await ExecuteCommandAsync(executor, candidateName, invocation, cancellationToken);
             var completedAt = DateTimeOffset.UtcNow;
@@ -488,10 +488,7 @@ public static class Program
             var exitCode = await WriteResultAsync(result, invocation, verbose, quiet, cancellationToken);
 
             // Write run manifest if --json-file specified
-            if (!string.IsNullOrEmpty(jsonFile))
-            {
-                await WriteRunManifestAsync(result, candidateName, workingDir, startedAt, completedAt, jsonFile, cancellationToken);
-            }
+            await WriteRunManifestAsync(result, candidateName, workingDir, startedAt, completedAt, outputSettings.JsonFile, effectiveConfig, outputSettings, cancellationToken);
 
             return exitCode;
         }
@@ -505,8 +502,8 @@ public static class Program
         DefaultCommandExecutor executor,
         IReadOnlyList<string> args,
         string workingDir,
-        bool json,
-        string? jsonFile,
+        RepoConfig? config,
+        CommandOutputSettings outputSettings,
         bool verbose,
         bool quiet,
         CancellationToken cancellationToken)
@@ -528,17 +525,17 @@ public static class Program
             };
         }
 
-        var invocation = new CommandInvocation(parsedArgs, parsedOptions, json, jsonFile, workingDir);
+        var invocation = new CommandInvocation(parsedArgs, parsedOptions, outputSettings.Json, outputSettings.JsonFile, workingDir)
+        {
+            Stdout = outputSettings.Stdout,
+        };
 
         var startedAt = DateTimeOffset.UtcNow;
         var result = await ExecuteCommandAsync(executor, "init", invocation, cancellationToken);
         var completedAt = DateTimeOffset.UtcNow;
         var exitCode = await WriteResultAsync(result, invocation, verbose, quiet, cancellationToken);
 
-        if (!string.IsNullOrWhiteSpace(invocation.JsonFile))
-        {
-            await WriteRunManifestAsync(result, "init", workingDir, startedAt, completedAt, invocation.JsonFile!, cancellationToken);
-        }
+        await WriteRunManifestAsync(result, "init", workingDir, startedAt, completedAt, invocation.JsonFile, config, outputSettings, cancellationToken);
 
         return exitCode;
     }
@@ -549,8 +546,8 @@ public static class Program
         DefaultCommandExecutor executor,
         RepoConfig? config,
         string workingDir,
-        bool json,
-        string? jsonFile,
+        RepoConfig? effectiveConfig,
+        CommandOutputSettings outputSettings,
         bool verbose,
         bool quiet,
         CancellationToken cancellationToken)
@@ -583,17 +580,17 @@ public static class Program
                 }
             }
 
-            var invocation = new CommandInvocation(parsedArgs, parsedOptions, json, jsonFile, workingDir);
+            var invocation = new CommandInvocation(parsedArgs, parsedOptions, outputSettings.Json, outputSettings.JsonFile, workingDir)
+            {
+                Stdout = outputSettings.Stdout,
+            };
 
             var startedAt = DateTimeOffset.UtcNow;
             var result = await ExecuteCommandAsync(executor, candidateName, invocation, cancellationToken);
             var completedAt = DateTimeOffset.UtcNow;
             var exitCode = await WriteResultAsync(result, invocation, verbose, quiet, cancellationToken);
 
-            if (!string.IsNullOrWhiteSpace(invocation.JsonFile))
-            {
-                await WriteRunManifestAsync(result, candidateName, workingDir, startedAt, completedAt, invocation.JsonFile!, cancellationToken);
-            }
+            await WriteRunManifestAsync(result, candidateName, workingDir, startedAt, completedAt, invocation.JsonFile, effectiveConfig, outputSettings, cancellationToken);
 
             return exitCode;
         }
@@ -619,7 +616,7 @@ public static class Program
         }
 
         // Stdout — suppressed entirely by --quiet
-        if (!quiet)
+        if (!quiet && (invocation.Json || invocation.Stdout))
         {
             if (invocation.Json)
             {
@@ -690,11 +687,28 @@ public static class Program
         string workingDir,
         DateTimeOffset startedAt,
         DateTimeOffset completedAt,
-        string jsonFile,
+        string? jsonFile,
+        RepoConfig? config,
+        CommandOutputSettings outputSettings,
         CancellationToken cancellationToken)
     {
-        var manifestPath = jsonFile.Replace(".json", "-manifest.json", StringComparison.OrdinalIgnoreCase);
-        if (manifestPath == jsonFile) manifestPath = jsonFile + ".manifest.json";
+        var ciConfig = config?.Outputs?.Ci;
+        var effectiveCiConfig = ciConfig ?? new RepoCiOutputsConfig { Provider = "auto" };
+        var shouldWriteManifest = !string.IsNullOrWhiteSpace(jsonFile);
+        var shouldEmitCi = ciConfig?.Emit ?? true;
+
+        if (!shouldWriteManifest && !shouldEmitCi)
+        {
+            return;
+        }
+
+        var ciInfo = CiDetector.Detect();
+        string? manifestPath = null;
+        if (shouldWriteManifest && jsonFile is not null)
+        {
+            manifestPath = jsonFile.Replace(".json", "-manifest.json", StringComparison.OrdinalIgnoreCase);
+            if (manifestPath == jsonFile) manifestPath = jsonFile + ".manifest.json";
+        }
 
         // Compute SHA-256 of resolved config content for traceability
         string? configHash = null;
@@ -706,7 +720,6 @@ public static class Program
             configHash = Convert.ToHexString(hashBytes).ToLowerInvariant();
         }
 
-        var ciInfo = CiDetector.Detect();
         var gitInfo = await GitDetector.DetectAsync(workingDir, cancellationToken);
 
         var manifest = new RunManifest
@@ -757,10 +770,148 @@ public static class Program
                 .ToArray(),
         };
 
-        var manifestJson = JsonSerializer.Serialize(manifest, JsonOptions);
-        var dir = Path.GetDirectoryName(manifestPath);
-        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-        await File.WriteAllTextAsync(manifestPath, manifestJson, cancellationToken);
+        if (shouldWriteManifest && jsonFile is not null && manifestPath is not null)
+        {
+            var manifestJson = JsonSerializer.Serialize(manifest, JsonOptions);
+            var dir = Path.GetDirectoryName(manifestPath);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            await File.WriteAllTextAsync(manifestPath, manifestJson, cancellationToken);
+        }
+
+        if (shouldEmitCi)
+        {
+            await EmitCiOutputsAsync(manifest, effectiveCiConfig, ciInfo, outputSettings, cancellationToken);
+        }
+    }
+
+    private static async Task EmitCiOutputsAsync(
+        RunManifest manifest,
+        RepoCiOutputsConfig ciConfig,
+        CiInfo detectedCi,
+        CommandOutputSettings outputSettings,
+        CancellationToken cancellationToken)
+    {
+        var provider = ResolveCiProvider(ciConfig.Provider, detectedCi);
+        if (string.Equals(ciConfig.Provider, "auto", StringComparison.OrdinalIgnoreCase) && !detectedCi.IsCi)
+        {
+            // No CI context detected and provider is auto: skip silently.
+            return;
+        }
+
+        if (!string.Equals(ciConfig.Provider, "auto", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(ciConfig.Provider, detectedCi.Provider, StringComparison.OrdinalIgnoreCase) &&
+            detectedCi.IsCi)
+        {
+            Console.WriteLine($"[warn] Emitting {ciConfig.Provider} syntax outside the detected {detectedCi.Provider} context for local testing.");
+        }
+
+        var emissionOptions = new CiEmissionOptions
+        {
+            Provider = provider,
+            Prefix = string.IsNullOrWhiteSpace(ciConfig.Prefix) ? "REXO_" : ciConfig.Prefix!,
+            KeyCasing = string.IsNullOrWhiteSpace(ciConfig.KeyCasing) ? "upperSnake" : ciConfig.KeyCasing!,
+            Scope = ciConfig.Scope,
+            IncludeStepOutputs = ciConfig.IncludeStepOutputs == true,
+            EmitEmptyValues = ciConfig.EmitEmptyValues == true,
+            Redact = ciConfig.Redact ?? true,
+            FailOnError = ciConfig.FailOnError == true,
+            MaxValueLength = ciConfig.MaxValueLength ?? 8192,
+            MaxVariables = ciConfig.MaxVariables ?? 1000,
+        };
+
+        try
+        {
+            var payload = CiOutputEmitter.BuildPayload(manifest, emissionOptions);
+            foreach (var warning in payload.Warnings)
+            {
+                Console.WriteLine($"[warn] {warning}");
+            }
+
+            if (string.Equals(provider, "github-actions", StringComparison.OrdinalIgnoreCase) &&
+                await TryEmitGitHubActionsFileAsync(payload, ResolveGitHubActionsScope(ciConfig), cancellationToken))
+            {
+                return;
+            }
+
+            foreach (var line in CiOutputEmitter.FormatStdoutLines(payload))
+            {
+                Console.WriteLine(line);
+            }
+        }
+        catch (Exception ex)
+        {
+            var message = $"CI emission failed: {ex.Message}";
+            if (emissionOptions.FailOnError)
+            {
+                throw new InvalidOperationException(message, ex);
+            }
+
+            Console.WriteLine($"[warn] {message}");
+        }
+
+        await Task.CompletedTask;
+    }
+
+    private static string ResolveCiProvider(string? configuredProvider, CiInfo detectedCi)
+    {
+        if (string.IsNullOrWhiteSpace(configuredProvider) || string.Equals(configuredProvider, "auto", StringComparison.OrdinalIgnoreCase))
+        {
+            return detectedCi.Provider is null or "unknown" ? "generic" : detectedCi.Provider;
+        }
+
+        return configuredProvider;
+    }
+
+    private static async Task<bool> TryEmitGitHubActionsFileAsync(CiEmissionPayload payload, string? githubScope, CancellationToken cancellationToken)
+    {
+        var scope = string.IsNullOrWhiteSpace(githubScope) ? "env" : githubScope;
+        var envVarName = scope.ToLowerInvariant() switch
+        {
+            "output" => "GITHUB_OUTPUT",
+            "state" => "GITHUB_STATE",
+            _ => "GITHUB_ENV",
+        };
+
+        var githubFile = Environment.GetEnvironmentVariable(envVarName);
+        if (string.IsNullOrWhiteSpace(githubFile))
+        {
+            Console.WriteLine($"[warn] {envVarName} is not set; falling back to stdout CI emission.");
+            return false;
+        }
+
+        var buffer = new System.Text.StringBuilder(payload.Variables.Count * 48);
+        foreach (var (key, value) in payload.Variables)
+        {
+            AppendGitHubEnvironmentAssignment(buffer, key, value);
+        }
+
+        await File.AppendAllTextAsync(githubFile, buffer.ToString(), cancellationToken);
+        return true;
+    }
+
+    private static string ResolveGitHubActionsScope(RepoCiOutputsConfig ciConfig)
+    {
+        var nestedScope = ciConfig.GitHubActions?.Scope;
+        return string.IsNullOrWhiteSpace(nestedScope) ? "env" : nestedScope;
+    }
+
+    private static void AppendGitHubEnvironmentAssignment(System.Text.StringBuilder buffer, string key, string value)
+    {
+        if (value.Contains('\n', StringComparison.Ordinal) || value.Contains('\r', StringComparison.Ordinal))
+        {
+            var delimiter = $"REXO_{Guid.NewGuid():N}";
+            while (value.Contains(delimiter, StringComparison.Ordinal))
+            {
+                delimiter = $"REXO_{Guid.NewGuid():N}";
+            }
+
+            buffer.Append(key).Append("<<").AppendLine(delimiter);
+            buffer.AppendLine(value);
+            buffer.AppendLine(delimiter);
+            return;
+        }
+
+        buffer.Append(key).Append('=').AppendLine(value);
     }
 
     private static string GetToolVersion()
@@ -892,13 +1043,30 @@ public static class Program
         Console.WriteLine("  --set <key.path=value>      Override a config value (repeatable)");
     }
 
-    private static CommandInvocation EmptyInvocation(string workingDir, bool json, string? jsonFile) =>
+    private static CommandInvocation EmptyInvocation(string workingDir, CommandOutputSettings outputSettings) =>
         new(
             new Dictionary<string, string>(),
             new Dictionary<string, string?>(),
-            Json: json,
-            JsonFile: jsonFile,
-            WorkingDirectory: workingDir);
+            Json: outputSettings.Json,
+            JsonFile: outputSettings.JsonFile,
+            WorkingDirectory: workingDir)
+        {
+            Stdout = outputSettings.Stdout,
+        };
+
+    private static CommandOutputSettings ResolveCommandOutputSettings(RepoConfig? config, bool jsonFlag, string? jsonFileFlag, bool quiet)
+    {
+        var commandOutputs = config?.Outputs?.Command;
+        var json = jsonFlag || commandOutputs?.Json == true;
+        var jsonFile = !string.IsNullOrWhiteSpace(jsonFileFlag)
+            ? jsonFileFlag
+            : commandOutputs?.JsonFile;
+        var stdout = !quiet && (commandOutputs?.Stdout ?? true);
+
+        return new CommandOutputSettings(json, string.IsNullOrWhiteSpace(jsonFile) ? null : jsonFile, stdout);
+    }
+
+    private sealed record CommandOutputSettings(bool Json, string? JsonFile, bool Stdout);
 
     private static IReadOnlyList<string> DiscoverUiProjectRoots(string currentWorkingDir)
     {

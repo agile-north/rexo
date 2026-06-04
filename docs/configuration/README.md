@@ -1,10 +1,10 @@
 # Configuration Reference
 
 For embedded templates, built-in lifecycle defaults, options, and usage examples,
-see [Embedded Policies Reference](../../embedded/README.md).
+see [Embedded Policies Reference](../embedded/README.md).
 
 For runtime builtin contracts (inputs, calls, outputs, exit behavior),
-see [Builtins Reference](../../builtins/README.md).
+see [Builtins Reference](../builtins/README.md).
 
 For machine-readable CLI output and sidecar run-manifest fields,
 see [Output Contract](./output-contract.md).
@@ -36,6 +36,11 @@ Every config file (`rexo.json`/`rexo.yml`) must begin with:
 
 The loader validates against the embedded schema (or a local `rexo.schema.json`) via NJsonSchema before
 deserializing. Missing/unsupported metadata or schema violations cause a hard failure.
+
+To temporarily bypass rexo schema validation during local experimentation, set
+`REXO_DISABLE_SCHEMA_VALIDATION=true` before running Rexo. When enabled, metadata
+checks (`$schema`, `schemaVersion`) and NJsonSchema validation are skipped for rexo
+configuration loading.
 
 Policy files (`policy.json`/`policy.yml`) follow the same contract, using:
 
@@ -239,7 +244,7 @@ Detailed reference for each config section:
 
 - [Commands](commands.md) — Define command workflows with options, args, and steps
 - [Versioning](versioning.md) — Configure version providers and auto-detection
-- [Artifacts](../../artifacts/README.md) — Configure artifact build/tag/push workflows
+- [Artifacts](../artifacts/README.md) — Configure artifact build/tag/push workflows
 - [Runtime](runtime.md) — Configure output, push policy, tests, and analysis settings
 - [Template Variables](templates.md) — Use dynamic variables in step commands
 

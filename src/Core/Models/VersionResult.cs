@@ -1,6 +1,7 @@
 namespace Rexo.Core.Models;
 
 using System.Globalization;
+using System.Text.Json.Serialization;
 
 public sealed record VersionResult(
     string SemVer,
@@ -23,6 +24,7 @@ public sealed record VersionResult(
     public string? Branch { get; init; }
 
     /// <summary>Version string for NuGet packages (pre-release separators converted to dots).</summary>
+    [JsonPropertyName("nugetVersion")]
     public string? NuGetVersion { get; init; }
 
     /// <summary>Version string for Docker image tags (only alphanumeric, dot, hyphen).</summary>

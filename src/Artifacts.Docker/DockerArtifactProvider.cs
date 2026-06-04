@@ -1334,16 +1334,42 @@ public sealed class DockerArtifactProvider : IArtifactProvider
             process.StandardInput.Close();
         }
 
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
-        var stdout = await stdoutTask;
-        var stderr = await stderrTask;
+        var stdoutBuffer = new StringBuilder();
+        var stderrBuffer = new StringBuilder();
 
-        if (!string.IsNullOrWhiteSpace(stdout)) Console.WriteLine(stdout);
-        if (!string.IsNullOrWhiteSpace(stderr)) Console.Error.WriteLine(stderr);
+        var stdoutTask = ReadStreamAsync(
+            process.StandardOutput,
+            stdoutBuffer,
+            line => Console.WriteLine(line),
+            cancellationToken);
+        var stderrTask = ReadStreamAsync(
+            process.StandardError,
+            stderrBuffer,
+            line => Console.Error.WriteLine(line),
+            cancellationToken);
+
+        await process.WaitForExitAsync(cancellationToken);
+        await stdoutTask;
+        await stderrTask;
+
+        var stdout = stdoutBuffer.ToString();
+        var stderr = stderrBuffer.ToString();
 
         return (process.ExitCode, stdout + stderr);
+    }
+
+    private static async Task ReadStreamAsync(
+        TextReader reader,
+        StringBuilder buffer,
+        Action<string> onLine,
+        CancellationToken cancellationToken)
+    {
+        string? line;
+        while ((line = await reader.ReadLineAsync(cancellationToken)) is not null)
+        {
+            buffer.AppendLine(line);
+            onLine(line);
+        }
     }
 
     private static string? GetSetting(ArtifactConfig artifact, string key) =>

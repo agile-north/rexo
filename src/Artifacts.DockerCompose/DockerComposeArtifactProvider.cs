@@ -1,6 +1,7 @@
 namespace Rexo.Artifacts.DockerCompose;
 
 using System.Diagnostics;
+using System.Text;
 using Rexo.Artifacts;
 using Rexo.Core.Abstractions;
 using Rexo.Core.Environment;
@@ -138,12 +139,19 @@ public sealed class DockerComposeArtifactProvider : IArtifactProvider
         }
 
         process.Start();
-        var output = await process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var error = await process.StandardError.ReadToEndAsync(cancellationToken);
+        var stdoutBuffer = new StringBuilder();
+        var stderrBuffer = new StringBuilder();
+        var stdoutTask = ReadStreamAsync(process.StandardOutput, stdoutBuffer, line => Console.WriteLine(line), cancellationToken);
+        var stderrTask = ReadStreamAsync(process.StandardError, stderrBuffer, line => Console.Error.WriteLine(line), cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
+        await stdoutTask;
+        await stderrTask;
 
-        if (!string.IsNullOrWhiteSpace(output)) Console.Write(output);
-        if (!string.IsNullOrWhiteSpace(error)) Console.Error.Write(error);
+        var output = stdoutBuffer.ToString();
+        var error = stderrBuffer.ToString();
+
+        if (!string.IsNullOrWhiteSpace(output) && !output.EndsWith('\n')) Console.WriteLine();
+        if (!string.IsNullOrWhiteSpace(error) && !error.EndsWith('\n')) Console.Error.WriteLine();
 
         return (process.ExitCode, output);
     }
@@ -173,12 +181,33 @@ public sealed class DockerComposeArtifactProvider : IArtifactProvider
         process.Start();
         await process.StandardInput.WriteAsync(stdinContent);
         process.StandardInput.Close();
-        var output = await process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var error = await process.StandardError.ReadToEndAsync(cancellationToken);
+        var stdoutBuffer = new StringBuilder();
+        var stderrBuffer = new StringBuilder();
+        var stdoutTask = ReadStreamAsync(process.StandardOutput, stdoutBuffer, line => Console.WriteLine(line), cancellationToken);
+        var stderrTask = ReadStreamAsync(process.StandardError, stderrBuffer, line => Console.Error.WriteLine(line), cancellationToken);
         await process.WaitForExitAsync(cancellationToken);
+        await stdoutTask;
+        await stderrTask;
 
-        if (!string.IsNullOrWhiteSpace(output)) Console.Write(output);
-        if (!string.IsNullOrWhiteSpace(error)) Console.Error.Write(error);
+        var output = stdoutBuffer.ToString();
+        var error = stderrBuffer.ToString();
+
+        if (!string.IsNullOrWhiteSpace(output) && !output.EndsWith('\n')) Console.WriteLine();
+        if (!string.IsNullOrWhiteSpace(error) && !error.EndsWith('\n')) Console.Error.WriteLine();
+    }
+
+    private static async Task ReadStreamAsync(
+        TextReader reader,
+        StringBuilder buffer,
+        Action<string> onLine,
+        CancellationToken cancellationToken)
+    {
+        string? line;
+        while ((line = await reader.ReadLineAsync(cancellationToken)) is not null)
+        {
+            buffer.AppendLine(line);
+            onLine(line);
+        }
     }
 
     private static string? GetSetting(ArtifactConfig artifact, string key) =>

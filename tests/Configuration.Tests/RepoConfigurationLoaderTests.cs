@@ -141,7 +141,61 @@ public sealed class RepoConfigurationLoaderTests
     }
   }
 
-  [Fact]
+    [Fact]
+    public async Task LoadAsyncParsesStructuredCiScopeSelectors()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"rexo-ci-scope-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+
+        var configPath = Path.Combine(dir, "rexo.json");
+        await File.WriteAllTextAsync(configPath, """
+          {
+            "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+            "schemaVersion": "1.0",
+            "name": "sample",
+            "commands": {
+              "build": {
+                "description": "Build",
+                "options": {},
+                "steps": [
+                  { "run": "echo hello" }
+                ]
+              }
+            },
+            "aliases": {},
+            "outputs": {
+              "ci": {
+                "emit": true,
+                "github-actions": {
+                  "scope": "output"
+                },
+                "emitEmptyValues": true,
+                "scope": {
+                  "mode": "full",
+                  "include": ["repoName", "version.*"],
+                  "exclude": ["regex:^version\\.secret.*"]
+                }
+              }
+            }
+          }
+          """);
+
+        try
+        {
+            var config = await RepoConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
+
+            Assert.True(config.Outputs?.Ci?.Emit);
+            Assert.Equal("output", config.Outputs?.Ci?.GitHubActions?.Scope);
+            Assert.True(config.Outputs?.Ci?.EmitEmptyValues);
+            Assert.Equal(JsonValueKind.Object, config.Outputs?.Ci?.Scope?.ValueKind);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
   public async Task LoadAsyncParsesStructuredPushRules()
   {
     var dir = Path.Combine(Path.GetTempPath(), $"rexo-push-rules-{Guid.NewGuid():N}");
@@ -330,6 +384,46 @@ public sealed class RepoConfigurationLoaderTests
         finally
         {
             File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task LoadAsyncSkipsSchemaValidationWhenEnvVarEnabled()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"repo-{Guid.NewGuid():N}.json");
+        var previous = Environment.GetEnvironmentVariable(RepoConfigurationLoader.DisableSchemaValidationEnvVar);
+        await File.WriteAllTextAsync(path, """
+        {
+          "$schema": "https://example.com/repo.schema.json",
+          "schemaVersion": "2.0",
+          "name": "sample",
+          "commands": {
+            "release": {
+              "options": {},
+              "steps": [
+                { "run": "echo hi" }
+              ]
+            }
+          },
+          "aliases": {}
+        }
+        """);
+
+        try
+        {
+            Environment.SetEnvironmentVariable(RepoConfigurationLoader.DisableSchemaValidationEnvVar, "true");
+            var config = await RepoConfigurationLoader.LoadAsync(path, CancellationToken.None);
+
+            Assert.Equal("sample", config.Name);
+            Assert.True(config.Commands!.ContainsKey("release"));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(RepoConfigurationLoader.DisableSchemaValidationEnvVar, previous);
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
         }
     }
 

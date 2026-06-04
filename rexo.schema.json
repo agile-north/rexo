@@ -1857,6 +1857,161 @@
           "description": "When false, Rexo does not collect or write any output files (manifests, step file outputs). Well-known overlay commands also skip passing output path arguments to toolchain CLIs.",
           "default": true
         },
+        "command": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Defaults for command stdout and JSON output. CLI flags override these values.",
+          "properties": {
+            "stdout": {
+              "type": "boolean",
+              "description": "When true, command results are written to stdout by default.",
+              "default": true
+            },
+            "json": {
+              "type": "boolean",
+              "description": "When true, command results are rendered as JSON by default.",
+              "default": false
+            },
+            "jsonFile": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Optional default file path for machine-readable command results."
+            }
+          }
+        },
+        "ci": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "CI-native manifest emission settings.",
+          "properties": {
+            "emit": {
+              "type": "boolean",
+              "description": "When true, emit CI-native variables after command execution.",
+              "default": true
+            },
+            "provider": {
+              "type": "string",
+              "description": "CI provider selection. Use auto to detect from the runtime environment.",
+              "default": "auto",
+              "enum": [
+                "auto",
+                "github-actions",
+                "azure-devops",
+                "teamcity",
+                "generic"
+              ]
+            },
+            "github-actions": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Provider-specific GitHub Actions settings.",
+              "properties": {
+                "scope": {
+                  "type": "string",
+                  "description": "GitHub Actions file target. Use env for $GITHUB_ENV, output for $GITHUB_OUTPUT, or state for $GITHUB_STATE.",
+                  "default": "env",
+                  "enum": [
+                    "env",
+                    "output",
+                    "state"
+                  ]
+                }
+              }
+            },
+            "prefix": {
+              "type": "string",
+              "description": "Prefix applied to emitted variable names.",
+              "default": "REXO_"
+            },
+            "keyCasing": {
+              "type": "string",
+              "description": "Key casing format for emitted variables.",
+              "default": "upperSnake",
+              "enum": [
+                "upperSnake",
+                "lowerSnake",
+                "kebab",
+                "camel",
+                "pascal"
+              ]
+            },
+            "scope": {
+              "description": "Emission scope controls which manifest fields are exported. Use a preset or a structured selector with include/exclude masks.",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "default": "safe",
+                  "enum": [
+                    "safe",
+                    "full"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "mode": {
+                      "type": "string",
+                      "enum": [
+                        "safe",
+                        "full"
+                      ],
+                      "description": "Baseline scope to filter from. Defaults to safe unless include masks are present."
+                    },
+                    "include": {
+                      "type": "array",
+                      "description": "Masks that must match for a field to be emitted. Supports exact names, wildcard globs, and regex:... patterns.",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "exclude": {
+                      "type": "array",
+                      "description": "Masks that remove matching fields after include filtering.",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            "includeStepOutputs": {
+              "type": "boolean",
+              "description": "When true, emit raw step outputs in addition to the safe summary payload.",
+              "default": false
+            },
+            "emitEmptyValues": {
+              "type": "boolean",
+              "description": "When true, emit variables even when values are empty or null.",
+              "default": false
+            },
+            "redact": {
+              "type": "boolean",
+              "description": "When true, redact sensitive values before emission.",
+              "default": true
+            },
+            "failOnError": {
+              "type": "boolean",
+              "description": "When true, CI emission errors fail the command.",
+              "default": false
+            },
+            "maxValueLength": {
+              "type": "integer",
+              "description": "Maximum emitted value length.",
+              "minimum": 1,
+              "default": 8192
+            },
+            "maxVariables": {
+              "type": "integer",
+              "description": "Maximum number of emitted variables.",
+              "minimum": 1,
+              "default": 1000
+            }
+          }
+        },
         "root": {
           "type": "string",
           "description": "Root folder for all generated outputs.",

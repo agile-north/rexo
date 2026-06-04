@@ -30,5 +30,4 @@
     <Project Path="tests/Execution.Tests/Execution.Tests.csproj" />
     <Project Path="tests/Integration.Tests/Integration.Tests.csproj" />
   </Folder>
-  <Project Path="TempDebugRegexReplace/TempDebugRegexReplace.csproj" />
 </Solution>

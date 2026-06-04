@@ -10,6 +10,43 @@ Global flags:
 - `--json-file <path>`: write `CommandResult` JSON to `<path>`.
 - `--quiet`: suppress human console rendering.
 
+When `outputs.ci.emit` is enabled, Rexo can emit CI-native variables after command execution. The
+`outputs.ci.scope` setting accepts either `"safe"` / `"full"` shortcuts or an object with `mode`,
+`include`, and `exclude` masks. Masks match the canonical field path and can be exact names,
+wildcards, or `regex:...` expressions.
+
+### CI Key Formatting
+
+`outputs.ci.keyCasing` controls how flattened manifest paths become variable keys.
+
+- `upperSnake`: child properties are separated with `_` and uppercased.
+- `lowerSnake`: child properties are separated with `_` and lowercased.
+- `kebab`: child properties are separated with `-` and lowercased.
+- `camel`: child properties are concatenated and each child boundary is capitalized after the first token.
+- `pascal`: child properties are concatenated and each child boundary is capitalized.
+
+Array indexes are treated as child segments in all styles.
+
+Examples for `steps[0].stepId`:
+
+- `upperSnake`: `STEPS_0_STEP_ID`
+- `lowerSnake`: `steps_0_step_id`
+- `kebab`: `steps-0-step-id`
+- `camel`: `steps0StepId`
+- `pascal`: `Steps0StepId`
+
+Known mixed-case product words are preserved as a single token during normalization.
+For example, `nuGetVersion` becomes `NUGET_VERSION` (not `NU_GET_VERSION`).
+
+By default, fields that normalize to an empty value (including `null`) are not emitted.
+Set `outputs.ci.emitEmptyValues: true` to always emit those keys as empty strings.
+
+For `github-actions`, use `outputs.ci.github-actions.scope` to choose the target file:
+
+- `env` (default): writes to `$GITHUB_ENV`
+- `output`: writes to `$GITHUB_OUTPUT`
+- `state`: writes to `$GITHUB_STATE`
+
 When `--json-file` is provided, Rexo also writes a sidecar run manifest next to the JSON file:
 
 - Input file: `artifacts/runs/release.json`

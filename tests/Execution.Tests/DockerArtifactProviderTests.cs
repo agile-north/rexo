@@ -412,6 +412,8 @@ public sealed class DockerArtifactProviderTests
     [Fact]
     public async Task BuildAsyncInfersGhcrImageWhenRegistryNotSpecifiedInGitHubActions()
     {
+        using var _ = CiEnvironmentVariableScope.CreateIsolatedCiScope();
+
         var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-docker-ghcr-default-{Guid.NewGuid():N}");
         Directory.CreateDirectory(Path.Combine(repoRoot, ".rexo"));
         await File.WriteAllTextAsync(
@@ -517,6 +519,8 @@ public sealed class DockerArtifactProviderTests
     [Fact]
     public async Task BuildAsyncInfersGhcrRepositoryFromGitHubActionsContext()
     {
+        using var _ = CiEnvironmentVariableScope.CreateIsolatedCiScope();
+
         var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-docker-ghcr-{Guid.NewGuid():N}");
         Directory.CreateDirectory(Path.Combine(repoRoot, ".rexo"));
         await File.WriteAllTextAsync(
@@ -567,6 +571,8 @@ public sealed class DockerArtifactProviderTests
     [Fact]
     public async Task PushAsyncUsesGitLabCiRegistryDefaultsWhenImageIsImplicit()
     {
+        using var _ = CiEnvironmentVariableScope.CreateIsolatedCiScope();
+
         var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-docker-gitlab-{Guid.NewGuid():N}");
         Directory.CreateDirectory(Path.Combine(repoRoot, ".rexo"));
         await File.WriteAllTextAsync(

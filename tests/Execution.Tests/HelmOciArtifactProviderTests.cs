@@ -175,6 +175,8 @@ public sealed class HelmOciArtifactProviderTests
     [Fact]
     public async Task PushAsyncInfersGhcrDestinationWhenRegistryNotSpecifiedInGitHubActions()
     {
+        using var _ = CiEnvironmentVariableScope.CreateIsolatedCiScope();
+
         var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-helm-ghcr-default-{Guid.NewGuid():N}");
         Directory.CreateDirectory(Path.Combine(repoRoot, "artifacts", "charts"));
         await File.WriteAllTextAsync(
@@ -282,6 +284,8 @@ public sealed class HelmOciArtifactProviderTests
     [Fact]
     public async Task PushAsyncInfersGhcrDestinationFromGitHubActionsContext()
     {
+        using var _ = CiEnvironmentVariableScope.CreateIsolatedCiScope();
+
         var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-helm-ghcr-{Guid.NewGuid():N}");
         Directory.CreateDirectory(Path.Combine(repoRoot, "artifacts", "charts"));
         await File.WriteAllTextAsync(
@@ -339,6 +343,8 @@ public sealed class HelmOciArtifactProviderTests
     [Fact]
     public async Task PushAsyncUsesGitLabCiRegistryDefaultsWhenTargetIsImplicit()
     {
+        using var _ = CiEnvironmentVariableScope.CreateIsolatedCiScope();
+
         var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-helm-gitlab-{Guid.NewGuid():N}");
         Directory.CreateDirectory(Path.Combine(repoRoot, "artifacts", "charts"));
         await File.WriteAllTextAsync(

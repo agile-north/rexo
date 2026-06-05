@@ -9,9 +9,20 @@ $ErrorActionPreference = "Stop"
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Resolve-Path (Join-Path $scriptRoot "..")
 $toolId = "Rexo.Cli"
+$toolPackageId = $toolId.ToLowerInvariant()
 
 Push-Location $repoRoot
 try {
+    if (-not $NoBuild) {
+        $publishRoot = Join-Path $repoRoot "src/Cli/bin/$Configuration"
+        if (Test-Path $publishRoot) {
+            Get-ChildItem -Path $publishRoot -Directory -Filter publish -Recurse | ForEach-Object {
+                Write-Host "Removing stale publish output at $($_.FullName)..."
+                Remove-Item -Path $_.FullName -Recurse -Force
+            }
+        }
+    }
+
     $packArgs = @(
         "pack",
         "src/Cli/Cli.csproj",
@@ -46,9 +57,29 @@ try {
     $version = $matches.version
     Write-Host "Using package: $($latestPackage.Name)"
 
-    $installed = (dotnet tool list --global | Select-String -Pattern '^\s*rexo\.cli\s' -Quiet)
+    $installedToolLine = dotnet tool list --global | Select-String -Pattern '^\s*rexo\.cli\s+(?<version>\S+)'
+    $installedVersion = $null
+    if ($installedToolLine) {
+        $installedVersion = $installedToolLine.Matches[0].Groups['version'].Value
+    }
 
-    if ($installed) {
+    if ($installedVersion -eq $version) {
+        Write-Host "Reinstalling global tool $toolId version $version from local source to refresh the same-version package..."
+
+        $cachedPackagePath = Join-Path $env:USERPROFILE ".nuget\packages\$toolPackageId\$version"
+        if (Test-Path $cachedPackagePath) {
+            Write-Host "Removing cached package payload at $cachedPackagePath..."
+            Remove-Item -Path $cachedPackagePath -Recurse -Force
+        }
+
+        & dotnet tool uninstall --global $toolId
+        if ($LASTEXITCODE -ne 0) {
+            throw "dotnet tool uninstall failed with exit code $LASTEXITCODE."
+        }
+
+        & dotnet tool install --global $toolId --add-source $PackageOutput --version $version --ignore-failed-sources
+    }
+    elseif ($installedVersion) {
         Write-Host "Updating global tool $toolId to version $version from local source..."
         & dotnet tool update --global $toolId --add-source $PackageOutput --version $version --ignore-failed-sources
     }

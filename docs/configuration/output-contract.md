@@ -2,6 +2,11 @@
 
 This page defines exactly what Rexo emits for machine-readable output and when fields are populated.
 
+Template context mapping reference:
+
+- For command template variables, see [templates.md](templates.md).
+- `{{push.*}}` values in templates are derived from step output contract fields `__artifacts` and `__pushDecisions`.
+
 ## Flags And Emission
 
 Global flags:
@@ -101,6 +106,12 @@ Primary machine payload:
 - Populated by `builtin:push-artifacts` output (`__pushDecisions`).
 - Entries include policy allow/deny reasons per artifact.
 - Empty when push phase is skipped.
+
+Template linkage:
+
+- `{{push.hasData}}` is true when either `__artifacts` or `__pushDecisions` exists in completed steps.
+- `{{push.anyPushed}}`, `{{push.pushedCount}}`, and `{{push.artifactCount}}` are computed from `__artifacts` (`Pushed` flags).
+- `{{push.allowedCount}}`, `{{push.deniedCount}}`, `{{push.anyBlocked}}`, and `{{push.blockReasons}}` are computed from `__pushDecisions`.
 
 `Steps[*].Outputs`
 

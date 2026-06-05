@@ -160,16 +160,7 @@ public sealed class HelmOciArtifactProvider : IArtifactProvider
     {
         var auth = ResolveRegistryAuth(
             artifact: artifact,
-            configuredRegistry: FeedAuthResolver.ResolveTargetValue(
-                defaultEnvName: "HELM_OCI_LOGIN_REGISTRY",
-                configuredEnvName: GetSetting(artifact, "target.loginRegistryEnv"),
-                configuredValue: GetSetting(artifact, "target.loginRegistry")
-                                 ?? FeedAuthResolver.ResolveTargetValue(
-                                     defaultEnvName: "HELM_OCI_TARGET_REGISTRY",
-                                     configuredEnvName: GetSetting(artifact, "target.registryEnv"),
-                                     configuredValue: GetSetting(artifact, "target.registry"),
-                                     fileEnv: fileEnv),
-                fileEnv: fileEnv),
+            configuredRegistry: ResolveRegistryHostForLogin(artifact, fileEnv),
             fileEnv: fileEnv);
 
         if (!string.IsNullOrWhiteSpace(auth.Error))
@@ -180,6 +171,11 @@ public sealed class HelmOciArtifactProvider : IArtifactProvider
 
         if (!auth.HasCredentials)
         {
+            if (FeedAuthResolver.ShouldWarnOnMissingContainerRegistryCredentials(auth.Endpoint, fileEnv))
+            {
+                Console.WriteLine($"  Warning: no Helm registry credentials resolved for '{auth.Endpoint}'. Push may fail unless the registry allows anonymous access.");
+            }
+
             return;
         }
 
@@ -199,6 +195,7 @@ public sealed class HelmOciArtifactProvider : IArtifactProvider
         ArtifactConfig artifact,
         IReadOnlyDictionary<string, string> fileEnv)
     {
+        var ciInferenceEnabled = FeedAuthResolver.IsArtifactCiInferenceEnabled(artifact.Settings);
         var oci = FeedAuthResolver.ResolveTargetValue(
             defaultEnvName: "HELM_OCI_TARGET",
             configuredEnvName: GetSetting(artifact, "target.ociEnv"),
@@ -221,6 +218,38 @@ public sealed class HelmOciArtifactProvider : IArtifactProvider
             configuredEnvName: GetSetting(artifact, "target.repositoryEnv"),
             configuredValue: GetSetting(artifact, "target.repository"),
             fileEnv: fileEnv);
+
+        if (ciInferenceEnabled
+            && !string.IsNullOrWhiteSpace(registry)
+            && string.IsNullOrWhiteSpace(repository))
+        {
+            repository = TryResolveImplicitRepository(registry, fileEnv);
+        }
+
+        if (ciInferenceEnabled && (string.IsNullOrWhiteSpace(registry) || string.IsNullOrWhiteSpace(repository)))
+        {
+            var implicitRegistry = FeedAuthResolver.ResolveImplicitContainerRegistry(fileEnv, ciInferenceEnabled);
+            if (!string.IsNullOrWhiteSpace(implicitRegistry))
+            {
+                registry = implicitRegistry;
+                repository ??= TryResolveImplicitRepository(implicitRegistry, fileEnv);
+            }
+        }
+
+        if (ciInferenceEnabled && (string.IsNullOrWhiteSpace(registry) || string.IsNullOrWhiteSpace(repository)))
+        {
+            var gitLabRegistry = FeedAuthResolver.GetEnv("CI_REGISTRY", fileEnv);
+            var gitLabProjectPath = FeedAuthResolver.GetEnv("CI_PROJECT_PATH", fileEnv);
+            var gitLabCi = FeedAuthResolver.GetEnv("GITLAB_CI", fileEnv);
+            if (string.Equals(gitLabCi, "true", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(gitLabRegistry)
+                && !string.IsNullOrWhiteSpace(gitLabProjectPath))
+            {
+                registry = gitLabRegistry;
+                repository = gitLabProjectPath;
+            }
+        }
+
         if (string.IsNullOrWhiteSpace(registry) || string.IsNullOrWhiteSpace(repository))
         {
             return null;
@@ -250,6 +279,44 @@ public sealed class HelmOciArtifactProvider : IArtifactProvider
             .EnumerateFiles(outputPath, $"{chartName}-*.tgz", SearchOption.TopDirectoryOnly)
             .OrderByDescending(File.GetLastWriteTimeUtc)
             .FirstOrDefault();
+    }
+
+    private static string? ResolveRegistryHostForLogin(
+        ArtifactConfig artifact,
+        IReadOnlyDictionary<string, string> fileEnv)
+    {
+        var ciInferenceEnabled = FeedAuthResolver.IsArtifactCiInferenceEnabled(artifact.Settings);
+        var loginRegistry = FeedAuthResolver.ResolveTargetValue(
+            defaultEnvName: "HELM_OCI_LOGIN_REGISTRY",
+            configuredEnvName: GetSetting(artifact, "target.loginRegistryEnv"),
+            configuredValue: GetSetting(artifact, "target.loginRegistry"),
+            fileEnv: fileEnv);
+        if (!string.IsNullOrWhiteSpace(loginRegistry))
+        {
+            return FeedAuthResolver.ExtractRegistryHost(loginRegistry) ?? loginRegistry;
+        }
+
+        var targetRegistry = FeedAuthResolver.ResolveTargetValue(
+            defaultEnvName: "HELM_OCI_TARGET_REGISTRY",
+            configuredEnvName: GetSetting(artifact, "target.registryEnv"),
+            configuredValue: GetSetting(artifact, "target.registry"),
+            fileEnv: fileEnv);
+        if (!string.IsNullOrWhiteSpace(targetRegistry))
+        {
+            return FeedAuthResolver.ExtractRegistryHost(targetRegistry) ?? targetRegistry;
+        }
+
+        var targetOci = FeedAuthResolver.ResolveTargetValue(
+            defaultEnvName: "HELM_OCI_TARGET",
+            configuredEnvName: GetSetting(artifact, "target.ociEnv"),
+            configuredValue: GetSetting(artifact, "target.oci"),
+            fileEnv: fileEnv);
+        if (!string.IsNullOrWhiteSpace(targetOci))
+        {
+            return FeedAuthResolver.ExtractRegistryHost(targetOci);
+        }
+
+        return FeedAuthResolver.ResolveImplicitContainerRegistry(fileEnv, ciInferenceEnabled);
     }
 
     private static string? GetSetting(ArtifactConfig artifact, string key)
@@ -476,6 +543,7 @@ public sealed class HelmOciArtifactProvider : IArtifactProvider
         string? configuredRegistry,
         IReadOnlyDictionary<string, string> fileEnv)
     {
+        var ciInferenceEnabled = FeedAuthResolver.IsArtifactCiInferenceEnabled(artifact.Settings);
         var username = FeedAuthResolver.ResolveSecret(
             defaultEnvName: "HELM_REGISTRY_USERNAME",
             configuredEnvName: GetSetting(artifact, "target.usernameEnv"),
@@ -491,34 +559,41 @@ public sealed class HelmOciArtifactProvider : IArtifactProvider
                            configuredValue: GetSetting(artifact, "target.loginRegistry"),
                            fileEnv: fileEnv);
 
-        if (string.IsNullOrWhiteSpace(username) && string.IsNullOrWhiteSpace(secret))
+        return FeedAuthResolver.FinalizeContainerRegistryAuth(
+            username,
+            secret,
+            endpoint,
+            fileEnv,
+            "HELM_REGISTRY_USERNAME and HELM_REGISTRY_PASSWORD must both be set.",
+            "Helm login registry could not be determined. Set settings.target.loginRegistry or HELM_REGISTRY.",
+            ciInferenceEnabled);
+    }
+
+    private static string? TryResolveImplicitRepository(
+        string registry,
+        IReadOnlyDictionary<string, string> fileEnv)
+    {
+        var normalizedRegistry = FeedAuthResolver.ExtractRegistryHost(registry) ?? registry;
+        if (string.Equals(normalizedRegistry, "ghcr.io", StringComparison.OrdinalIgnoreCase))
         {
-            if (!string.IsNullOrWhiteSpace(endpoint) &&
-                endpoint.Contains("ghcr.io", StringComparison.OrdinalIgnoreCase))
+            var githubActions = FeedAuthResolver.GetEnv("GITHUB_ACTIONS", fileEnv);
+            var githubRepository = FeedAuthResolver.GetEnv("GITHUB_REPOSITORY", fileEnv);
+            if (string.Equals(githubActions, "true", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(githubRepository))
             {
-                var actor = Environment.GetEnvironmentVariable("GITHUB_ACTOR");
-                var token = Environment.GetEnvironmentVariable("GITHUB_TOKEN");
-                if (!string.IsNullOrWhiteSpace(actor) && !string.IsNullOrWhiteSpace(token))
-                {
-                    return new FeedAuthResolution(true, actor, token, endpoint, null, "github-token");
-                }
+                return githubRepository.Trim('/');
             }
-
-            return new FeedAuthResolution(false, null, null, endpoint, null, "none");
         }
 
-        if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(secret))
+        var gitLabRegistry = FeedAuthResolver.ExtractRegistryHost(FeedAuthResolver.GetEnv("CI_REGISTRY", fileEnv));
+        var gitLabProjectPath = FeedAuthResolver.GetEnv("CI_PROJECT_PATH", fileEnv);
+        if (!string.IsNullOrWhiteSpace(gitLabRegistry)
+            && string.Equals(normalizedRegistry, gitLabRegistry, StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(gitLabProjectPath))
         {
-            return new FeedAuthResolution(false, null, null, endpoint,
-                "HELM_REGISTRY_USERNAME and HELM_REGISTRY_PASSWORD must both be set.", "env");
+            return gitLabProjectPath.Trim('/');
         }
 
-        if (string.IsNullOrWhiteSpace(endpoint))
-        {
-            return new FeedAuthResolution(false, null, null, null,
-                "Helm login registry could not be determined. Set settings.registry or HELM_REGISTRY.", "env");
-        }
-
-        return new FeedAuthResolution(true, username, secret, endpoint, null, "env");
+        return null;
     }
 }

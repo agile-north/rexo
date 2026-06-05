@@ -201,6 +201,15 @@ public sealed class TemplateRenderer : ITemplateRenderer
             ["remoteUrl"] = context.RemoteUrl,
         };
 
+        var git = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["branch"] = context.Branch,
+            ["commitSha"] = context.CommitSha,
+            ["shortSha"] = context.ShortSha,
+            ["remoteUrl"] = context.RemoteUrl,
+            ["isCleanWorkingTree"] = context.IsCleanWorkingTree.ToString().ToLowerInvariant(),
+        };
+
         var ci = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
             ["isCi"] = context.IsCi.ToString().ToLowerInvariant(),
@@ -232,11 +241,13 @@ public sealed class TemplateRenderer : ITemplateRenderer
             ["args"] = args,
             ["options"] = options,
             ["repo"] = repo,
+            ["git"] = git,
             ["ci"] = ci,
             ["steps"] = steps,
             ["outputs"] = context.ResolvedOutputs,
             ["settings"] = context.ResolvedSettings,
             ["vars"] = context.ResolvedVars,
+            ["push"] = BuildPushContext(context),
         };
 
         if (context.Version is not null)
@@ -261,6 +272,48 @@ public sealed class TemplateRenderer : ITemplateRenderer
         }
 
         return root;
+    }
+
+    private static IReadOnlyDictionary<string, object?> BuildPushContext(ExecutionContext context)
+    {
+        var artifacts = new List<ArtifactManifestEntry>();
+        var decisions = new List<PushDecision>();
+
+        foreach (var step in context.CompletedSteps.Values)
+        {
+            if (step.Outputs.TryGetValue("__artifacts", out var artifactsObj)
+                && artifactsObj is IEnumerable<ArtifactManifestEntry> artifactEntries)
+            {
+                artifacts.AddRange(artifactEntries);
+            }
+
+            if (step.Outputs.TryGetValue("__pushDecisions", out var decisionsObj)
+                && decisionsObj is IEnumerable<PushDecision> pushEntries)
+            {
+                decisions.AddRange(pushEntries);
+            }
+        }
+
+        var pushedCount = artifacts.Count(a => a.Pushed);
+        var deniedDecisions = decisions.Where(d => !d.Allowed).ToList();
+        var blockReasons = deniedDecisions
+            .Select(d => d.Reason)
+            .Where(reason => !string.IsNullOrWhiteSpace(reason))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        return new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["hasData"] = (artifacts.Count > 0 || decisions.Count > 0).ToString().ToLowerInvariant(),
+            ["anyPushed"] = (pushedCount > 0).ToString().ToLowerInvariant(),
+            ["pushedCount"] = pushedCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["artifactCount"] = artifacts.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["decisionCount"] = decisions.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["allowedCount"] = decisions.Count(d => d.Allowed).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["deniedCount"] = deniedDecisions.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["anyBlocked"] = (deniedDecisions.Count > 0).ToString().ToLowerInvariant(),
+            ["blockReasons"] = string.Join(" | ", blockReasons),
+        };
     }
 
     private static string Slug(string value) =>

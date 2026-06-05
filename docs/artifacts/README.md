@@ -23,7 +23,7 @@ This folder contains provider-specific artifact documentation.
 | `gradle` | [gradle.md](gradle.md) |
 | `rubygems` | [rubygems.md](rubygems.md) |
 | `terraform` | [terraform.md](terraform.md) |
-| custom type (`generic`) | [generic.md](generic.md) |
+| `generic` | [generic.md](generic.md) |
 
 ## Shared behavior across many providers
 
@@ -40,5 +40,23 @@ Most providers also use a shared target pattern:
 - `settings.target.<value>Env`: env var name used to source that value at runtime
 
 Value precedence is consistent: env value from `settings.target.*Env` (or provider default env key) takes priority over `settings.target.*`.
+
+## Shared auth and CI inference
+
+For providers that support feed/registry token fallback, auth resolution is implemented through shared feed-auth providers in [src/Artifacts/Auth/](../../src/Artifacts/Auth/).
+
+Supported shared CI fallback families:
+
+- GitHub Packages tokens (`GITHUB_TOKEN`)
+- GitLab package tokens (`CI_JOB_TOKEN` for explicit GitLab package endpoints)
+- Azure Artifacts tokens (`SYSTEM_ACCESSTOKEN`)
+- Container registry credentials for GitHub/GitLab CI contexts
+
+Where supported, CI inference is controlled per artifact:
+
+- `settings.ciInference` (preferred)
+- `settings.target.ciInference` (compatibility alias)
+
+Default is `true`.
 
 `docker-compose` does not expose `useDocker`/`dockerImage` because it runs through Docker directly.

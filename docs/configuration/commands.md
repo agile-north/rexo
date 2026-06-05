@@ -145,6 +145,33 @@ Each step has one of `run`, `uses`, or `command`:
 
 Variables in `run` strings are template-expanded. See [Template Variables](templates.md).
 
+Container-wrapped run steps:
+
+```jsonc
+{
+  "id": "lint-in-container",
+  "run": "dotnet --info",
+  "container": {
+    "image": "mcr.microsoft.com/dotnet/sdk:10.0",
+    "workingDirectory": "/work",
+    "env": {
+      "DOTNET_CLI_TELEMETRY_OPTOUT": "1"
+    }
+  }
+}
+```
+
+Container defaults and behavior:
+
+- Repository root is mounted to `/work`.
+- The command runs in `/work` unless `container.workingDirectory` is provided.
+- Environment inside the container includes host process environment plus `.env`/`.rexo/.env` overlays, then `container.env` overrides.
+- If Docker is unavailable, Rexo logs a warning and falls back to native execution for that step.
+- `container` is only supported for `run` steps in v1; `uses` and `command` steps keep their own execution model.
+
+See [Containerized Run Steps](containerized-run.md) for detailed semantics,
+validation rules, and extended examples.
+
 ### Builtin Steps
 
 ```jsonc

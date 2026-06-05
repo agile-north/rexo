@@ -101,7 +101,13 @@ public sealed record RepoStepConfig(
     string[]? DependsOn = null,
     string? OutputPattern = null,
     string? OutputFile = null,
-    Dictionary<string, string[]>? Outputs = null);
+    Dictionary<string, string[]>? Outputs = null,
+    RepoStepContainerConfig? Container = null);
+
+public sealed record RepoStepContainerConfig(
+    string Image,
+    Dictionary<string, string>? Env = null,
+    string? WorkingDirectory = null);
 
 public sealed record RepoCommandMergeConfig(
     string? Mode = null,

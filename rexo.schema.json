@@ -345,6 +345,31 @@
             "docker build -f Dockerfile -t my-app:local ."
           ]
         },
+        "container": {
+          "type": "object",
+          "description": "Optional run-step container wrapper. When set, the rendered run command executes inside the specified container image.",
+          "additionalProperties": false,
+          "required": [
+            "image"
+          ],
+          "properties": {
+            "image": {
+              "type": "string",
+              "description": "Container image used to execute the run command."
+            },
+            "env": {
+              "type": "object",
+              "description": "Additional environment variables injected into the container process.",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "workingDirectory": {
+              "type": "string",
+              "description": "Working directory inside the container. Defaults to /work."
+            }
+          }
+        },
         "when": {
           "type": "string",
           "description": "Conditional expression that controls whether the step runs."
@@ -411,6 +436,14 @@
         { "required": ["run"] },
         { "required": ["uses"] },
         { "required": ["command"] }
+      ],
+      "allOf": [
+        {
+          "anyOf": [
+            { "not": { "required": ["container"] } },
+            { "required": ["run"] }
+          ]
+        }
       ]
     },
     "versioning": {

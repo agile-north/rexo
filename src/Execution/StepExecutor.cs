@@ -1,5 +1,6 @@
 namespace Rexo.Execution;
 
+using System.Collections;
 using System.Text.RegularExpressions;
 using Rexo.Core.Abstractions;
 using Rexo.Core.Models;
@@ -83,13 +84,29 @@ public sealed class StepExecutor : IStepExecutor
     {
         var command = _templateRenderer.Render(run, context);
         var secrets = SecretMasker.CollectSecretValues();
-        Console.WriteLine($"  > {command}");
+        var env = BuildNativeRunEnvironment(context);
+        ShellRunResult shellResult;
 
-        var shellResult = await ShellRunner.RunAsync(
-            command,
-            context.RepositoryRoot,
-            onStdout: line => Console.WriteLine($"    {SecretMasker.Mask(line, secrets)}"),
-            cancellationToken: cancellationToken);
+        if (stepDefinition.Container is { Image.Length: > 0 } container)
+        {
+            shellResult = await ExecuteContainerizedRunWithFallbackAsync(
+                command,
+                container,
+                context,
+                secrets,
+                cancellationToken);
+        }
+        else
+        {
+            Console.WriteLine($"  > {command}");
+
+            shellResult = await ShellRunner.RunAsync(
+                command,
+                context.RepositoryRoot,
+                environment: env,
+                onStdout: line => Console.WriteLine($"    {SecretMasker.Mask(line, secrets)}"),
+                cancellationToken: cancellationToken);
+        }
 
         sw.Stop();
 
@@ -146,6 +163,113 @@ public sealed class StepExecutor : IStepExecutor
             shellResult.ExitCode,
             sw.Elapsed,
             outputs);
+    }
+
+    private static async Task<ShellRunResult> ExecuteContainerizedRunWithFallbackAsync(
+        string command,
+        StepContainerDefinition container,
+        ExecutionContext context,
+        IReadOnlySet<string> secrets,
+        CancellationToken cancellationToken)
+    {
+        Console.WriteLine($"  > [container:{container.Image}] {command}");
+
+        var dockerArgs = BuildContainerRunArgs(command, container, context);
+        try
+        {
+            return await ShellRunner.RunProcessAsync(
+                "docker",
+                dockerArgs,
+                context.RepositoryRoot,
+                onStdout: line => Console.WriteLine($"    {SecretMasker.Mask(line, secrets)}"),
+                cancellationToken: cancellationToken);
+        }
+        catch (FileNotFoundException)
+        {
+            Console.WriteLine("  ! Docker runtime not found; falling back to native execution.");
+            var env = BuildNativeRunEnvironment(context);
+            return await ShellRunner.RunAsync(
+                command,
+                context.RepositoryRoot,
+                environment: env,
+                onStdout: line => Console.WriteLine($"    {SecretMasker.Mask(line, secrets)}"),
+                cancellationToken: cancellationToken);
+        }
+    }
+
+    private static IReadOnlyList<string> BuildContainerRunArgs(
+        string command,
+        StepContainerDefinition container,
+        ExecutionContext context)
+    {
+        var args = new List<string>
+        {
+            "run",
+            "--rm",
+            "-v",
+            $"{context.RepositoryRoot}:/work",
+            "-w",
+            string.IsNullOrWhiteSpace(container.WorkingDirectory) ? "/work" : container.WorkingDirectory,
+        };
+
+        foreach (var envVar in BuildContainerEnvironment(context, container))
+        {
+            args.Add("-e");
+            args.Add(envVar.Key + "=" + envVar.Value);
+        }
+
+        args.Add(container.Image);
+        args.Add("/bin/sh");
+        args.Add("-c");
+        args.Add(command);
+
+        return args;
+    }
+
+    private static Dictionary<string, string> BuildContainerEnvironment(
+        ExecutionContext context,
+        StepContainerDefinition container)
+    {
+        var env = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (DictionaryEntry entry in Environment.GetEnvironmentVariables())
+        {
+            if (entry.Key is string key && entry.Value is string value)
+            {
+                env[key] = value;
+            }
+        }
+
+        foreach (var (key, value) in context.FileEnvironment)
+        {
+            env[key] = value;
+        }
+
+        if (container.Env is { Count: > 0 })
+        {
+            foreach (var (key, value) in container.Env)
+            {
+                env[key] = value;
+            }
+        }
+
+        return env;
+    }
+
+    private static Dictionary<string, string?> BuildNativeRunEnvironment(ExecutionContext context)
+    {
+        if (context.FileEnvironment.Count == 0)
+        {
+            return new Dictionary<string, string?>(StringComparer.Ordinal);
+        }
+
+        var env = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (var (key, value) in context.FileEnvironment)
+        {
+            env[key] = value;
+        }
+
+        return env;
     }
 
     private async Task<StepResult> ExecuteUsesAsync(

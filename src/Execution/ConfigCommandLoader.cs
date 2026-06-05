@@ -1509,6 +1509,12 @@ public sealed class ConfigCommandLoader
             OutputPattern = stepConfig.OutputPattern,
             OutputFile = stepConfig.OutputFile,
             StepOutputs = BuildStepOutputs(stepConfig.Outputs),
+            Container = stepConfig.Container is null
+                ? null
+                : new Core.Models.StepContainerDefinition(
+                    stepConfig.Container.Image,
+                    stepConfig.Container.Env,
+                    stepConfig.Container.WorkingDirectory),
         };
 
     private static IReadOnlyDictionary<string, IReadOnlyList<string>>? BuildStepOutputs(

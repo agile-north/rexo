@@ -45,4 +45,20 @@ public sealed class ParallelStepGroupingTests
         Assert.NotNull(step.DependsOn);
         Assert.Equal(["build", "test"], step.DependsOn);
     }
+
+    [Fact]
+    public void StepConfigContainerCanBeSet()
+    {
+        var step = new RepoStepConfig(
+            Run: "dotnet --info",
+            Container: new RepoStepContainerConfig(
+                Image: "mcr.microsoft.com/dotnet/sdk:10.0",
+                Env: new Dictionary<string, string> { ["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1" },
+                WorkingDirectory: "/work"));
+
+        Assert.NotNull(step.Container);
+        Assert.Equal("mcr.microsoft.com/dotnet/sdk:10.0", step.Container?.Image);
+        Assert.Equal("1", step.Container?.Env?["DOTNET_CLI_TELEMETRY_OPTOUT"]);
+        Assert.Equal("/work", step.Container?.WorkingDirectory);
+    }
 }

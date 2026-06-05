@@ -13,6 +13,7 @@ public sealed record StepDefinition(
     public bool ContinueOnError { get; init; }
     public string? OutputPattern { get; init; }
     public string? OutputFile { get; init; }
+    public StepContainerDefinition? Container { get; init; }
 
     /// <summary>
     /// Declared output glob patterns produced by this step.
@@ -22,3 +23,8 @@ public sealed record StepDefinition(
     /// </summary>
     public IReadOnlyDictionary<string, IReadOnlyList<string>>? StepOutputs { get; init; }
 }
+
+public sealed record StepContainerDefinition(
+    string Image,
+    IReadOnlyDictionary<string, string>? Env = null,
+    string? WorkingDirectory = null);

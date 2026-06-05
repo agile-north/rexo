@@ -1271,6 +1271,97 @@ public sealed class RepoConfigurationLoaderTests
   }
 
   [Fact]
+  public async Task LoadAsyncParsesRunStepContainer()
+  {
+    var dir = Path.Combine(Path.GetTempPath(), $"rexo-step-container-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(dir);
+
+    var configPath = Path.Combine(dir, "rexo.json");
+    await File.WriteAllTextAsync(configPath, """
+      {
+        "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+        "schemaVersion": "1.0",
+        "name": "sample",
+        "commands": {
+          "build": {
+            "steps": [
+              {
+                "id": "container-step",
+                "run": "dotnet --info",
+                "container": {
+                  "image": "mcr.microsoft.com/dotnet/sdk:10.0",
+                  "workingDirectory": "/work",
+                  "env": {
+                    "DOTNET_CLI_TELEMETRY_OPTOUT": "1"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "aliases": {}
+      }
+      """);
+
+    try
+    {
+      var config = await RepoConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
+      var step = Assert.Single(config.Commands!["build"].Steps);
+
+      Assert.NotNull(step.Container);
+      Assert.Equal("mcr.microsoft.com/dotnet/sdk:10.0", step.Container?.Image);
+      Assert.Equal("/work", step.Container?.WorkingDirectory);
+      Assert.Equal("1", step.Container?.Env?["DOTNET_CLI_TELEMETRY_OPTOUT"]);
+    }
+    finally
+    {
+      Directory.Delete(dir, true);
+    }
+  }
+
+  [Fact]
+  public async Task LoadAsyncRejectsContainerOnUsesStep()
+  {
+    var dir = Path.Combine(Path.GetTempPath(), $"rexo-step-container-invalid-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(dir);
+
+    var configPath = Path.Combine(dir, "rexo.json");
+    await File.WriteAllTextAsync(configPath, """
+      {
+        "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+        "schemaVersion": "1.0",
+        "name": "sample",
+        "commands": {
+          "release": {
+            "steps": [
+              {
+                "id": "invalid-container-uses",
+                "uses": "builtin:resolve-version",
+                "container": {
+                  "image": "mcr.microsoft.com/dotnet/sdk:10.0"
+                }
+              }
+            ]
+          }
+        },
+        "aliases": {}
+      }
+      """);
+
+    try
+    {
+      var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+          RepoConfigurationLoader.LoadAsync(configPath, CancellationToken.None));
+
+      Assert.Contains("does not match", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+    finally
+    {
+      Directory.Delete(dir, true);
+    }
+  }
+
+  [Fact]
   public async Task LoadAsyncRejectsInvalidCommandMergeValue()
   {
     var dir = Path.Combine(Path.GetTempPath(), $"rexo-invalid-merge-{Guid.NewGuid():N}");

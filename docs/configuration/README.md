@@ -9,6 +9,9 @@ see [Builtins Reference](../builtins/README.md).
 For machine-readable CLI output and sidecar run-manifest fields,
 see [Output Contract](./output-contract.md).
 
+For detailed run-step container wrapping behavior (scope, defaults, env precedence,
+fallback, and validation), see [Containerized Run Steps](./containerized-run.md).
+
 Default repository configuration file: **`rexo.json`**
 
 Supported config locations (first match wins):

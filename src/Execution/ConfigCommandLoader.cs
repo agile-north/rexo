@@ -137,6 +137,7 @@ public sealed class ConfigCommandLoader
     {
         var emitRuntimeFiles = ShouldEmitRuntimeFiles(config);
         var outputRoot = ResolveOutputRoot(config);
+        var ciVariablePrefix = ResolveCiVariablePrefix(config);
         var normalizedCommandConfig = NormalizeCommandConfig(commandConfig);
         var gitInfo = await Git.GitDetector.DetectAsync(repositoryRoot, cancellationToken);
         var ciInfo = CiDetector.Detect();
@@ -162,6 +163,7 @@ public sealed class ConfigCommandLoader
             Args = invocation.Args,
             Options = BuildOptionsWithDefaults(invocation.Options, normalizedCommandConfig),
             FileEnvironment = RepositoryEnvironmentFiles.Load(repositoryRoot),
+            CiVariablePrefix = ciVariablePrefix,
             IsDryRun = TryGetOptionBoolean(invocation.Options, "dry-run") == true,
             CommandCallStack = [.. invocation.CallStack, commandName],
             ResolvedOutputs = BuildOutputsContext(config),
@@ -894,6 +896,12 @@ public sealed class ConfigCommandLoader
         }
 
         return bool.TryParse(value, out var parsed) ? parsed : null;
+    }
+
+    private static string ResolveCiVariablePrefix(RepoConfig config)
+    {
+        var prefix = config.Outputs?.Ci?.Prefix;
+        return string.IsNullOrWhiteSpace(prefix) ? "REXO_" : prefix;
     }
 
     private static (bool canPush, List<string> skipReasons) EvaluatePushEligibility(

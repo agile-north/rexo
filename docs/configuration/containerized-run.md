@@ -70,6 +70,21 @@ Later values win when keys collide.
 
 This gives native-feeling behavior while still allowing explicit overrides per step.
 
+Rexo injects a `REXO_*` runtime variable set for run steps (derived from the same
+manifest contract used by CI output emission), including values such as command
+status, version fields, step counts, and push summary fields.
+
+The `REXO_` prefix is the default. When `outputs.ci.prefix` is configured, run-step
+environment variables use that configured prefix instead.
+
+Examples include:
+
+- `REXO_SUCCESS`
+- `REXO_VERSION_SEM_VER`
+- `REXO_PUSH_DECISIONS_COUNT`
+
+These are available in both native and container-wrapped run steps.
+
 ---
 
 ## Fallback Semantics

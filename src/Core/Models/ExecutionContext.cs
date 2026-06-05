@@ -24,6 +24,7 @@ public sealed record ExecutionContext(
     public IReadOnlyDictionary<string, string> Args { get; init; } = new Dictionary<string, string>();
     public IReadOnlyDictionary<string, string?> Options { get; init; } = new Dictionary<string, string?>();
     public IReadOnlyDictionary<string, string> FileEnvironment { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
+    public string CiVariablePrefix { get; init; } = "REXO_";
     public VersionResult? Version { get; init; }
     public IReadOnlyDictionary<string, StepResult> CompletedSteps { get; init; } = new Dictionary<string, StepResult>();
 

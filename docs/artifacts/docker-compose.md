@@ -50,19 +50,58 @@ Registry resolution order:
 1. Env value from `settings.target.registryEnv` (or `DOCKER_COMPOSE_TARGET_REGISTRY`)
 2. `settings.target.registry`
 
-## Notes
+## Behavior
 
-- No `useDocker` or `dockerImage` settings: this provider is already Docker-based.
-- If `target.registry` is omitted, provider may still resolve a registry from CI context (`CI_REGISTRY` or GitHub Actions `ghcr.io`) when CI inference is enabled.
+- Build: `docker compose build`.
+- Push: `docker compose push`.
+- `settings.file` controls the compose file path.
+- `settings.project-name` maps to `docker compose -p`.
+- `settings.services` limits build/push to the named services.
+
+### What gets pushed
+
+- The provider pushes the images referenced by the selected Compose services.
+- The actual pushed registry and repository are taken from the services' `image:` values in the compose file.
+- The provider does not rewrite image names or implement Docker tag strategy itself.
+- It reports a synthetic push result of `artifact.Name:<version|latest>`, not the real Compose image references.
+
+### When to use `docker-compose`
+
+- your repository is a Docker Compose stack
+- you want Compose to own build/push ordering for multiple services
+- you want to build/push several services together from a single artifact definition
+
+### When not to use `docker-compose`
+
+- you need explicit per-image `image`, `dockerfile`, or `context` control
+- you need version-based tag strategy and push gating
+- you want Rexo to manage artifact metadata for individual images
 
 ## Example
+
+Compose file:
+
+```yaml
+version: "3.9"
+
+services:
+  api:
+    build: ./api
+    image: ghcr.io/agile-north/rexo/api:latest
+
+  worker:
+    build: ./worker
+    image: ghcr.io/agile-north/rexo/worker:latest
+```
+
+Artifact config:
 
 ```json
 {
   "type": "docker-compose",
   "name": "stack",
   "settings": {
-    "file": "deploy/compose.yml",
+    "file": "docker-compose.yml",
     "project-name": "my-stack",
     "services": "api worker",
     "target": {
@@ -75,3 +114,10 @@ Registry resolution order:
   }
 }
 ```
+
+With that config, `docker compose push` will attempt to push:
+
+- `ghcr.io/agile-north/rexo/api:latest`
+- `ghcr.io/agile-north/rexo/worker:latest`
+
+It does not create or push a separate “stack” artifact bundle. The provider merely wraps Docker Compose build/push behavior and reports a single synthetic artifact reference.

@@ -162,6 +162,7 @@ public sealed class ConfigCommandLoader
             Args = invocation.Args,
             Options = BuildOptionsWithDefaults(invocation.Options, normalizedCommandConfig),
             FileEnvironment = RepositoryEnvironmentFiles.Load(repositoryRoot),
+            IsDryRun = TryGetOptionBoolean(invocation.Options, "dry-run") == true,
             CommandCallStack = [.. invocation.CallStack, commandName],
             ResolvedOutputs = BuildOutputsContext(config),
             ResolvedSettings = BuildSettingsContext(config),
@@ -378,8 +379,9 @@ public sealed class ConfigCommandLoader
         var pushDecisions = new List<Core.Models.PushDecision>();
         var globalPolicy = ParsePushPolicyRules(config);
         var confirmRequested = ResolveConfirmRequested(ctx.Options);
+        var dryRun = ctx.IsDryRun;
 
-        if (!confirmRequested)
+        if (!confirmRequested && !dryRun)
         {
             foreach (var artifactCfg in artifacts)
             {
@@ -432,7 +434,24 @@ public sealed class ConfigCommandLoader
                 continue;
             }
 
-            var pushResult = await provider.PushAsync(ToArtifactConfig(artifactCfg, config, outputRoot), ctx, cancellationToken);
+            var artifactConfig = ToArtifactConfig(artifactCfg, config, outputRoot);
+            ArtifactPushResult pushResult;
+            if (dryRun)
+            {
+                Console.WriteLine($"  Dry run enabled: simulating push for '{artifactName}'.");
+                var simulatedReferences = provider.GetPlannedTags(artifactConfig, ctx).ToList();
+                if (simulatedReferences.Count == 0)
+                {
+                    simulatedReferences.Add($"{artifactName}:{ctx.Version?.SemVer ?? "latest"}");
+                }
+
+                pushResult = new ArtifactPushResult(artifactName, true, simulatedReferences);
+            }
+            else
+            {
+                pushResult = await provider.PushAsync(artifactConfig, ctx, cancellationToken);
+            }
+
             var pushPerformed = pushResult.PublishedReferences.Count > 0;
             manifestEntries.Add(new Core.Models.ArtifactManifestEntry(
                 artifactCfg.Type,
@@ -443,9 +462,11 @@ public sealed class ConfigCommandLoader
             pushDecisions.Add(new Core.Models.PushDecision(
                 artifactName,
                 pushResult.Success,
-                pushResult.Success
-                    ? (pushPerformed ? "Push succeeded." : "Push skipped.")
-                    : $"Failed to push artifact '{artifactName}'."));
+                dryRun
+                    ? "Dry run: push simulated."
+                    : pushResult.Success
+                        ? (pushPerformed ? "Push succeeded." : "Push skipped.")
+                        : $"Failed to push artifact '{artifactName}'."));
 
             if (!pushResult.Success)
             {
@@ -470,7 +491,7 @@ public sealed class ConfigCommandLoader
         return new StepResult(stepId, true, 0, TimeSpan.Zero,
             new Dictionary<string, object?>
             {
-                ["message"] = successMessage,
+                ["message"] = dryRun ? $"{successMessage} (dry run)" : successMessage,
                 ["__artifacts"] = manifestEntries,
                 ["__pushDecisions"] = pushDecisions,
             });

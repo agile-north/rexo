@@ -4,6 +4,24 @@ Configure runtime output and push policies.
 
 ---
 
+## `runtime.dryRun`
+
+Controls dry-run mode for the current run.
+
+```jsonc
+"runtime": {
+  "dryRun": true
+}
+```
+
+- `dryRun` (default: `false`): when `true`, Rexo plans or simulates actions instead of performing side effects where supported.
+- `--dry-run` / `--no-dry-run` on the CLI override the config value for a given invocation.
+- Commands can read the resolved flag through `{{options.dry-run}}`.
+
+`runtime.push.dryRun` can be used to force push-related commands into dry-run mode even when the global runtime flag is off.
+
+---
+
 ## `runtime.output`
 
 Controls filesystem artifact emission, the root output folder, and per-category output paths.
@@ -59,9 +77,14 @@ Push policy and eligibility rules enforced by `builtin:push-artifacts`.
 `builtin:push-artifacts` enforces these rules globally, then merges per-artifact
 overrides from `artifacts[].settings.push.*`.
 
+When dry-run is enabled, `builtin:push-artifacts` does not call artifact providers. It
+simulates a successful push, records the planned references in the runtime manifest,
+and keeps the run side-effect free.
+
 | Rule | Effect |
 | --- | --- |
 | `enabled` | Enables/disables push globally |
 | `noPushInPullRequest` | Rejects push when the CI environment reports a PR build |
 | `requireCleanWorkingTree` | Rejects push when the git working tree has uncommitted changes |
 | `branches` | Allows push only when branch matches listed patterns |
+| `dryRun` | Forces push into simulation mode without provider calls |

@@ -92,18 +92,25 @@ Exit behavior:
 Purpose:
 
 - Push matching artifacts with confirmation and push-policy gates.
+- Simulate push when dry-run is enabled.
 
 Calls:
 
 - Parse global push rules from `config.runtime.push`
+- Resolve dry-run from CLI/config runtime settings
 - Merge per-artifact push overrides from artifact settings
 - Enforce local explicit confirmation (`confirm`/`push` option)
 - For allowed artifacts: provider `PushAsync(...)`
 - Writes `<runtime.output.root>/manifest.json` when `runtime.output.emitRuntimeFiles=true` (default)
 
+Dry-run changes the provider call path: the builtin still evaluates push decisions and
+produces manifest output, but it skips external push operations and marks artifacts as
+successfully simulated.
+
 Inputs:
 
 - `ctx.Options.confirm` and/or `ctx.Options.push`
+- `ctx.Options.dry-run`
 - CI context (`ctx.IsCi`)
 - Global push rules (`runtime.push`)
 - Per-artifact settings:
@@ -121,4 +128,5 @@ Exit behavior:
 
 - Local, not confirmed: success `0`, push skipped with guidance
 - Policy-gated skip: success `0` with decision reasons
+- Dry-run: success `0`, no provider calls, simulated push output only
 - Provider push failure: exit code `6`

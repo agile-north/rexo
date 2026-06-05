@@ -256,9 +256,11 @@ public sealed record RepoSecurityOutputPathsConfig
 }
 
 public sealed record RepoRuntimeConfig(
+    bool? DryRun = null,
     RepoPushConfig? Push = null);
 
 public sealed record RepoPushConfig(
+    bool? DryRun = null,
     bool? Enabled = null,
     bool? NoPushInPullRequest = null,
     bool? RequireCleanWorkingTree = null,

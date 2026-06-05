@@ -39,6 +39,9 @@ Available in any `run` step string:
 
 `repo.branch`, `repo.commitSha`, `repo.shortSha`, and `repo.remoteUrl` remain available for compatibility. Prefer `git.*` for new templates.
 
+Dry-run is exposed through the options bag as `{{options.dry-run}}`, so commands and
+steps can branch on it directly in `run` strings and `when` expressions.
+
 ### `version.*` fields
 
 When version is resolved, these fields are available:
@@ -128,6 +131,7 @@ Boolean literal support:
 
 ```
 {{options.confirm == true}}      // true if confirm option is true
+{{options.dry-run == true}}      // true if dry-run is enabled for the invocation
 ```
 
 When a variable is missing/undefined:

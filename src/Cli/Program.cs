@@ -30,7 +30,7 @@ public static class Program
         var workingDir = Environment.CurrentDirectory;
 
         // Parse global flags
-        var (cleanArgs, json, jsonFile, verbose, debug, quiet, setOverrides) = ParseGlobalFlags(args);
+        var (cleanArgs, json, jsonFile, verbose, debug, quiet, dryRunFlag, setOverrides) = ParseGlobalFlags(args);
 
         // No args (or only global flags) — show help
         if (cleanArgs.Count == 0)
@@ -51,21 +51,22 @@ public static class Program
         // Set up the full service graph
         var (registry, executor, config) = await CliBootstrapper.BuildServicesAsync(workingDir, debug, setOverrides, cancellationToken);
         var outputSettings = ResolveCommandOutputSettings(config, json, jsonFile, quiet);
+        var dryRun = ResolveDryRun(config, dryRunFlag);
 
         return command switch
         {
-            "version" => await RunBuiltinAsync(executor, "version", EmptyInvocation(workingDir, outputSettings), config, outputSettings, verbose, quiet, cancellationToken),
-            "doctor" => await RunBuiltinAsync(executor, "doctor", EmptyInvocation(workingDir, outputSettings), config, outputSettings, verbose, quiet, cancellationToken),
-            "capabilities" => await RunBuiltinAsync(executor, "capabilities", EmptyInvocation(workingDir, outputSettings), config, outputSettings, verbose, quiet, cancellationToken),
-            "init" => await RunInitBuiltinAsync(executor, cleanArgs, workingDir, config, outputSettings, verbose, quiet, cancellationToken),
-            "new" => await RunInitBuiltinAsync(executor, cleanArgs, workingDir, config, outputSettings, verbose, quiet, cancellationToken),
-            "list" => await RunBuiltinAsync(executor, "list", EmptyInvocation(workingDir, outputSettings), config, outputSettings, verbose, quiet, cancellationToken),
-            "explain" => await RunExplainAsync(executor, cleanArgs, workingDir, config, outputSettings, verbose, quiet, cancellationToken),
-            "config" => await RunConfigSubcommandAsync(cleanArgs, executor, workingDir, config, outputSettings, verbose, quiet, cancellationToken),
-            "policies" => await RunPoliciesSubcommandAsync("policies", cleanArgs, executor, workingDir, config, outputSettings, verbose, quiet, cancellationToken),
+            "version" => await RunBuiltinAsync(executor, "version", EmptyInvocation(workingDir, outputSettings, dryRun), config, outputSettings, verbose, quiet, cancellationToken),
+            "doctor" => await RunBuiltinAsync(executor, "doctor", EmptyInvocation(workingDir, outputSettings, dryRun), config, outputSettings, verbose, quiet, cancellationToken),
+            "capabilities" => await RunBuiltinAsync(executor, "capabilities", EmptyInvocation(workingDir, outputSettings, dryRun), config, outputSettings, verbose, quiet, cancellationToken),
+            "init" => await RunInitBuiltinAsync(executor, cleanArgs, workingDir, config, outputSettings, verbose, quiet, dryRun, cancellationToken),
+            "new" => await RunInitBuiltinAsync(executor, cleanArgs, workingDir, config, outputSettings, verbose, quiet, dryRun, cancellationToken),
+            "list" => await RunBuiltinAsync(executor, "list", EmptyInvocation(workingDir, outputSettings, dryRun), config, outputSettings, verbose, quiet, cancellationToken),
+            "explain" => await RunExplainAsync(executor, cleanArgs, workingDir, config, outputSettings, verbose, quiet, dryRun, cancellationToken),
+            "config" => await RunConfigSubcommandAsync(cleanArgs, executor, workingDir, config, outputSettings, verbose, quiet, dryRun, cancellationToken),
+            "policies" => await RunPoliciesSubcommandAsync("policies", cleanArgs, executor, workingDir, config, outputSettings, verbose, quiet, dryRun, cancellationToken),
             "ui" => await RunUiAsync(executor, config, workingDir, cancellationToken),
-            "run" => await RunConfiguredAsync(cleanArgs, executor, config, workingDir, config, outputSettings, verbose, quiet, cancellationToken),
-            _ => await RunDirectAsync(command, cleanArgs, executor, config, workingDir, config, outputSettings, verbose, quiet, cancellationToken),
+            "run" => await RunConfiguredAsync(cleanArgs, executor, config, workingDir, config, outputSettings, verbose, quiet, dryRun, cancellationToken),
+            _ => await RunDirectAsync(command, cleanArgs, executor, config, workingDir, config, outputSettings, verbose, quiet, dryRun, cancellationToken),
         };
     }
 
@@ -319,6 +320,7 @@ public static class Program
         CommandOutputSettings outputSettings,
         bool verbose,
         bool quiet,
+        bool dryRun,
         CancellationToken cancellationToken)
     {
         if (args.Count < 2)
@@ -329,15 +331,12 @@ public static class Program
 
         // Collect multi-word command name: explain branch feature
         var commandName = string.Join(" ", args.Skip(1));
-        var invocation = new CommandInvocation(
+        var invocation = CreateInvocation(
             new Dictionary<string, string> { ["command"] = commandName },
             new Dictionary<string, string?>(),
-            outputSettings.Json,
-            outputSettings.JsonFile,
-            workingDir)
-        {
-            Stdout = outputSettings.Stdout,
-        };
+            outputSettings,
+            workingDir,
+            dryRun);
 
         var startedAt = DateTimeOffset.UtcNow;
         var result = await ExecuteCommandAsync(executor, "explain", invocation, cancellationToken);
@@ -358,6 +357,7 @@ public static class Program
         CommandOutputSettings outputSettings,
         bool verbose,
         bool quiet,
+        bool dryRun,
         CancellationToken cancellationToken)
     {
         // args[0] == commandPrefix, args[1] == sub-command, args[2..] == positional args
@@ -376,10 +376,7 @@ public static class Program
             parsedArgs["name"] = args[2];
         }
 
-        var invocation = new CommandInvocation(parsedArgs, new Dictionary<string, string?>(), outputSettings.Json, outputSettings.JsonFile, workingDir)
-        {
-            Stdout = outputSettings.Stdout,
-        };
+        var invocation = CreateInvocation(parsedArgs, new Dictionary<string, string?>(), outputSettings, workingDir, dryRun);
 
         var startedAt = DateTimeOffset.UtcNow;
         var result = await ExecuteCommandAsync(executor, subCommand, invocation, cancellationToken);
@@ -399,6 +396,7 @@ public static class Program
         CommandOutputSettings outputSettings,
         bool verbose,
         bool quiet,
+        bool dryRun,
         CancellationToken cancellationToken)
     {
         // args[0] == "config", args[1] == sub-command
@@ -409,7 +407,7 @@ public static class Program
         }
 
         var subCommand = $"config {args[1].ToLowerInvariant()}";
-        var invocation = EmptyInvocation(workingDir, outputSettings);
+        var invocation = EmptyInvocation(workingDir, outputSettings, dryRun);
 
         var startedAt = DateTimeOffset.UtcNow;
         var result = await ExecuteCommandAsync(executor, subCommand, invocation, cancellationToken);
@@ -440,6 +438,7 @@ public static class Program
         CommandOutputSettings outputSettings,
         bool verbose,
         bool quiet,
+        bool dryRun,
         CancellationToken cancellationToken)
     {
         if (args.Count < 2)
@@ -477,10 +476,7 @@ public static class Program
                 }
             }
 
-            var invocation = new CommandInvocation(parsedArgs, parsedOptions, outputSettings.Json, outputSettings.JsonFile, workingDir)
-            {
-                Stdout = outputSettings.Stdout,
-            };
+            var invocation = CreateInvocation(parsedArgs, parsedOptions, outputSettings, workingDir, dryRun);
             var startedAt = DateTimeOffset.UtcNow;
             var result = await ExecuteCommandAsync(executor, candidateName, invocation, cancellationToken);
             var completedAt = DateTimeOffset.UtcNow;
@@ -506,6 +502,7 @@ public static class Program
         CommandOutputSettings outputSettings,
         bool verbose,
         bool quiet,
+        bool dryRun,
         CancellationToken cancellationToken)
     {
         var remainingArgs = args.Skip(1).ToList();
@@ -525,10 +522,7 @@ public static class Program
             };
         }
 
-        var invocation = new CommandInvocation(parsedArgs, parsedOptions, outputSettings.Json, outputSettings.JsonFile, workingDir)
-        {
-            Stdout = outputSettings.Stdout,
-        };
+        var invocation = CreateInvocation(parsedArgs, parsedOptions, outputSettings, workingDir, dryRun);
 
         var startedAt = DateTimeOffset.UtcNow;
         var result = await ExecuteCommandAsync(executor, "init", invocation, cancellationToken);
@@ -550,6 +544,7 @@ public static class Program
         CommandOutputSettings outputSettings,
         bool verbose,
         bool quiet,
+        bool dryRun,
         CancellationToken cancellationToken)
     {
         // Try multi-word command resolution: "branch feature" from ["branch", "feature", "name"]
@@ -580,10 +575,7 @@ public static class Program
                 }
             }
 
-            var invocation = new CommandInvocation(parsedArgs, parsedOptions, outputSettings.Json, outputSettings.JsonFile, workingDir)
-            {
-                Stdout = outputSettings.Stdout,
-            };
+            var invocation = CreateInvocation(parsedArgs, parsedOptions, outputSettings, workingDir, dryRun);
 
             var startedAt = DateTimeOffset.UtcNow;
             var result = await ExecuteCommandAsync(executor, candidateName, invocation, cancellationToken);
@@ -923,7 +915,7 @@ public static class Program
             .FirstOrDefault()?.InformationalVersion ?? "0.1.0-local";
     }
 
-    private static (IReadOnlyList<string> cleanArgs, bool json, string? jsonFile, bool verbose, bool debug, bool quiet, IReadOnlyList<string> setOverrides) ParseGlobalFlags(string[] args)
+    private static (IReadOnlyList<string> cleanArgs, bool json, string? jsonFile, bool verbose, bool debug, bool quiet, bool? dryRun, IReadOnlyList<string> setOverrides) ParseGlobalFlags(string[] args)
     {
         var clean = new List<string>();
         var json = false;
@@ -931,6 +923,7 @@ public static class Program
         var verbose = false;
         var debug = false;
         var quiet = false;
+        bool? dryRun = null;
         var setOverrides = new List<string>();
 
         for (var i = 0; i < args.Length; i++)
@@ -953,6 +946,12 @@ public static class Program
                 case "--quiet" or "-q":
                     quiet = true;
                     break;
+                case "--dry-run":
+                    dryRun = true;
+                    break;
+                case "--no-dry-run":
+                    dryRun = false;
+                    break;
                 case "--set" when i + 1 < args.Length:
                     setOverrides.Add(args[++i]);
                     break;
@@ -962,7 +961,7 @@ public static class Program
             }
         }
 
-        return (clean, json, jsonFile, verbose, debug, quiet, setOverrides);
+        return (clean, json, jsonFile, verbose, debug, quiet, dryRun, setOverrides);
     }
 
     private static (IReadOnlyDictionary<string, string> args, IReadOnlyDictionary<string, string?> options)
@@ -1040,19 +1039,46 @@ public static class Program
         Console.WriteLine("  --verbose                   Show detailed step output");
         Console.WriteLine("  --quiet                     Suppress non-essential output");
         Console.WriteLine("  --debug                     Show debug/diagnostic output");
+        Console.WriteLine("  --dry-run                   Simulate external mutations without applying them");
+        Console.WriteLine("  --no-dry-run                Explicitly disable dry-run when config enables it");
         Console.WriteLine("  --set <key.path=value>      Override a config value (repeatable)");
     }
 
-    private static CommandInvocation EmptyInvocation(string workingDir, CommandOutputSettings outputSettings) =>
-        new(
+    private static CommandInvocation EmptyInvocation(string workingDir, CommandOutputSettings outputSettings, bool dryRun) =>
+        CreateInvocation(
             new Dictionary<string, string>(),
             new Dictionary<string, string?>(),
-            Json: outputSettings.Json,
-            JsonFile: outputSettings.JsonFile,
-            WorkingDirectory: workingDir)
+            outputSettings,
+            workingDir,
+            dryRun);
+
+    private static CommandInvocation CreateInvocation(
+        IReadOnlyDictionary<string, string> args,
+        IReadOnlyDictionary<string, string?> options,
+        CommandOutputSettings outputSettings,
+        string workingDir,
+        bool dryRun)
+    {
+        var mergedOptions = new Dictionary<string, string?>(options, StringComparer.OrdinalIgnoreCase)
+        {
+            ["dry-run"] = dryRun ? "true" : "false",
+        };
+
+        return new CommandInvocation(args, mergedOptions, outputSettings.Json, outputSettings.JsonFile, workingDir)
         {
             Stdout = outputSettings.Stdout,
         };
+    }
+
+    private static bool ResolveDryRun(RepoConfig? config, bool? cliDryRun)
+    {
+        if (cliDryRun.HasValue)
+        {
+            return cliDryRun.Value;
+        }
+
+        return config?.Runtime?.DryRun == true || config?.Runtime?.Push?.DryRun == true;
+    }
 
     private static CommandOutputSettings ResolveCommandOutputSettings(RepoConfig? config, bool jsonFlag, string? jsonFileFlag, bool quiet)
     {

@@ -13,6 +13,44 @@ using Rexo.Versioning;
 public sealed class PushGateTests
 {
     [Fact]
+    public async Task PushDryRunSimulatesSuccessWithoutCallingProvider()
+    {
+        var provider = new RecordingArtifactProvider("docker");
+        var (executor, _) = CreateExecutor(
+            provider,
+            new RepoConfig(
+                Name: "test",
+                Commands: new Dictionary<string, RepoCommandConfig>
+                {
+                    ["push"] = new RepoCommandConfig(
+                        Description: "push",
+                        Options: new Dictionary<string, RepoOptionConfig>(),
+                        Steps: [new RepoStepConfig(Id: "push", Uses: "builtin:push-artifacts")]),
+                },
+                Aliases: new Dictionary<string, string>())
+            {
+                Artifacts = [new RepoArtifactConfig("docker", "a")],
+            });
+
+        var result = await ExecuteAsync(
+            executor,
+            "push",
+            new Dictionary<string, string?>
+            {
+                ["dry-run"] = "true",
+            },
+            Path.GetTempPath());
+
+        Assert.True(result.Success);
+        Assert.Empty(provider.PushedArtifacts);
+        Assert.Single(result.PushDecisions);
+        Assert.Contains("dry run", result.PushDecisions[0].Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.Single(result.Artifacts);
+        Assert.True(result.Artifacts[0].Pushed);
+        Assert.NotEmpty(result.Artifacts[0].Tags);
+    }
+
+    [Fact]
     public async Task GlobalPushGateCanBeOverriddenPerArtifact()
     {
         var provider = new RecordingArtifactProvider("docker");

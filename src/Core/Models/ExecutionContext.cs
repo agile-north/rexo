@@ -14,6 +14,7 @@ public sealed record ExecutionContext(
     public string? CiProvider { get; init; }
     public bool IsPullRequest { get; init; }
     public bool IsCleanWorkingTree { get; init; }
+    public bool IsDryRun { get; init; }
     public string? CiBuildId { get; init; }
     public string? CiRunNumber { get; init; }
     public string? CiWorkflowName { get; init; }

@@ -2105,6 +2105,7 @@
       "additionalProperties": false,
       "examples": [
         {
+          "dryRun": true,
           "push": {
             "enabled": true,
             "branches": ["main", "release/*"]
@@ -2112,6 +2113,11 @@
         }
       ],
       "properties": {
+        "dryRun": {
+          "type": "boolean",
+          "description": "Enables dry-run mode for the runtime. When true, external mutations are simulated instead of executed.",
+          "default": false
+        },
         "push": {
           "description": "Global push policy merged with per-artifact push overrides.",
           "$ref": "#/$defs/pushRules"
@@ -2130,6 +2136,11 @@
         }
       ],
       "properties": {
+        "dryRun": {
+          "type": "boolean",
+          "description": "Enables dry-run mode for push operations. This can be used to simulate pushes while leaving the global runtime mode unchanged.",
+          "default": false
+        },
         "enabled": {
           "type": "boolean",
           "description": "Enables or disables push globally.",

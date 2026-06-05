@@ -726,9 +726,9 @@ public sealed class ConfigCommandLoader
     {
         return artifact.Type.ToLowerInvariant() switch
         {
-            "docker" => ["DOCKER_LOGIN_USERNAME", "DOCKER_LOGIN_PASSWORD", "DOCKER_LOGIN_REGISTRY", "GITHUB_ACTOR/GITHUB_TOKEN (for ghcr.io in GitHub Actions)"],
+            "docker" => ["DOCKER_LOGIN_USERNAME", "DOCKER_LOGIN_PASSWORD", "DOCKER_LOGIN_REGISTRY", "GITHUB_ACTOR/GITHUB_TOKEN (for ghcr.io in GitHub Actions)", "CI_REGISTRY_USER/CI_JOB_TOKEN (for GitLab Container Registry in GitLab CI)"],
             "nuget" => [$"{TryGetArtifactSettingString(artifact.Settings, "target.apiKeyEnv") ?? "NUGET_API_KEY"}", "NUGET_AUTH_TOKEN", "GITHUB_TOKEN or SYSTEM_ACCESSTOKEN (CI fallback)"],
-            "helm-oci" => ["HELM_REGISTRY_USERNAME", "HELM_REGISTRY_PASSWORD", "HELM_REGISTRY", "GITHUB_ACTOR/GITHUB_TOKEN (for ghcr.io in GitHub Actions)"],
+            "helm-oci" => ["HELM_REGISTRY_USERNAME", "HELM_REGISTRY_PASSWORD", "HELM_REGISTRY", "GITHUB_ACTOR/GITHUB_TOKEN (for ghcr.io in GitHub Actions)", "CI_REGISTRY_USER/CI_JOB_TOKEN (for GitLab Container Registry in GitLab CI)"],
             _ => Array.Empty<string>(),
         };
     }
@@ -736,28 +736,36 @@ public sealed class ConfigCommandLoader
     private static IReadOnlyList<PlanCredentialCheck> GetCredentialChecks(RepoArtifactConfig artifact, string repositoryRoot)
     {
         var fileEnv = RepositoryEnvironmentFiles.Load(repositoryRoot);
+        var ciInferenceEnabled = IsArtifactCiInferenceEnabled(artifact.Settings);
 
         return artifact.Type.ToLowerInvariant() switch
         {
             "docker" =>
             [
                 ToPlanCredentialCheck(Artifacts.FeedAuthResolver.ResolveDocker(
-                    TryGetArtifactSettingString(artifact.Settings, "loginRegistry"),
+                    TryGetArtifactSettingString(artifact.Settings, "loginRegistry")
+                    ?? TryGetArtifactSettingString(artifact.Settings, "target.loginRegistry")
+                    ?? TryGetArtifactSettingString(artifact.Settings, "target.registry"),
                     InferDockerRegistry(TryGetArtifactSettingString(artifact.Settings, "image")),
-                    fileEnv))
+                    fileEnv,
+                    ciInferenceEnabled: ciInferenceEnabled))
             ],
             "nuget" =>
             [
                 ToPlanCredentialCheck(ResolvePlanNuGetAuth(
                     TryGetArtifactSettingString(artifact.Settings, "target.source") ?? "https://api.nuget.org/v3/index.json",
                     TryGetArtifactSettingString(artifact.Settings, "target.apiKeyEnv"),
-                    fileEnv))
+                    fileEnv,
+                    ciInferenceEnabled))
             ],
             "helm-oci" =>
             [
                 ToPlanCredentialCheck(ResolvePlanHelmOciAuth(
-                    TryGetArtifactSettingString(artifact.Settings, "registry"),
-                    fileEnv))
+                    TryGetArtifactSettingString(artifact.Settings, "target.loginRegistry")
+                    ?? TryGetArtifactSettingString(artifact.Settings, "target.registry")
+                    ?? Artifacts.FeedAuthResolver.ExtractRegistryHost(TryGetArtifactSettingString(artifact.Settings, "target.oci")),
+                    fileEnv,
+                    ciInferenceEnabled))
             ],
             _ => Array.Empty<PlanCredentialCheck>(),
         };
@@ -775,7 +783,8 @@ public sealed class ConfigCommandLoader
     private static Artifacts.FeedAuthResolution ResolvePlanNuGetAuth(
         string source,
         string? configuredApiKeyEnv,
-        IReadOnlyDictionary<string, string> fileEnv)
+        IReadOnlyDictionary<string, string> fileEnv,
+        bool ciInferenceEnabled)
     {
         var envName = string.IsNullOrWhiteSpace(configuredApiKeyEnv) ? "NUGET_API_KEY" : configuredApiKeyEnv;
         var secret = Artifacts.FeedAuthResolver.GetEnv(envName, fileEnv)
@@ -783,6 +792,11 @@ public sealed class ConfigCommandLoader
 
         if (string.IsNullOrWhiteSpace(secret))
         {
+            if (!ciInferenceEnabled)
+            {
+                return new Artifacts.FeedAuthResolution(false, null, null, source, null, "none");
+            }
+
             secret = source.Contains("nuget.pkg.github.com", StringComparison.OrdinalIgnoreCase)
                 ? Environment.GetEnvironmentVariable("GITHUB_TOKEN")
                 : Environment.GetEnvironmentVariable("SYSTEM_ACCESSTOKEN");
@@ -800,35 +814,38 @@ public sealed class ConfigCommandLoader
 
     private static Artifacts.FeedAuthResolution ResolvePlanHelmOciAuth(
         string? configuredRegistry,
-        IReadOnlyDictionary<string, string> fileEnv)
+        IReadOnlyDictionary<string, string> fileEnv,
+        bool ciInferenceEnabled)
     {
         var username = Artifacts.FeedAuthResolver.GetEnv("HELM_REGISTRY_USERNAME", fileEnv);
         var secret = Artifacts.FeedAuthResolver.GetEnv("HELM_REGISTRY_PASSWORD", fileEnv);
         var endpoint = Artifacts.FeedAuthResolver.GetEnv("HELM_REGISTRY", fileEnv) ?? configuredRegistry;
 
-        if (string.IsNullOrWhiteSpace(username) && string.IsNullOrWhiteSpace(secret))
+        if (string.IsNullOrWhiteSpace(endpoint))
         {
-            if (!string.IsNullOrWhiteSpace(endpoint) &&
-                endpoint.Contains("ghcr.io", StringComparison.OrdinalIgnoreCase))
-            {
-                var actor = Environment.GetEnvironmentVariable("GITHUB_ACTOR");
-                var token = Environment.GetEnvironmentVariable("GITHUB_TOKEN");
-                if (!string.IsNullOrWhiteSpace(actor) && !string.IsNullOrWhiteSpace(token))
-                {
-                    return new Artifacts.FeedAuthResolution(true, actor, token, endpoint, null, "github-token");
-                }
-            }
-
-            return new Artifacts.FeedAuthResolution(false, null, null, endpoint, null, "none");
+            endpoint = Artifacts.FeedAuthResolver.ResolveImplicitContainerRegistry(fileEnv, ciInferenceEnabled);
         }
 
-        if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(secret))
+        return Artifacts.FeedAuthResolver.FinalizeContainerRegistryAuth(
+            username,
+            secret,
+            endpoint,
+            fileEnv,
+            "HELM_REGISTRY_USERNAME and HELM_REGISTRY_PASSWORD must both be set.",
+            "Helm login registry could not be determined. Set settings.target.loginRegistry or HELM_REGISTRY.",
+            ciInferenceEnabled);
+    }
+
+    private static bool IsArtifactCiInferenceEnabled(Dictionary<string, JsonElement>? settings)
+    {
+        if (settings is null)
         {
-            return new Artifacts.FeedAuthResolution(false, null, null, endpoint,
-                "HELM_REGISTRY_USERNAME and HELM_REGISTRY_PASSWORD must both be set.", "env");
+            return true;
         }
 
-        return new Artifacts.FeedAuthResolution(true, username, secret, endpoint, null, "env");
+        return TryGetBool(settings, "ciInference")
+            ?? TryGetBool(settings, "target.ciInference")
+            ?? true;
     }
 
 

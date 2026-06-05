@@ -25,9 +25,56 @@ Available in any `run` step string:
 | `{{args.<name>}}` | Positional/named args from CLI |
 | `{{options.<name>}}` | Option flags from CLI |
 | `{{env.<VAR>}}` | Environment variables |
-| `{{repo.<field>}}` | Top-level config fields (name, version, …) |
+| `{{repo.<field>}}` | Repository/runtime metadata (root, branch, commitSha, shortSha, remoteUrl) |
+| `{{git.<field>}}` | Git metadata (branch, commitSha, shortSha, remoteUrl, isCleanWorkingTree) |
+| `{{ci.<field>}}` | CI metadata (isCi, provider, buildId, runNumber, workflowName, actor, tag, buildUrl, isPullRequest) |
+| `{{outputs.<path>}}` | Resolved output paths from `outputs` config |
+| `{{settings.<path>}}` | Resolved `settings` values |
+| `{{vars.<path>}}` | Resolved `vars` values |
 | `{{version.<field>}}` | Resolved version after `builtin:resolve-version` |
-| `{{steps.<id>.output.<key>}}` | Output from a completed step |
+| `{{steps.<id>.outputs.<key>}}` | Raw output from a completed step |
+| `{{steps.<id>.success}}` | Step success (`true`/`false`) |
+| `{{steps.<id>.exitCode}}` | Step exit code |
+| `{{push.<field>}}` | Aggregated push summary derived from step outputs |
+
+`repo.branch`, `repo.commitSha`, `repo.shortSha`, and `repo.remoteUrl` remain available for compatibility. Prefer `git.*` for new templates.
+
+### `version.*` fields
+
+When version is resolved, these fields are available:
+
+- `semver`
+- `major`, `minor`, `patch`
+- `prerelease`
+- `preReleaseTag`
+- `preReleaseLabel`
+- `preReleaseNumber`
+- `preReleaseLabelWithDash`
+- `preReleaseTagWithDash`
+- `commitSha`, `shortSha`
+- `isPrerelease`, `isStable`
+
+### `push.*` fields
+
+The push summary is derived from `__artifacts` and `__pushDecisions` emitted by push-related builtins/commands.
+
+- `hasData` (`true`/`false`)
+- `anyPushed` (`true`/`false`)
+- `pushedCount`
+- `artifactCount`
+- `decisionCount`
+- `allowedCount`
+- `deniedCount`
+- `anyBlocked` (`true`/`false`)
+- `blockReasons` (distinct denied reasons joined with ` | `)
+
+### `git.*` fields
+
+- `branch`
+- `commitSha`
+- `shortSha`
+- `remoteUrl`
+- `isCleanWorkingTree` (`true`/`false`)
 
 ---
 
@@ -104,6 +151,16 @@ This design enables policy-layer branching with missing vars defaulting graceful
   "with": {
     "confirm": "{{options.push}}"
   }
+}
+```
+
+### Push-aware branching
+
+```json
+{
+  "id": "notify-push-blocks",
+  "run": "echo Push blocked: {{push.blockReasons}}",
+  "when": "{{push.anyBlocked}}"
 }
 ```
 

@@ -208,7 +208,7 @@ the group (they cannot see each other's outputs within the same group).
 ### Output Capture
 
 - **`outputPattern`**: a .NET regex with named groups. Matched groups are stored in
-  `steps.<id>.output.<groupName>` and available to subsequent template steps.
+  `steps.<id>.outputs.<groupName>` and available to subsequent template steps.
 - **`outputFile`**: stdout is written to this path (relative to the repo root).
 
 ---

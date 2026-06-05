@@ -49,7 +49,8 @@ public sealed class DockerArtifactProvider : IArtifactProvider
 
             try
             {
-                var auth = await PrepareDockerAuthAsync(settings, context.RepositoryRoot, dotEnv, cancellationToken);
+                var ciInferenceEnabled = FeedAuthResolver.IsArtifactCiInferenceEnabled(artifact.Settings);
+                var auth = await PrepareDockerAuthAsync(settings, context.RepositoryRoot, dotEnv, ciInferenceEnabled, cancellationToken);
                 if (!auth.Success)
                 {
                     return new ArtifactBuildResult(artifact.Name, false, null);
@@ -157,7 +158,8 @@ public sealed class DockerArtifactProvider : IArtifactProvider
 
             try
             {
-                var auth = await PrepareDockerAuthAsync(settings, context.RepositoryRoot, dotEnv, cancellationToken);
+                var ciInferenceEnabled = FeedAuthResolver.IsArtifactCiInferenceEnabled(artifact.Settings);
+                var auth = await PrepareDockerAuthAsync(settings, context.RepositoryRoot, dotEnv, ciInferenceEnabled, cancellationToken);
                 if (!auth.Success)
                 {
                     if (settings.CleanupLocal && tags.Count > 0)
@@ -272,13 +274,15 @@ public sealed class DockerArtifactProvider : IArtifactProvider
         DockerBuildSettings settings,
         string workingDirectory,
         IReadOnlyDictionary<string, string> dotEnv,
+        bool ciInferenceEnabled,
         CancellationToken cancellationToken)
     {
         var envOverrides = BuildEnvironmentOverrides(dotEnv);
         var auth = FeedAuthResolver.ResolveDocker(
             configuredRegistry: settings.LoginRegistry,
             inferredRegistry: InferRegistryFromImage(settings.Image),
-            fileEnv: dotEnv);
+            fileEnv: dotEnv,
+            ciInferenceEnabled: ciInferenceEnabled);
 
         if (!string.IsNullOrWhiteSpace(auth.Error))
         {
@@ -288,6 +292,11 @@ public sealed class DockerArtifactProvider : IArtifactProvider
 
         if (!auth.HasCredentials)
         {
+            if (FeedAuthResolver.ShouldWarnOnMissingContainerRegistryCredentials(auth.Endpoint, dotEnv))
+            {
+                Console.WriteLine($"  Warning: no Docker login credentials resolved for '{auth.Endpoint}'. Push may fail unless the registry allows anonymous access.");
+            }
+
             return (true, envOverrides.Count > 0 ? envOverrides : null, null);
         }
 
@@ -614,6 +623,7 @@ public sealed class DockerArtifactProvider : IArtifactProvider
 
     private static string ResolveImage(ArtifactConfig artifact, IReadOnlyDictionary<string, string> dotEnv)
     {
+        var ciInferenceEnabled = FeedAuthResolver.IsArtifactCiInferenceEnabled(artifact.Settings);
         var explicitImage = GetStringSetting(artifact.Settings, "image");
         if (!string.IsNullOrWhiteSpace(explicitImage))
         {
@@ -625,14 +635,101 @@ public sealed class DockerArtifactProvider : IArtifactProvider
         var repository = GetEnvironmentValue("DOCKER_TARGET_REPOSITORY", dotEnv)
             ?? GetStringSetting(artifact.Settings, "target.repository", "repository");
 
-        if (!string.IsNullOrWhiteSpace(registry) && !string.IsNullOrWhiteSpace(repository))
+        var normalizedRegistry = !string.IsNullOrWhiteSpace(registry)
+            ? NormalizeRegistry(registry)
+            : null;
+
+        if (ciInferenceEnabled
+            && !string.IsNullOrWhiteSpace(normalizedRegistry)
+            && string.IsNullOrWhiteSpace(repository))
         {
-            var normalizedRegistry = NormalizeRegistry(registry);
+            repository = TryResolveImplicitRepository(normalizedRegistry, artifact.Name, dotEnv);
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalizedRegistry) && !string.IsNullOrWhiteSpace(repository))
+        {
             var normalizedRepository = NormalizeRepository(repository);
             return $"{normalizedRegistry}/{normalizedRepository}";
         }
 
+        if (ciInferenceEnabled)
+        {
+            var gitHubCiImage = TryResolveGitHubActionsImage(artifact.Name, dotEnv);
+            if (!string.IsNullOrWhiteSpace(gitHubCiImage))
+            {
+                return gitHubCiImage;
+            }
+
+            var gitLabCiImage = TryResolveGitLabCiImage(artifact.Name, dotEnv);
+            if (!string.IsNullOrWhiteSpace(gitLabCiImage))
+            {
+                return gitLabCiImage;
+            }
+        }
+
         return artifact.Name;
+    }
+
+    private static string? TryResolveImplicitRepository(
+        string normalizedRegistry,
+        string artifactName,
+        IReadOnlyDictionary<string, string> dotEnv)
+    {
+        if (string.Equals(normalizedRegistry, "ghcr.io", StringComparison.OrdinalIgnoreCase))
+        {
+            var githubActions = FeedAuthResolver.GetEnv("GITHUB_ACTIONS", dotEnv);
+            var githubRepository = FeedAuthResolver.GetEnv("GITHUB_REPOSITORY", dotEnv);
+            if (string.Equals(githubActions, "true", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(githubRepository))
+            {
+                return NormalizeRepository($"{githubRepository}/{artifactName}");
+            }
+        }
+
+        var gitLabRegistry = FeedAuthResolver.ExtractRegistryHost(FeedAuthResolver.GetEnv("CI_REGISTRY", dotEnv));
+        var gitLabProjectPath = FeedAuthResolver.GetEnv("CI_PROJECT_PATH", dotEnv);
+        if (!string.IsNullOrWhiteSpace(gitLabRegistry)
+            && string.Equals(normalizedRegistry, gitLabRegistry, StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(gitLabProjectPath))
+        {
+            return NormalizeRepository($"{gitLabProjectPath}/{artifactName}");
+        }
+
+        return null;
+    }
+
+    private static string? TryResolveGitLabCiImage(
+        string artifactName,
+        IReadOnlyDictionary<string, string> dotEnv)
+    {
+        var gitLabCi = FeedAuthResolver.GetEnv("GITLAB_CI", dotEnv);
+        var gitLabRegistry = FeedAuthResolver.GetEnv("CI_REGISTRY", dotEnv);
+        var gitLabProjectPath = FeedAuthResolver.GetEnv("CI_PROJECT_PATH", dotEnv);
+
+        if (!string.Equals(gitLabCi, "true", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(gitLabRegistry)
+            || string.IsNullOrWhiteSpace(gitLabProjectPath))
+        {
+            return null;
+        }
+
+        return $"{NormalizeRegistry(gitLabRegistry)}/{NormalizeRepository($"{gitLabProjectPath}/{artifactName}")}";
+    }
+
+    private static string? TryResolveGitHubActionsImage(
+        string artifactName,
+        IReadOnlyDictionary<string, string> dotEnv)
+    {
+        var githubActions = FeedAuthResolver.GetEnv("GITHUB_ACTIONS", dotEnv);
+        var githubRepository = FeedAuthResolver.GetEnv("GITHUB_REPOSITORY", dotEnv);
+
+        if (!string.Equals(githubActions, "true", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(githubRepository))
+        {
+            return null;
+        }
+
+        return $"ghcr.io/{NormalizeRepository($"{githubRepository}/{artifactName}")}";
     }
 
     private static string NormalizeRegistry(string value)

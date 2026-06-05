@@ -73,7 +73,7 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
         var symbolPattern = ResolveSymbolPattern(artifact, output, packageVersion);
         var fileEnv = RepositoryEnvironmentFiles.Load(context.RepositoryRoot);
         var source = ResolveSource(artifact, fileEnv);
-        var auth = ResolveAuth(source, GetSetting(artifact.Settings, "target.apiKeyEnv"), fileEnv);
+        var auth = ResolveAuth(artifact, source, GetSetting(artifact.Settings, "target.apiKeyEnv"), fileEnv);
         if (!auth.HasCredentials)
         {
             Console.Error.WriteLine("NuGet auth preflight failed: no API token resolved from env/CI identity.");
@@ -104,6 +104,7 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
         {
             var symbolSource = ResolveSymbolSource(artifact, source, fileEnv);
             var symbolAuth = ResolveSymbolAuth(
+                artifact,
                 symbolSource,
                 GetSetting(artifact.Settings, "symbols.apiKeyEnv"),
                 fileEnv,
@@ -249,11 +250,13 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
     }
 
     private static FeedAuthResolution ResolveSymbolAuth(
+        ArtifactConfig artifact,
         string source,
         string? configuredApiKeyEnv,
         IReadOnlyDictionary<string, string> fileEnv,
         string? primarySecret)
     {
+        var ciInferenceEnabled = FeedAuthResolver.IsArtifactCiInferenceEnabled(artifact.Settings);
         var secret = FeedAuthResolver.ResolveSecret(
             defaultEnvName: "NUGET_SYMBOL_API_KEY",
             configuredEnvName: configuredApiKeyEnv,
@@ -268,18 +271,34 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
 
         if (string.IsNullOrWhiteSpace(secret))
         {
-            if (source.Contains("nuget.pkg.github.com", StringComparison.OrdinalIgnoreCase))
+            var githubFallback = FeedAuthResolver.ResolveGitHubPackagesTokenAuth(
+                source,
+                fileEnv,
+                "nuget.pkg.github.com",
+                ciInferenceEnabled);
+            if (githubFallback.HasCredentials)
             {
-                secret = Environment.GetEnvironmentVariable("GITHUB_TOKEN");
-            }
-            else
-            {
-                secret = Environment.GetEnvironmentVariable("SYSTEM_ACCESSTOKEN");
+                return githubFallback;
             }
 
-            if (!string.IsNullOrWhiteSpace(secret))
+            var gitLabFallback = FeedAuthResolver.ResolveGitLabPackageTokenAuth(
+                source,
+                fileEnv,
+                username: null,
+                ciInferenceEnabled: ciInferenceEnabled);
+            if (gitLabFallback.HasCredentials)
             {
-                return new FeedAuthResolution(true, null, secret, source, null, "ci-token");
+                return gitLabFallback;
+            }
+
+            var azureFallback = FeedAuthResolver.ResolveAzureArtifactsTokenAuth(
+                source,
+                fileEnv,
+                username: null,
+                ciInferenceEnabled: ciInferenceEnabled);
+            if (azureFallback.HasCredentials)
+            {
+                return azureFallback;
             }
 
             return new FeedAuthResolution(false, null, null, source, null, "none");
@@ -386,10 +405,12 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
     /// for Azure Artifacts.
     /// </summary>
     private static FeedAuthResolution ResolveAuth(
+        ArtifactConfig artifact,
         string source,
         string? configuredApiKeyEnv,
         IReadOnlyDictionary<string, string> fileEnv)
     {
+        var ciInferenceEnabled = FeedAuthResolver.IsArtifactCiInferenceEnabled(artifact.Settings);
         var secret = FeedAuthResolver.ResolveSecret(
             defaultEnvName: "NUGET_API_KEY",
             configuredEnvName: configuredApiKeyEnv,
@@ -398,18 +419,34 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
 
         if (string.IsNullOrWhiteSpace(secret))
         {
-            if (source.Contains("nuget.pkg.github.com", StringComparison.OrdinalIgnoreCase))
+            var githubFallback = FeedAuthResolver.ResolveGitHubPackagesTokenAuth(
+                source,
+                fileEnv,
+                "nuget.pkg.github.com",
+                ciInferenceEnabled);
+            if (githubFallback.HasCredentials)
             {
-                secret = Environment.GetEnvironmentVariable("GITHUB_TOKEN");
-            }
-            else
-            {
-                secret = Environment.GetEnvironmentVariable("SYSTEM_ACCESSTOKEN");
+                return githubFallback;
             }
 
-            if (!string.IsNullOrWhiteSpace(secret))
+            var gitLabFallback = FeedAuthResolver.ResolveGitLabPackageTokenAuth(
+                source,
+                fileEnv,
+                username: null,
+                ciInferenceEnabled: ciInferenceEnabled);
+            if (gitLabFallback.HasCredentials)
             {
-                return new FeedAuthResolution(true, null, secret, source, null, "ci-token");
+                return gitLabFallback;
+            }
+
+            var azureFallback = FeedAuthResolver.ResolveAzureArtifactsTokenAuth(
+                source,
+                fileEnv,
+                username: null,
+                ciInferenceEnabled: ciInferenceEnabled);
+            if (azureFallback.HasCredentials)
+            {
+                return azureFallback;
             }
 
             return new FeedAuthResolution(false, null, null, source, null, "none");

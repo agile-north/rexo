@@ -52,11 +52,17 @@ public sealed class DockerComposeArtifactProvider : IArtifactProvider
     {
         var workDir = context.RepositoryRoot;
         var fileEnv = RepositoryEnvironmentFiles.Load(context.RepositoryRoot);
+        var ciInferenceEnabled = FeedAuthResolver.IsArtifactCiInferenceEnabled(artifact.Settings);
         var registry = FeedAuthResolver.ResolveTargetValue(
             defaultEnvName: "DOCKER_COMPOSE_TARGET_REGISTRY",
             configuredEnvName: GetSetting(artifact, "target.registryEnv"),
             configuredValue: GetSetting(artifact, "target.registry"),
             fileEnv: fileEnv);
+
+        if (string.IsNullOrWhiteSpace(registry))
+        {
+            registry = FeedAuthResolver.ResolveImplicitContainerRegistry(fileEnv, ciInferenceEnabled);
+        }
 
         // docker login before push
         if (!string.IsNullOrWhiteSpace(registry))
@@ -67,12 +73,17 @@ public sealed class DockerComposeArtifactProvider : IArtifactProvider
                 fileEnv: fileEnv,
                 configuredUsernameEnv: GetSetting(artifact, "target.usernameEnv"),
                 configuredPasswordEnv: GetSetting(artifact, "target.passwordEnv"),
-                configuredRegistryEnv: GetSetting(artifact, "target.loginRegistryEnv"));
+                configuredRegistryEnv: GetSetting(artifact, "target.loginRegistryEnv"),
+                ciInferenceEnabled: ciInferenceEnabled);
             if (auth.HasCredentials)
             {
                 var loginArgs = new List<string> { "login", registry, "-u", auth.Username ?? string.Empty, "--password-stdin" };
                 Console.WriteLine($"  > docker login {registry}");
                 await RunDockerWithStdinAsync(loginArgs, workDir, auth.Secret ?? string.Empty, cancellationToken);
+            }
+            else if (FeedAuthResolver.ShouldWarnOnMissingContainerRegistryCredentials(auth.Endpoint, fileEnv))
+            {
+                Console.WriteLine($"  Warning: no Docker Compose login credentials resolved for '{auth.Endpoint}'. Push may fail unless the registry allows anonymous access.");
             }
         }
 

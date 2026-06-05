@@ -63,6 +63,26 @@ public sealed class TemplateRendererTests
     }
 
     [Fact]
+    public void RenderResolvesGitVariables()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = ExecutionContext.Empty("C:\\repo") with
+        {
+            Branch = "feature/demo",
+            CommitSha = "abcdef1234567890",
+            ShortSha = "abcdef1",
+            RemoteUrl = "https://github.com/agile-north/rexo",
+            IsCleanWorkingTree = true,
+        };
+
+        Assert.Equal("feature/demo", renderer.Render("{{git.branch}}", ctx));
+        Assert.Equal("abcdef1234567890", renderer.Render("{{git.commitSha}}", ctx));
+        Assert.Equal("abcdef1", renderer.Render("{{git.shortSha}}", ctx));
+        Assert.Equal("https://github.com/agile-north/rexo", renderer.Render("{{git.remoteUrl}}", ctx));
+        Assert.Equal("true", renderer.Render("{{git.isCleanWorkingTree}}", ctx));
+    }
+
+    [Fact]
     public void RenderAppliesSlugFilter()
     {
         var renderer = new TemplateRenderer();
@@ -524,5 +544,60 @@ public sealed class TemplateRendererTests
         Assert.Equal(
             "/p:ErrorLog=artifacts/analysis/sarif/dotnet-build.sarif",
             renderer.Render("{{args.dir | suffix('/dotnet-build.sarif') | prefix('/p:ErrorLog=')}}", ctx));
+    }
+
+    [Fact]
+    public void RenderResolvesPushSummaryDefaultsWhenNoPushStepsHaveRun()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext();
+
+        Assert.Equal("false", renderer.Render("{{push.hasData}}", ctx));
+        Assert.Equal("false", renderer.Render("{{push.anyPushed}}", ctx));
+        Assert.Equal("0", renderer.Render("{{push.pushedCount}}", ctx));
+        Assert.Equal("", renderer.Render("{{push.blockReasons}}", ctx));
+    }
+
+    [Fact]
+    public void RenderResolvesPushSummaryFromCompletedStepOutputs()
+    {
+        var renderer = new TemplateRenderer();
+        var pushStep = new StepResult(
+            "push",
+            true,
+            0,
+            TimeSpan.Zero,
+            new Dictionary<string, object?>
+            {
+                ["__artifacts"] = new List<ArtifactManifestEntry>
+                {
+                    new("docker", "api", true, true, ["ghcr.io/org/api:1.2.3"]),
+                    new("npm", "sdk", true, false, []),
+                },
+                ["__pushDecisions"] = new List<PushDecision>
+                {
+                    new("api", true, "Push succeeded."),
+                    new("sdk", false, "Push disabled by policy."),
+                    new("cli", false, "Push disabled by policy."),
+                },
+            });
+
+        var ctx = MakeContext() with
+        {
+            CompletedSteps = new Dictionary<string, StepResult>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["push"] = pushStep,
+            },
+        };
+
+        Assert.Equal("true", renderer.Render("{{push.hasData}}", ctx));
+        Assert.Equal("true", renderer.Render("{{push.anyPushed}}", ctx));
+        Assert.Equal("1", renderer.Render("{{push.pushedCount}}", ctx));
+        Assert.Equal("2", renderer.Render("{{push.artifactCount}}", ctx));
+        Assert.Equal("3", renderer.Render("{{push.decisionCount}}", ctx));
+        Assert.Equal("1", renderer.Render("{{push.allowedCount}}", ctx));
+        Assert.Equal("2", renderer.Render("{{push.deniedCount}}", ctx));
+        Assert.Equal("true", renderer.Render("{{push.anyBlocked}}", ctx));
+        Assert.Equal("Push disabled by policy.", renderer.Render("{{push.blockReasons}}", ctx));
     }
 }

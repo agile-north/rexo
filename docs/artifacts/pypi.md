@@ -15,6 +15,7 @@
 | `target.apiTokenEnv` | `string` | Env var name containing API token (default env key `TWINE_API_TOKEN`). |
 | `target.usernameEnv` | `string` | Env var name containing username (default env key `TWINE_USERNAME`). |
 | `target.passwordEnv` | `string` | Env var name containing password (default env key `TWINE_PASSWORD`). |
+| `ciInference` | `boolean` | Enable CI token fallback (`SYSTEM_ACCESSTOKEN` for Azure Artifacts URLs) (default `true`; alias `target.ciInference`). |
 | `dist-dir` | `string` | Upload pattern (default `dist/*`). |
 | `useDocker` | `boolean` | Docker fallback toggle (default `true`). |
 | `dockerImage` | `string` | Fallback image override (default `python:3-slim`). |
@@ -32,7 +33,12 @@ Credential resolution order:
 
 1. Env value from `settings.target.apiTokenEnv` (or `TWINE_API_TOKEN`) (username becomes `__token__`)
 2. Env value from `settings.target.usernameEnv` + `settings.target.passwordEnv` (defaults `TWINE_USERNAME` + `TWINE_PASSWORD`)
-3. `SYSTEM_ACCESSTOKEN` for Azure Artifacts URLs (`pkgs.dev.azure.com` / `.pkgs.visualstudio.com`)
+3. `SYSTEM_ACCESSTOKEN` for Azure Artifacts URLs (`pkgs.dev.azure.com` / `.pkgs.visualstudio.com`) via shared package CI fallback
+
+CI inference toggle:
+
+- `settings.ciInference` (or `settings.target.ciInference`) defaults to `true`
+- set to `false` to disable CI token fallback for this artifact
 
 Credentials are injected into the push process as `TWINE_USERNAME` and `TWINE_PASSWORD`.
 

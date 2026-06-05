@@ -132,6 +132,7 @@ public sealed class MavenArtifactProvider : IArtifactProvider
         ArtifactConfig artifact,
         IReadOnlyDictionary<string, string> fileEnv)
     {
+        var ciInferenceEnabled = FeedAuthResolver.IsArtifactCiInferenceEnabled(artifact.Settings);
         var username = FeedAuthResolver.ResolveSecret(
             defaultEnvName: "MAVEN_REPO_USERNAME",
             configuredEnvName: GetSetting(artifact, "target.usernameEnv"),
@@ -146,10 +147,15 @@ public sealed class MavenArtifactProvider : IArtifactProvider
             return new FeedAuthResolution(true, username, password, null, null, "env");
         }
 
-        var accessToken = Environment.GetEnvironmentVariable("SYSTEM_ACCESSTOKEN");
-        if (!string.IsNullOrWhiteSpace(accessToken))
+        var azureFallback = FeedAuthResolver.ResolveAzureArtifactsTokenAuth(
+            endpoint: null,
+            fileEnv: fileEnv,
+            username: "VssSessionToken",
+            allowWhenEndpointUnknown: true,
+            ciInferenceEnabled: ciInferenceEnabled);
+        if (azureFallback.HasCredentials)
         {
-            return new FeedAuthResolution(true, "VssSessionToken", accessToken, null, null, "ci-token");
+            return azureFallback;
         }
 
         return new FeedAuthResolution(false, null, null, null, null, "none");

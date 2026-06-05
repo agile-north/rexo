@@ -13,6 +13,7 @@
 | `target.registry` | `string` | Registry URL (default npmjs). |
 | `target.registryEnv` | `string` | Env var name containing registry URL (default env key `NPM_TARGET_REGISTRY`). |
 | `target.tokenEnv` | `string` | Env var name containing auth token (default env key `NPM_TOKEN`). |
+| `ciInference` | `boolean` | Enable CI token fallback (`GITHUB_TOKEN` / `CI_JOB_TOKEN` / `SYSTEM_ACCESSTOKEN`) (default `true`; alias `target.ciInference`). |
 | `access` | `public` \| `restricted` | Publish access level. |
 | `tag` | `string` | Dist-tag for publish (default resolved version). |
 | `useDocker` | `boolean` | Docker fallback toggle (default `true`). |
@@ -26,7 +27,14 @@ Token resolution order:
 
 1. `settings.target.tokenEnv` (or `NPM_TOKEN` when not set)
 2. `NODE_AUTH_TOKEN`
-3. `GITHUB_TOKEN` when resolved registry targets `npm.pkg.github.com`
+3. `GITHUB_TOKEN` when resolved registry targets `npm.pkg.github.com` (shared package CI fallback)
+4. `CI_JOB_TOKEN` when resolved registry is an explicit GitLab Package Registry npm endpoint (`.../api/v4/projects/<id>/packages/npm/`)
+5. `SYSTEM_ACCESSTOKEN` when resolved registry is an Azure Artifacts endpoint (`pkgs.dev.azure.com` / `.pkgs.visualstudio.com`)
+
+CI inference toggle:
+
+- `settings.ciInference` (or `settings.target.ciInference`) defaults to `true`
+- set to `false` to disable CI token fallback for this artifact
 
 Registry resolution order:
 

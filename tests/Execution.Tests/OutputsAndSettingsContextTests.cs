@@ -27,7 +27,7 @@ public sealed class OutputsAndSettingsContextTests
         Assert.Equal("artifacts/packages", ctx["packages"]);
         Assert.Equal("artifacts/manifests", ctx["manifests"]);
         Assert.Equal("artifacts/logs", ctx["logs"]);
-        Assert.Equal(".rexo/temp", ctx["temp"]);
+        Assert.Equal("artifacts/tmp", ctx["temp"]);
 
         var tests = Assert.IsType<Dictionary<string, object?>>(ctx["tests"]);
         Assert.Equal("artifacts/tests", tests["results"]);
@@ -85,6 +85,28 @@ public sealed class OutputsAndSettingsContextTests
     }
 
     [Fact]
+    public void BuildOutputsContextPlainRelativePathsAreRepoRelative()
+    {
+        var config = EmptyConfig() with
+        {
+            Outputs = new RepoOutputsConfig
+            {
+                Tests = new RepoTestOutputPathsConfig
+                {
+                    Results = "custom/test-results",
+                    Coverage = "custom/cov",
+                },
+            },
+        };
+
+        var ctx = ConfigCommandLoader.BuildOutputsContext(config);
+
+        var tests = Assert.IsType<Dictionary<string, object?>>(ctx["tests"]);
+        Assert.Equal("custom/test-results", tests["results"]);
+        Assert.Equal("custom/cov", tests["coverage"]);
+    }
+
+    [Fact]
     public void BuildOutputsContextCustomAnalysisPathsOverridesDefaults()
     {
         var config = EmptyConfig() with
@@ -104,6 +126,27 @@ public sealed class OutputsAndSettingsContextTests
         var analysis = Assert.IsType<Dictionary<string, object?>>(ctx["analysis"]);
         Assert.Equal("custom/reports", analysis["reports"]);
         Assert.Equal("custom/sarif", analysis["sarif"]);
+    }
+
+    [Fact]
+    public void BuildOutputsContextRootRelativePathUsesRootBase()
+    {
+        var config = EmptyConfig() with
+        {
+            Outputs = new RepoOutputsConfig
+            {
+                Root = "out",
+                Manifests = new RepoManifestOutputsConfig { Path = "~/manifests" },
+                Tests = new RepoTestOutputPathsConfig { Results = "~/test-results" },
+            },
+        };
+
+        var ctx = ConfigCommandLoader.BuildOutputsContext(config);
+
+        Assert.Equal("out/manifests", ctx["manifests"]);
+
+        var tests = Assert.IsType<Dictionary<string, object?>>(ctx["tests"]);
+        Assert.Equal("out/test-results", tests["results"]);
     }
 
     // ----------------------------------------------------------------

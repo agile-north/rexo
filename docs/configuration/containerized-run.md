@@ -99,6 +99,36 @@ This fallback is step-local. Other steps continue with their configured behavior
 
 ---
 
+## Runtime Visibility
+
+Rexo now emits execution-mode signals for run steps so you can see how a step ran.
+
+Normal output includes:
+
+- container intent line (image, in-container working directory, mount root)
+- container command line marker
+- explicit native fallback marker when Docker is unavailable
+
+Example markers:
+
+- `[container] image=... workdir=... mount=/work`
+- `[container:<image>] <command>`
+- `[native:fallback] <command>`
+
+With `--debug`, Rexo also logs container materialization details (Docker argv and
+environment merge summary counts).
+
+Run manifests include per-step execution metadata:
+
+- `executionMode`
+- `requestedExecutionMode`
+- `containerImage`
+- `containerWorkingDirectory`
+- `containerFallbackUsed`
+- `containerFallbackReason`
+
+---
+
 ## Output and Templates
 
 Containerized run steps preserve existing run-step features:

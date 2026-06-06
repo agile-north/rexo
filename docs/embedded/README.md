@@ -21,6 +21,11 @@ Current embedded policies:
 
 - [standard](standard.md) — General lifecycle commands (`build`, `test`, `verify`, `release`, `push`, etc.)
 - [dotnet](dotnet.md) — Dotnet-focused command surface with `restore`, `format`, `ci` helpers
+- [git-tag](git-tag.md) — Generic git tag creation for versioned repositories
+- [github-status](github-status.md) — GitHub commit status or check run publishing for test/coverage metadata and CI-aware GitHub Actions handling
+- [github-sarif](github-sarif.md) — GitHub SARIF security scan upload after push
+- [gitlab-status](gitlab-status.md) — GitLab commit status publishing after push
+- [github-release](github-release.md) — GitHub CLI release automation for `post-push` (recommended with `embedded:standard`, but callable directly when composed into custom flows)
 
 Embedded policies are never applied implicitly.
 
@@ -71,6 +76,10 @@ Choose `embedded:dotnet` when:
 
 - [standard](standard.md) — lifecycle commands, plan/verify/build/release/push
 - [dotnet](dotnet.md) — dotnet-specific commands, restore/format/ci/pack with optional var-driven customization
+- [git-tag](git-tag.md) — generic git tag creation for versioned repositories
+- [github-status](github-status.md) — GitHub commit status publishing after push
+- [gitlab-status](gitlab-status.md) — GitLab commit status publishing after push
+- [github-release](github-release.md) — GitHub CLI release automation for standard lifecycle `post-push`
 
 ## Builtins Used By Embedded Templates
 

@@ -552,6 +552,11 @@ public sealed class CliSmokeTests
             var output = await File.ReadAllTextAsync(outFile);
             Assert.Contains("standard", output, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("dotnet", output, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("git-tag", output, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("github-status", output, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("github-sarif", output, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("gitlab-status", output, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("github-release", output, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("none", output, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("node", output, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("dotnet-library", output, StringComparison.OrdinalIgnoreCase);

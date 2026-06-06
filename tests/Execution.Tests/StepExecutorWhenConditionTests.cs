@@ -437,6 +437,30 @@ public sealed class StepExecutorWhenConditionTests
         Assert.Contains("true|2.0.1", stdout, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task RunStepOutputsExecutionMetadataForNativeRun()
+    {
+        var executor = CreateExecutor();
+
+        var run = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? "echo native-run"
+            : "echo native-run";
+
+        var step = new StepDefinition(
+            Id: "execution-metadata",
+            Run: run,
+            Uses: null,
+            Command: null,
+            When: null);
+
+        var result = await executor.ExecuteAsync(step, EmptyContext(), CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Equal("native", result.Outputs["__executionMode"]?.ToString());
+        Assert.Equal("native", result.Outputs["__requestedExecutionMode"]?.ToString());
+        Assert.Equal("False", result.Outputs["__containerFallbackUsed"]?.ToString());
+    }
+
     // ──────────────────────────────────────────────────────────────────────────
     // Cross-command cycle detection: REXO-CMD-CYCLE
     // ──────────────────────────────────────────────────────────────────────────

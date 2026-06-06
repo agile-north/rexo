@@ -1,0 +1,56 @@
+{
+  "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/policy.schema.json",
+  "schemaVersion": "1.0",
+  "name": "git-tag-policy",
+  "description": "Generic git tagging automation for versioned repositories.",
+  "commands": {
+    "post-push": {
+      "description": "Create and push a git tag for the resolved version if it does not already exist.",
+      "options": {
+        "remote": {
+          "type": "string",
+          "default": "origin"
+        },
+        "force": {
+          "type": "bool",
+          "default": false
+        }
+      },
+      "steps": [
+        {
+          "id": "resolve-version",
+          "uses": "builtin:resolve-version"
+        },
+        {
+          "id": "tag-exists",
+          "run": "git fetch --tags {{options.remote}} && if git rev-parse --verify --quiet \"refs/tags/{{version.SemVer}}\" >/dev/null 2>&1; then echo TAG_EXISTS; fi",
+          "outputPattern": "TAG_EXISTS",
+          "continueOnError": true,
+          "when": "{{options.dry-run}} != 'true'",
+          "container": {
+            "image": "docker.io/alpine/git:latest",
+            "workingDirectory": "/work"
+          }
+        },
+        {
+          "id": "delete-existing-tag",
+          "run": "git push {{options.remote}} --delete \"refs/tags/{{version.SemVer}}\" || true && git tag -d \"{{version.SemVer}}\" || true",
+          "when": "{{options.force}} == 'true' && {{options.dry-run}} != 'true'",
+          "container": {
+            "image": "docker.io/alpine/git:latest",
+            "workingDirectory": "/work"
+          }
+        },
+        {
+          "id": "create-tag",
+          "run": "git tag \"{{version.SemVer}}\" && git push {{options.remote}} \"{{version.SemVer}}\"",
+          "when": "{{options.dry-run}} != 'true' && ({{options.force}} == 'true' || {{steps.tag-exists.outputs.TAG_EXISTS}} != 'TAG_EXISTS')",
+          "container": {
+            "image": "docker.io/alpine/git:latest",
+            "workingDirectory": "/work"
+          }
+        }
+      ]
+    }
+  }
+}

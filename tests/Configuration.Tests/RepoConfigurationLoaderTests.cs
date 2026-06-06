@@ -1413,18 +1413,39 @@ public sealed class RepoConfigurationLoaderTests
   }
 
   [Fact]
-  public void EmbeddedTemplateNamesIncludesDotnetAndNode()
-  {
-    var names = EmbeddedPolicyTemplates.TemplateNames;
-    Assert.Contains("dotnet", names);
+    public void EmbeddedTemplateNamesIncludesDotnetNodeGitTagBuildStatusGitLabStatusAndGitHubRelease()
+    {
+        var names = EmbeddedPolicyTemplates.TemplateNames;
+        Assert.Contains("dotnet", names);
     Assert.Contains("node", names);
-    Assert.DoesNotContain("dotnet-library", names);
-    Assert.DoesNotContain("dotnet-api", names);
+        Assert.Contains("git-tag", names);
+        Assert.Contains("github-status", names);
+        Assert.Contains("github-sarif", names);
+        Assert.Contains("gitlab-status", names);
+        Assert.Contains("github-release", names);
+        Assert.DoesNotContain("dotnet-library", names);
+        Assert.DoesNotContain("dotnet-api", names);
   }
 
-  [Fact]
-  public void EmbeddedNodeTemplateHasExpectedCommands()
-  {
+    [Fact]
+    public void EmbeddedGitHubReleaseTemplateProvidesPostPushCommand()
+    {
+        using var document = JsonDocument.Parse(EmbeddedPolicyTemplates.ReadTemplate("github-release"));
+        var root = document.RootElement;
+        var commands = root.GetProperty("commands");
+
+        Assert.True(commands.TryGetProperty("post-push", out var command));
+        var steps = command.GetProperty("steps");
+        Assert.Equal(4, steps.GetArrayLength());
+
+        var releaseStep = steps[3];
+        Assert.Equal("release", releaseStep.GetProperty("id").GetString());
+        Assert.Contains("gh release create", releaseStep.GetProperty("run").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EmbeddedNodeTemplateHasExpectedCommands()
+    {
     using var document = JsonDocument.Parse(EmbeddedPolicyTemplates.ReadTemplate("node"));
     var root = document.RootElement;
     var commands = root.GetProperty("commands");

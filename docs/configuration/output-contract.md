@@ -121,6 +121,38 @@ Template linkage:
 
 Written only when `--json-file` is provided.
 
+## Command Manifest Files (`outputs.manifests`)
+
+When `outputs.emit` is true (default), Rexo writes command manifests under
+`outputs.manifests.path` (default `~/manifests`, which resolves under `outputs.root`).
+
+Paths that begin with `~/` are rooted under `outputs.root`. Plain relative paths are
+repo-relative.
+
+Default strategy is optimized for low noise:
+
+- `outputs.manifests.commandMode: "aggregate"` (default): writes `commands.json` containing all commands in one file.
+- `outputs.manifests.commandMode: "single"`: alias for aggregate; also writes `commands.json`.
+- `outputs.manifests.commandDetail: "summary"` (default): concise payload only
+
+Optional verbose strategies:
+
+- `outputs.manifests.commandMode: "perCommand"`: writes `<command>.json` files
+- `outputs.manifests.commandDetail: "verbose"`: includes full `CommandResult`
+
+Example:
+
+```jsonc
+"outputs": {
+  "root": "artifacts",
+  "manifests": {
+    "path": "~/manifests",
+    "commandMode": "perCommand",
+    "commandDetail": "verbose"
+  }
+}
+```
+
 Example shape:
 
 ```jsonc

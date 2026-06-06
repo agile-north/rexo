@@ -1883,7 +1883,7 @@
     "outputsConfig": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Output path contract. All paths default to subdirectories under the root output folder.",
+      "description": "Output path contract. Paths default to subdirectories under the root output folder unless a plain relative path is provided, in which case the path is treated as repo-relative.",
       "properties": {
         "emit": {
           "type": "boolean",
@@ -2058,17 +2058,17 @@
             "results": {
               "type": "string",
               "description": "Directory for test result files (e.g. TRX, JUnit XML).",
-              "default": "artifacts/tests"
+              "default": "~/tests"
             },
             "coverage": {
               "type": "string",
               "description": "Directory for coverage data files.",
-              "default": "artifacts/coverage"
+              "default": "~/coverage"
             },
             "reports": {
               "type": "string",
               "description": "Directory for generated coverage reports (HTML, etc.).",
-              "default": "artifacts/coverage/reports"
+              "default": "~/tests/reports"
             }
           }
         },
@@ -2080,12 +2080,12 @@
             "reports": {
               "type": "string",
               "description": "Directory for analysis report files.",
-              "default": "artifacts/analysis"
+              "default": "~/analysis"
             },
             "sarif": {
               "type": "string",
               "description": "SARIF output directory.",
-              "default": "artifacts/analysis/sarif"
+              "default": "~/analysis/sarif"
             }
           }
         },
@@ -2097,39 +2097,65 @@
             "audit": {
               "type": "string",
               "description": "Full file path for the npm/security audit JSON output.",
-              "default": "artifacts/security/audit.json"
+              "default": "~/security/audit.json"
             },
             "reports": {
               "type": "string",
               "description": "Security report output directory.",
-              "default": "artifacts/security"
+              "default": "~/security"
             },
             "sarif": {
               "type": "string",
               "description": "SARIF output directory for security findings.",
-              "default": "artifacts/security/sarif"
+              "default": "~/security/sarif"
             }
           }
         },
         "packages": {
           "type": "string",
           "description": "Directory for built artifact packages (NuGet, npm, Helm charts, etc.).",
-          "default": "artifacts/packages"
+          "default": "~/packages"
         },
         "manifests": {
-          "type": "string",
-          "description": "Directory for runtime manifest JSON files.",
-          "default": "artifacts/manifests"
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Manifest output settings.",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Directory for command/runtime manifest files. Use ~/... to resolve relative to outputs.root; plain relative paths are repo-relative.",
+              "default": "~/manifests"
+            },
+            "commandMode": {
+              "type": "string",
+              "description": "Command manifest file strategy. Use aggregate for one file containing all commands, perCommand for one file per command, or single as an alias for aggregate.",
+              "default": "aggregate",
+              "enum": [
+                "single",
+                "perCommand",
+                "aggregate"
+              ]
+            },
+            "commandDetail": {
+              "type": "string",
+              "description": "Command manifest detail level. Use summary for concise output or verbose for full command result payload.",
+              "default": "summary",
+              "enum": [
+                "summary",
+                "verbose"
+              ]
+            }
+          }
         },
         "logs": {
           "type": "string",
           "description": "Directory for CI log files.",
-          "default": "artifacts/logs"
+          "default": "~/logs"
         },
         "temp": {
           "type": "string",
           "description": "Scratch directory for intermediate build artifacts.",
-          "default": "artifacts/tmp"
+          "default": "~/tmp"
         }
       }
     },

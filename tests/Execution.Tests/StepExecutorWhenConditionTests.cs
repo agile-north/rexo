@@ -1,5 +1,6 @@
 namespace Rexo.Execution.Tests;
 
+using System.Runtime.InteropServices;
 using Rexo.Core.Models;
 using Rexo.Templating;
 
@@ -362,6 +363,78 @@ public sealed class StepExecutorWhenConditionTests
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("no run, uses, or command", result.Outputs["error"]?.ToString() ?? string.Empty,
             StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RunStepReceivesCoreRexoEnvironmentVariables()
+    {
+        var executor = CreateExecutor();
+        var version = new VersionResult("1.2.3", 1, 2, 3, null, "abcdef", "abcdef", false, true);
+        var context = EmptyContext() with
+        {
+            Version = version,
+            CompletedSteps = new Dictionary<string, StepResult>
+            {
+                ["push"] = new StepResult(
+                    "push",
+                    true,
+                    0,
+                    TimeSpan.Zero,
+                    new Dictionary<string, object?>
+                    {
+                        ["__pushDecisions"] = new List<PushDecision>
+                        {
+                            new("artifact-a", true, "ok"),
+                        },
+                    }),
+            },
+        };
+
+        var run = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? "echo %REXO_SUCCESS%^|%REXO_VERSION_SEM_VER%^|%REXO_PUSH_DECISIONS_COUNT%"
+            : "echo \"$REXO_SUCCESS|$REXO_VERSION_SEM_VER|$REXO_PUSH_DECISIONS_COUNT\"";
+
+        var step = new StepDefinition(
+            Id: "env-vars",
+            Run: run,
+            Uses: null,
+            Command: null,
+            When: null);
+
+        var result = await executor.ExecuteAsync(step, context, CancellationToken.None);
+
+        Assert.True(result.Success);
+        var stdout = result.Outputs["stdout"]?.ToString() ?? string.Empty;
+        Assert.Contains("true|1.2.3|1", stdout, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RunStepUsesConfiguredRexoEnvironmentPrefix()
+    {
+        var executor = CreateExecutor();
+        var version = new VersionResult("2.0.1", 2, 0, 1, null, "abcdef", "abcdef", false, true);
+        var context = EmptyContext() with
+        {
+            Version = version,
+            CiVariablePrefix = "MY_",
+        };
+
+        var run = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+            ? "echo %MY_SUCCESS%^|%MY_VERSION_SEM_VER%"
+            : "echo \"$MY_SUCCESS|$MY_VERSION_SEM_VER\"";
+
+        var step = new StepDefinition(
+            Id: "env-prefix",
+            Run: run,
+            Uses: null,
+            Command: null,
+            When: null);
+
+        var result = await executor.ExecuteAsync(step, context, CancellationToken.None);
+
+        Assert.True(result.Success);
+        var stdout = result.Outputs["stdout"]?.ToString() ?? string.Empty;
+        Assert.Contains("true|2.0.1", stdout, StringComparison.OrdinalIgnoreCase);
     }
 
     // ──────────────────────────────────────────────────────────────────────────

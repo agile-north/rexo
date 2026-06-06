@@ -2,6 +2,7 @@ namespace Rexo.Execution;
 
 using System.Collections;
 using System.Text.RegularExpressions;
+using Rexo.Ci;
 using Rexo.Core.Abstractions;
 using Rexo.Core.Models;
 
@@ -245,6 +246,11 @@ public sealed class StepExecutor : IStepExecutor
             env[key] = value;
         }
 
+        foreach (var (key, value) in BuildRexoStepEnvironment(context))
+        {
+            env[key] = value;
+        }
+
         if (container.Env is { Count: > 0 })
         {
             foreach (var (key, value) in container.Env)
@@ -258,18 +264,114 @@ public sealed class StepExecutor : IStepExecutor
 
     private static Dictionary<string, string?> BuildNativeRunEnvironment(ExecutionContext context)
     {
-        if (context.FileEnvironment.Count == 0)
-        {
-            return new Dictionary<string, string?>(StringComparer.Ordinal);
-        }
-
         var env = new Dictionary<string, string?>(StringComparer.Ordinal);
         foreach (var (key, value) in context.FileEnvironment)
         {
             env[key] = value;
         }
 
+        foreach (var (key, value) in BuildRexoStepEnvironment(context))
+        {
+            env[key] = value;
+        }
+
         return env;
+    }
+
+    private static Dictionary<string, string> BuildRexoStepEnvironment(ExecutionContext context)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var commandName = context.CommandCallStack.Count > 0
+            ? context.CommandCallStack[^1]
+            : string.Empty;
+
+        var manifest = new RunManifest
+        {
+            RepoName = Path.GetFileName(context.RepositoryRoot.TrimEnd(Path.DirectorySeparatorChar)),
+            RepoRoot = context.RepositoryRoot,
+            Branch = context.Branch,
+            CommitSha = context.CommitSha,
+            RemoteUrl = context.RemoteUrl,
+            IsCi = context.IsCi,
+            CiProvider = context.CiProvider,
+            CiBuildId = context.CiBuildId,
+            CiRunNumber = context.CiRunNumber,
+            CiWorkflowName = context.CiWorkflowName,
+            CiActor = context.CiActor,
+            CiTag = context.CiTag,
+            CiBuildUrl = context.CiBuildUrl,
+            CommandExecuted = commandName,
+            Success = context.CompletedSteps.Values.All(step => step.Success),
+            ExitCode = context.CompletedSteps.Values.LastOrDefault()?.ExitCode ?? 0,
+            StartedAt = now,
+            CompletedAt = now,
+            Version = context.Version,
+            Steps = context.CompletedSteps.Values
+                .Select(step => new StepManifestEntry(step.StepId, step.Success, step.ExitCode, step.Duration.TotalMilliseconds))
+                .ToArray(),
+            Artifacts = AggregateArtifacts(context),
+            PushDecisions = AggregatePushDecisions(context),
+        };
+
+        var payload = CiOutputEmitter.BuildPayload(
+            manifest,
+            new CiEmissionOptions
+            {
+                Provider = "generic",
+                Prefix = context.CiVariablePrefix,
+                KeyCasing = "upperSnake",
+                IncludeStepOutputs = true,
+                EmitEmptyValues = true,
+                Redact = false,
+                MaxValueLength = 8192,
+                MaxVariables = 1000,
+            });
+
+        return new Dictionary<string, string>(payload.Variables, StringComparer.Ordinal);
+    }
+
+    private static IReadOnlyList<PushDecision> AggregatePushDecisions(ExecutionContext context)
+    {
+        var decisions = new List<PushDecision>();
+        foreach (var step in context.CompletedSteps.Values)
+        {
+            if (!step.Outputs.TryGetValue("__pushDecisions", out var decisionsObj) || decisionsObj is null)
+            {
+                continue;
+            }
+
+            if (decisionsObj is IEnumerable<PushDecision> stepDecisions)
+            {
+                foreach (var decision in stepDecisions)
+                {
+                    decisions.Add(decision);
+                }
+            }
+        }
+
+        return decisions;
+    }
+
+    private static IReadOnlyList<ArtifactManifestEntry> AggregateArtifacts(ExecutionContext context)
+    {
+        var artifacts = new List<ArtifactManifestEntry>();
+        foreach (var step in context.CompletedSteps.Values)
+        {
+            if (!step.Outputs.TryGetValue("__artifacts", out var artifactsObj) || artifactsObj is null)
+            {
+                continue;
+            }
+
+            if (artifactsObj is IEnumerable<ArtifactManifestEntry> stepArtifacts)
+            {
+                foreach (var artifact in stepArtifacts)
+                {
+                    artifacts.Add(artifact);
+                }
+            }
+        }
+
+        return artifacts;
     }
 
     private async Task<StepResult> ExecuteUsesAsync(

@@ -156,17 +156,29 @@ public sealed record RepoOutputsConfig
     /// <summary>Security output paths.</summary>
     public RepoSecurityOutputPathsConfig? Security { get; init; }
 
-    /// <summary>Package output directory. Default: <c>artifacts/packages</c>.</summary>
+    /// <summary>Package output directory. Default: <c>~/packages</c> (relative to <c>outputs.root</c>).</summary>
     public string? Packages { get; init; }
 
-    /// <summary>Run manifest output directory. Default: <c>artifacts/manifests</c>.</summary>
-    public string? Manifests { get; init; }
+    /// <summary>Manifest-related output settings.</summary>
+    public RepoManifestOutputsConfig? Manifests { get; init; }
 
-    /// <summary>Log output directory. Default: <c>artifacts/logs</c>.</summary>
+    /// <summary>Log output directory. Default: <c>~/logs</c> (relative to <c>outputs.root</c>).</summary>
     public string? Logs { get; init; }
 
-    /// <summary>Temporary scratch directory. Default: <c>.rexo/temp</c>.</summary>
+    /// <summary>Temporary scratch directory. Default: <c>~/tmp</c> (relative to <c>outputs.root</c>).</summary>
     public string? Temp { get; init; }
+}
+
+public sealed record RepoManifestOutputsConfig
+{
+    /// <summary>Manifest output directory. Default: <c>~/manifests</c> (relative to <c>outputs.root</c>).</summary>
+    public string? Path { get; init; }
+
+    /// <summary>Command manifest file strategy. One of <c>single</c> (default) or <c>perCommand</c>.</summary>
+    public string? CommandMode { get; init; }
+
+    /// <summary>Command manifest detail level. One of <c>summary</c> (default) or <c>verbose</c>.</summary>
+    public string? CommandDetail { get; init; }
 }
 
 public sealed record RepoCommandOutputConfig
@@ -229,35 +241,35 @@ public sealed record RepoGitHubActionsCiOutputsConfig
 
 public sealed record RepoTestOutputPathsConfig
 {
-    /// <summary>Test result files directory. Default: <c>artifacts/tests</c>.</summary>
+    /// <summary>Test result files directory. Default: <c>~/tests</c> (relative to <c>outputs.root</c>).</summary>
     public string? Results { get; init; }
 
-    /// <summary>Coverage output directory. Default: <c>artifacts/coverage</c>.</summary>
+    /// <summary>Coverage output directory. Default: <c>~/coverage</c> (relative to <c>outputs.root</c>).</summary>
     public string? Coverage { get; init; }
 
-    /// <summary>Test report output directory. Default: <c>artifacts/tests/reports</c>.</summary>
+    /// <summary>Test report output directory. Default: <c>~/tests/reports</c> (relative to <c>outputs.root</c>).</summary>
     public string? Reports { get; init; }
 }
 
 public sealed record RepoAnalysisOutputPathsConfig
 {
-    /// <summary>Analysis report output directory. Default: <c>artifacts/analysis</c>.</summary>
+    /// <summary>Analysis report output directory. Default: <c>~/analysis</c> (relative to <c>outputs.root</c>).</summary>
     public string? Reports { get; init; }
 
-    /// <summary>SARIF output directory. Default: <c>artifacts/analysis/sarif</c>.</summary>
+    /// <summary>SARIF output directory. Default: <c>~/analysis/sarif</c> (relative to <c>outputs.root</c>).</summary>
     public string? Sarif { get; init; }
 
 }
 
 public sealed record RepoSecurityOutputPathsConfig
 {
-    /// <summary>Full file path for the npm/security audit JSON output. Default: <c>artifacts/security/audit.json</c>.</summary>
+    /// <summary>Full file path for the npm/security audit JSON output. Default: <c>~/security/audit.json</c> (relative to <c>outputs.root</c>).</summary>
     public string? Audit { get; init; }
 
-    /// <summary>Security report output directory. Default: <c>artifacts/security</c>.</summary>
+    /// <summary>Security report output directory. Default: <c>~/security</c> (relative to <c>outputs.root</c>).</summary>
     public string? Reports { get; init; }
 
-    /// <summary>SARIF output directory for security findings. Default: <c>artifacts/security/sarif</c>.</summary>
+    /// <summary>SARIF output directory for security findings. Default: <c>~/security/sarif</c> (relative to <c>outputs.root</c>).</summary>
     public string? Sarif { get; init; }
 }
 

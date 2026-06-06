@@ -273,7 +273,7 @@ public sealed class ConfigCommandLoader
 
         if (emitRuntimeFiles)
         {
-            await WriteCommandManifestAsync(repositoryRoot, outputRoot, commandName, commandResult, cancellationToken);
+            await WriteCommandManifestAsync(repositoryRoot, outputRoot, config, commandName, commandResult, cancellationToken);
         }
 
         return commandResult;
@@ -1082,16 +1082,29 @@ public sealed class ConfigCommandLoader
     private static async Task WriteCommandManifestAsync(
         string repositoryRoot,
         string outputRoot,
+        RepoConfig config,
         string commandName,
         CommandResult commandResult,
         CancellationToken cancellationToken)
     {
-        var manifestsDir = Path.Combine(repositoryRoot, outputRoot, "manifests");
+        var manifestsDir = ResolveManifestsDirectory(repositoryRoot, outputRoot, config);
         Directory.CreateDirectory(manifestsDir);
+
+        var mode = string.Equals(config.Outputs?.Manifests?.CommandMode, "perCommand", StringComparison.OrdinalIgnoreCase)
+            ? "perCommand"
+            : "aggregate";
+        var detail = string.Equals(config.Outputs?.Manifests?.CommandDetail, "verbose", StringComparison.OrdinalIgnoreCase)
+            ? "verbose"
+            : "summary";
 
         // Sanitize command name for use as a file name
         var safeName = string.Concat(commandName.Select(c => char.IsLetterOrDigit(c) || c == '-' || c == '_' ? c : '_'));
-        var manifestPath = Path.Combine(manifestsDir, $"{safeName}.json");
+        var manifestFileName = mode switch
+        {
+            "perCommand" => $"{safeName}.json",
+            _ => "commands.json",
+        };
+        var manifestPath = Path.Combine(manifestsDir, manifestFileName);
 
         var stepSummaries = commandResult.Steps
             .Select(s =>
@@ -1129,19 +1142,158 @@ public sealed class ConfigCommandLoader
             }
         }
 
+        object entry;
+        if (detail == "verbose")
+        {
+            entry = new
+            {
+                command = commandName,
+                status = commandResult.Success ? "success" : "failure",
+                version = commandResult.Version?.SemVer,
+                fileOutputs = aggregatedFileOutputs,
+                steps = stepSummaries,
+                result = commandResult,
+                generatedAt = DateTimeOffset.UtcNow,
+            };
+        }
+        else
+        {
+            entry = new
+            {
+                command = commandName,
+                status = commandResult.Success ? "success" : "failure",
+                version = commandResult.Version?.SemVer,
+                fileOutputs = aggregatedFileOutputs,
+                steps = stepSummaries,
+                generatedAt = DateTimeOffset.UtcNow,
+            };
+        }
+
+        if (mode == "aggregate")
+        {
+            await WriteAggregateCommandManifestAsync(manifestPath, entry, cancellationToken);
+            return;
+        }
+
+        object manifest;
+        if (detail == "verbose")
+        {
+            manifest = new
+            {
+                schemaVersion = "1.0",
+                generatedAt = DateTimeOffset.UtcNow,
+                command = commandName,
+                status = commandResult.Success ? "success" : "failure",
+                version = commandResult.Version?.SemVer,
+                fileOutputs = aggregatedFileOutputs,
+                steps = stepSummaries,
+                result = commandResult,
+            };
+        }
+        else
+        {
+            manifest = new
+            {
+                schemaVersion = "1.0",
+                generatedAt = DateTimeOffset.UtcNow,
+                command = commandName,
+                status = commandResult.Success ? "success" : "failure",
+                version = commandResult.Version?.SemVer,
+                fileOutputs = aggregatedFileOutputs,
+                steps = stepSummaries,
+            };
+        }
+
+        var json = System.Text.Json.JsonSerializer.Serialize(manifest, IndentedJsonOptions);
+        await WriteTextFileAsync(manifestPath, json, cancellationToken);
+    }
+
+    private static async Task WriteAggregateCommandManifestAsync(string manifestPath, object entry, CancellationToken cancellationToken)
+    {
+        var commands = new List<object>();
+
+        if (File.Exists(manifestPath))
+        {
+            try
+            {
+                var existingJson = await ReadTextFileAsyncWithRetry(manifestPath, cancellationToken);
+                using var document = JsonDocument.Parse(existingJson);
+                if (document.RootElement.TryGetProperty("commands", out var commandsElement) &&
+                    commandsElement.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var commandElement in commandsElement.EnumerateArray())
+                    {
+                        commands.Add(commandElement.Clone());
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore malformed existing aggregate manifest and overwrite with a fresh one.
+            }
+        }
+
+        commands.Add(entry);
+
         var manifest = new
         {
             schemaVersion = "1.0",
             generatedAt = DateTimeOffset.UtcNow,
-            command = commandName,
-            status = commandResult.Success ? "success" : "failure",
-            version = commandResult.Version is { } v ? v.SemVer : null,
-            fileOutputs = aggregatedFileOutputs,
-            steps = stepSummaries,
+            commands,
         };
 
         var json = System.Text.Json.JsonSerializer.Serialize(manifest, IndentedJsonOptions);
-        await File.WriteAllTextAsync(manifestPath, json, cancellationToken);
+        await WriteTextFileAsync(manifestPath, json, cancellationToken);
+    }
+
+    private static async Task<string> ReadTextFileAsyncWithRetry(string path, CancellationToken cancellationToken)
+    {
+        const int maxAttempts = 5;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await File.ReadAllTextAsync(path, cancellationToken);
+            }
+            catch (IOException) when (attempt < maxAttempts)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(50 * attempt), cancellationToken);
+            }
+        }
+    }
+
+    private static async Task WriteTextFileAsync(string path, string contents, CancellationToken cancellationToken)
+    {
+        const int maxAttempts = 5;
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await File.WriteAllTextAsync(path, contents, cancellationToken);
+                return;
+            }
+            catch (IOException) when (attempt < maxAttempts)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(50 * attempt), cancellationToken);
+            }
+        }
+    }
+
+    private static string ResolveManifestsDirectory(string repositoryRoot, string outputRoot, RepoConfig config)
+    {
+        var manifestsPath = ResolveOutputPath(outputRoot, config.Outputs?.Manifests?.Path, "manifests");
+        if (Path.IsPathRooted(manifestsPath))
+        {
+            return manifestsPath;
+        }
+
+        return Path.Combine(repositoryRoot, manifestsPath);
     }
 
     internal static string ResolveOutputRoot(RepoConfig config) =>
@@ -1577,18 +1729,18 @@ public sealed class ConfigCommandLoader
             };
         }
 
-        var testsResults = config.Outputs?.Tests?.Results ?? $"{root}/tests";
-        var testsCoverage = config.Outputs?.Tests?.Coverage ?? $"{root}/coverage";
-        var testsReports = config.Outputs?.Tests?.Reports ?? $"{root}/tests/reports";
-        var analysisReports = config.Outputs?.Analysis?.Reports ?? $"{root}/analysis";
-        var analysisSarif = config.Outputs?.Analysis?.Sarif ?? $"{root}/analysis/sarif";
-        var securityAudit = config.Outputs?.Security?.Audit ?? $"{root}/security/audit.json";
-        var securityReports = config.Outputs?.Security?.Reports ?? $"{root}/security";
-        var securitySarif = config.Outputs?.Security?.Sarif ?? $"{root}/security/sarif";
-        var packages = config.Outputs?.Packages ?? $"{root}/packages";
-        var manifests = config.Outputs?.Manifests ?? $"{root}/manifests";
-        var logs = config.Outputs?.Logs ?? $"{root}/logs";
-        var temp = config.Outputs?.Temp ?? ".rexo/temp";
+        var testsResults = ResolveOutputPath(root, config.Outputs?.Tests?.Results, "tests");
+        var testsCoverage = ResolveOutputPath(root, config.Outputs?.Tests?.Coverage, "coverage");
+        var testsReports = ResolveOutputPath(root, config.Outputs?.Tests?.Reports, "tests/reports");
+        var analysisReports = ResolveOutputPath(root, config.Outputs?.Analysis?.Reports, "analysis");
+        var analysisSarif = ResolveOutputPath(root, config.Outputs?.Analysis?.Sarif, "analysis/sarif");
+        var securityAudit = ResolveOutputPath(root, config.Outputs?.Security?.Audit, "security/audit.json");
+        var securityReports = ResolveOutputPath(root, config.Outputs?.Security?.Reports, "security");
+        var securitySarif = ResolveOutputPath(root, config.Outputs?.Security?.Sarif, "security/sarif");
+        var packages = ResolveOutputPath(root, config.Outputs?.Packages, "packages");
+        var manifests = ResolveOutputPath(root, config.Outputs?.Manifests?.Path, "manifests");
+        var logs = ResolveOutputPath(root, config.Outputs?.Logs, "logs");
+        var temp = ResolveOutputPath(root, config.Outputs?.Temp, "tmp");
 
         return new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
@@ -1616,6 +1768,59 @@ public sealed class ConfigCommandLoader
             ["logs"] = logs,
             ["temp"] = temp,
         };
+    }
+
+    private static string ResolveOutputPath(string root, string? configuredPath, string defaultRelativePath)
+    {
+        if (string.IsNullOrWhiteSpace(configuredPath))
+        {
+            return CombineOutputPath(root, defaultRelativePath);
+        }
+
+        if (Path.IsPathRooted(configuredPath))
+        {
+            return configuredPath;
+        }
+
+        if (configuredPath.StartsWith("~/", StringComparison.Ordinal) ||
+            configuredPath.StartsWith("~\\", StringComparison.Ordinal))
+        {
+            return CombineOutputPath(root, configuredPath[2..]);
+        }
+
+        // Plain relative paths are repo-relative, not outputs.root-relative.
+        return configuredPath;
+    }
+
+    private static string ResolveManifestDirectory(string repositoryRoot, string outputRoot, string? configuredPath)
+    {
+        if (string.IsNullOrWhiteSpace(configuredPath))
+        {
+            return Path.Combine(repositoryRoot, outputRoot, "manifests");
+        }
+
+        if (Path.IsPathRooted(configuredPath))
+        {
+            return configuredPath;
+        }
+
+        if (configuredPath.StartsWith("~/", StringComparison.Ordinal) ||
+            configuredPath.StartsWith("~\\", StringComparison.Ordinal))
+        {
+            return Path.Combine(repositoryRoot, CombineOutputPath(outputRoot, configuredPath[2..]));
+        }
+
+        return Path.Combine(repositoryRoot, configuredPath);
+    }
+
+    private static string CombineOutputPath(string root, string relative)
+    {
+        var normalizedRoot = root.TrimEnd('/', '\\');
+        var normalizedRelative = relative.TrimStart('/', '\\');
+
+        return string.IsNullOrEmpty(normalizedRoot)
+            ? normalizedRelative
+            : $"{normalizedRoot}/{normalizedRelative}";
     }
 
     /// <summary>

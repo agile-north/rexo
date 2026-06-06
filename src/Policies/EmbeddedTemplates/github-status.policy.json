@@ -1,0 +1,70 @@
+{
+  "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/policy.schema.json",
+  "schemaVersion": "1.0",
+  "name": "github-status-policy",
+  "description": "Publish GitHub commit status or check run for the resolved commit after push.",
+  "commands": {
+    "post-push": {
+      "description": "Publish a GitHub status or check run for the resolved commit.",
+      "options": {
+        "mode": {
+          "type": "string",
+          "default": "auto",
+          "allowed": ["auto", "status", "checks"]
+        },
+        "state": {
+          "type": "string",
+          "default": "success",
+          "allowed": ["error", "failure", "pending", "success"]
+        },
+        "context": {
+          "type": "string",
+          "default": "rexo/build"
+        },
+        "description": {
+          "type": "string",
+          "default": "Rexo build status"
+        },
+        "name": {
+          "type": "string",
+          "default": "Rexo CI"
+        },
+        "title": {
+          "type": "string",
+          "default": "Rexo check run"
+        },
+        "summary": {
+          "type": "string",
+          "default": "Rexo reported test and coverage results."
+        },
+        "conclusion": {
+          "type": "string",
+          "default": "success",
+          "allowed": ["success", "failure", "neutral", "cancelled", "timed_out", "action_required", "stale"]
+        }
+      },
+      "steps": [
+        {
+          "id": "resolve-version",
+          "uses": "builtin:resolve-version"
+        },
+        {
+          "id": "publish-check",
+          "run": "if [ \"{{options.dry-run}}\" = \"true\" ]; then echo DRY RUN: would create GitHub check run '{{options.name}}' for commit {{version.CommitSha}}; elif [ \"{{options.mode}}\" = \"checks\" ] || ( [ \"{{options.mode}}\" = \"auto\" ] && [ \"{{env.GITHUB_ACTIONS}}\" != \"true\" ] ); then REPO=${GITHUB_REPOSITORY:-$(gh repo view --json nameWithOwner -q .nameWithOwner)} && gh api repos/$REPO/check-runs -f name='{{options.name}}' -f head_sha='{{version.CommitSha}}' -f status=completed -f conclusion='{{options.conclusion}}' -f output.title='{{options.title}}' -f output.summary='{{options.summary}}'; fi",
+          "container": {
+            "image": "ghcr.io/cli/cli:latest",
+            "workingDirectory": "/work"
+          }
+        },
+        {
+          "id": "publish-status",
+          "run": "if [ \"{{options.dry-run}}\" = \"true\" ]; then echo DRY RUN: would publish GitHub status '{{options.context}}'={{options.state}} for commit {{version.CommitSha}}; elif [ \"{{options.mode}}\" = \"status\" ]; then REPO=${GITHUB_REPOSITORY:-$(gh repo view --json nameWithOwner -q .nameWithOwner)} && gh api repos/$REPO/statuses/{{version.CommitSha}} -f state={{options.state}} -f context=\"{{options.context}}\" -f description=\"{{options.description}}\"; fi",
+          "container": {
+            "image": "ghcr.io/cli/cli:latest",
+            "workingDirectory": "/work"
+          }
+        }
+      ]
+    }
+  }
+}

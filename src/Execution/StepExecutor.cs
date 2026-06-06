@@ -87,19 +87,24 @@ public sealed class StepExecutor : IStepExecutor
         var secrets = SecretMasker.CollectSecretValues();
         var env = BuildNativeRunEnvironment(context);
         ShellRunResult shellResult;
+        var executionMetadata = new RunExecutionMetadata("native", "native", null, null, false, null);
+        var debugEnabled = IsDebugEnabled(context);
 
         if (stepDefinition.Container is { Image.Length: > 0 } container)
         {
-            shellResult = await ExecuteContainerizedRunWithFallbackAsync(
+            var containerResult = await ExecuteContainerizedRunWithFallbackAsync(
                 command,
                 container,
                 context,
                 secrets,
+                debugEnabled,
                 cancellationToken);
+            shellResult = containerResult.Result;
+            executionMetadata = containerResult.Metadata;
         }
         else
         {
-            Console.WriteLine($"  > {command}");
+            Console.WriteLine($"  > [native] {command}");
 
             shellResult = await ShellRunner.RunAsync(
                 command,
@@ -121,6 +126,12 @@ public sealed class StepExecutor : IStepExecutor
         {
             ["stdout"] = maskedStdout,
             ["stderr"] = SecretMasker.Mask(shellResult.Stderr, secrets),
+            ["__executionMode"] = executionMetadata.ExecutionMode,
+            ["__requestedExecutionMode"] = executionMetadata.RequestedExecutionMode,
+            ["__containerImage"] = executionMetadata.ContainerImage,
+            ["__containerWorkingDirectory"] = executionMetadata.ContainerWorkingDirectory,
+            ["__containerFallbackUsed"] = executionMetadata.FallbackUsed,
+            ["__containerFallbackReason"] = executionMetadata.FallbackReason,
         };
 
         // Extract named groups from stdout via OutputPattern regex
@@ -166,35 +177,67 @@ public sealed class StepExecutor : IStepExecutor
             outputs);
     }
 
-    private static async Task<ShellRunResult> ExecuteContainerizedRunWithFallbackAsync(
+    private static async Task<ContainerRunResult> ExecuteContainerizedRunWithFallbackAsync(
         string command,
         StepContainerDefinition container,
         ExecutionContext context,
         IReadOnlySet<string> secrets,
+        bool debugEnabled,
         CancellationToken cancellationToken)
     {
+        var containerWorkingDirectory = string.IsNullOrWhiteSpace(container.WorkingDirectory)
+            ? "/work"
+            : container.WorkingDirectory;
+        Console.WriteLine($"  > [container] image={container.Image} workdir={containerWorkingDirectory} mount=/work");
         Console.WriteLine($"  > [container:{container.Image}] {command}");
 
         var dockerArgs = BuildContainerRunArgs(command, container, context);
+        if (debugEnabled)
+        {
+            Console.WriteLine($"[debug] Container invocation: docker {string.Join(" ", dockerArgs.Select(QuoteForDebug))}");
+            Console.WriteLine($"[debug] Container env materialization: host+file+runtime+container.env (effective={BuildContainerEnvironment(context, container).Count}, file={context.FileEnvironment.Count}, containerOverrides={(container.Env?.Count ?? 0)})");
+        }
+
         try
         {
-            return await ShellRunner.RunProcessAsync(
+            var result = await ShellRunner.RunProcessAsync(
                 "docker",
                 dockerArgs,
                 context.RepositoryRoot,
                 onStdout: line => Console.WriteLine($"    {SecretMasker.Mask(line, secrets)}"),
                 cancellationToken: cancellationToken);
+
+            return new ContainerRunResult(
+                result,
+                new RunExecutionMetadata(
+                    "container",
+                    "container",
+                    container.Image,
+                    containerWorkingDirectory,
+                    false,
+                    null));
         }
         catch (FileNotFoundException)
         {
-            Console.WriteLine("  ! Docker runtime not found; falling back to native execution.");
+            Console.WriteLine("  ! [container] Docker runtime not found; falling back to native execution.");
+            Console.WriteLine($"  > [native:fallback] {command}");
             var env = BuildNativeRunEnvironment(context);
-            return await ShellRunner.RunAsync(
+            var fallbackResult = await ShellRunner.RunAsync(
                 command,
                 context.RepositoryRoot,
                 environment: env,
                 onStdout: line => Console.WriteLine($"    {SecretMasker.Mask(line, secrets)}"),
                 cancellationToken: cancellationToken);
+
+            return new ContainerRunResult(
+                fallbackResult,
+                new RunExecutionMetadata(
+                    "native",
+                    "container",
+                    container.Image,
+                    containerWorkingDirectory,
+                    true,
+                    "docker-not-found"));
         }
     }
 
@@ -561,4 +604,33 @@ public sealed class StepExecutor : IStepExecutor
 
         return sanitized[..Math.Min(20, sanitized.Length)];
     }
+
+    private static bool IsDebugEnabled(ExecutionContext context) =>
+        context.Options.TryGetValue("debug", out var debugValue) &&
+        string.Equals(debugValue, "true", StringComparison.OrdinalIgnoreCase);
+
+    private static string QuoteForDebug(string value)
+    {
+        if (value.Length == 0)
+        {
+            return "\"\"";
+        }
+
+        if (value.IndexOfAny([' ', '\t', '"']) < 0)
+        {
+            return value;
+        }
+
+        return "\"" + value.Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
+    }
+
+    private sealed record ContainerRunResult(ShellRunResult Result, RunExecutionMetadata Metadata);
+
+    private sealed record RunExecutionMetadata(
+        string ExecutionMode,
+        string RequestedExecutionMode,
+        string? ContainerImage,
+        string? ContainerWorkingDirectory,
+        bool FallbackUsed,
+        string? FallbackReason);
 }

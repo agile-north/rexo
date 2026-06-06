@@ -239,9 +239,24 @@ public sealed partial class RepoConfigurationLoader
             Analysis = MergeAnalysisOutputsConfig(@base.Analysis, child.Analysis),
             Security = MergeSecurityOutputsConfig(@base.Security, child.Security),
             Packages = child.Packages ?? @base.Packages,
-            Manifests = child.Manifests ?? @base.Manifests,
+            Manifests = MergeManifestOutputsConfig(@base.Manifests, child.Manifests),
             Logs = child.Logs ?? @base.Logs,
             Temp = child.Temp ?? @base.Temp,
+        };
+    }
+
+    private static RepoManifestOutputsConfig? MergeManifestOutputsConfig(
+        RepoManifestOutputsConfig? @base,
+        RepoManifestOutputsConfig? child)
+    {
+        if (@base is null) return child;
+        if (child is null) return @base;
+
+        return new RepoManifestOutputsConfig
+        {
+            Path = child.Path ?? @base.Path,
+            CommandMode = child.CommandMode ?? @base.CommandMode,
+            CommandDetail = child.CommandDetail ?? @base.CommandDetail,
         };
     }
 

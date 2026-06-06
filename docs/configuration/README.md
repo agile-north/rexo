@@ -12,6 +12,8 @@ see [Output Contract](./output-contract.md).
 For detailed run-step container wrapping behavior (scope, defaults, env precedence,
 fallback, and validation), see [Containerized Run Steps](./containerized-run.md).
 
+For CLI config overrides, see [CLI Overrides](./overrides.md).
+
 Default repository configuration file: **`rexo.json`**
 
 Supported config locations (first match wins):
@@ -190,6 +192,41 @@ stacked *on top of* `embedded:standard` so both the shared lifecycle commands (`
 ```json
 { "extends": ["embedded:standard", "embedded:dotnet-api"] }
 ```
+If you want GitHub release automation for `release --push`, stack `embedded:github-release`
+alongside `embedded:standard`:
+
+```json
+{ "extends": ["embedded:standard", "embedded:github-release"] }
+```
+
+For more reusable versioning and release flow composition, stack `embedded:git-tag`
+before `embedded:github-release`:
+
+```json
+{ "extends": ["embedded:standard", "embedded:git-tag", "embedded:github-release"] }
+```
+
+If you also want commit status publishing for the release flow, add `embedded:github-status`:
+
+```json
+{ "extends": ["embedded:standard", "embedded:git-tag", "embedded:github-status", "embedded:github-release"] }
+```
+
+For richer GitHub CI metadata and security report uploads, also add `embedded:github-status` and `embedded:github-sarif`:
+
+```json
+{
+  "extends": [
+    "embedded:standard",
+    "embedded:git-tag",
+    "embedded:github-status",
+    "embedded:github-sarif",
+    "embedded:github-release"
+  ]
+}
+```
+
+GitHub auth is standardized using `GITHUB_TOKEN` for containerized `gh` operations. `GITHUB_REPOSITORY` is preferred when available, but an authenticated `gh` session and configured git remote can also infer the repository context.
 
 This is what `rx init` generates automatically when `--with-policy` is used with a
 recognized policy template that is not `standard`.

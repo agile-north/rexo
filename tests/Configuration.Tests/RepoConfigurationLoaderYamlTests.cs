@@ -63,42 +63,27 @@ public sealed class RepoConfigurationLoaderYamlTests
   [Fact]
   public async Task LoadAsyncParsesYamlHiddenCommand()
   {
+    var originalOverlay = Environment.GetEnvironmentVariable("REXO_OVERLAY");
+    Environment.SetEnvironmentVariable("REXO_OVERLAY", null);
+
     var dir = Path.Combine(Path.GetTempPath(), $"rexo-yaml-hidden-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
-    var schemaPath = Path.Combine(dir, "rexo.schema.json");
     var configPath = Path.Combine(dir, "rexo.yml");
-
-    await File.WriteAllTextAsync(
-        schemaPath,
-        """
-            {
-              "$schema": "https://json-schema.org/draft/2020-12/schema",
-              "type": "object",
-              "required": ["$schema", "schemaVersion", "name", "commands", "aliases"],
-              "properties": {
-                "$schema": { "type": "string" },
-                "schemaVersion": { "type": "string" },
-                "name": { "type": "string" },
-                "commands": { "type": "object" },
-                "aliases": { "type": "object" }
-              }
-            }
-            """);
 
     await File.WriteAllTextAsync(
         configPath,
         """
-            $schema: rexo.schema.json
-            schemaVersion: "1.0"
-            name: yaml-hidden-sample
-            commands:
-              hidden-helper:
-                hidden: true
-                description: Hidden helper
-                options: {}
-                steps: []
-            aliases: {}
-            """);
+        $schema: https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json
+        schemaVersion: "1.0"
+        name: yaml-hidden-sample
+        commands:
+          hidden-helper:
+            hidden: true
+            description: Hidden helper
+            options: {}
+            steps: []
+        aliases: {}
+        """);
 
     try
     {
@@ -110,6 +95,7 @@ public sealed class RepoConfigurationLoaderYamlTests
     }
     finally
     {
+      Environment.SetEnvironmentVariable("REXO_OVERLAY", originalOverlay);
       if (Directory.Exists(dir)) Directory.Delete(dir, true);
     }
   }

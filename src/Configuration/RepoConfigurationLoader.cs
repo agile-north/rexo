@@ -908,7 +908,14 @@ public sealed partial class RepoConfigurationLoader
         {
             case null:
                 return null;
-            case string or bool or byte or sbyte or short or ushort or int or uint or long or ulong or
+            case string stringValue:
+                if (bool.TryParse(stringValue, out var boolValue))
+                {
+                    return boolValue;
+                }
+
+                return stringValue;
+            case bool or byte or sbyte or short or ushort or int or uint or long or ulong or
                 float or double or decimal:
                 return value;
             case IDictionary dictionary:

@@ -60,7 +60,61 @@ public sealed class RepoConfigurationLoaderYamlTests
         }
     }
 
-    [Fact]
+  [Fact]
+  public async Task LoadAsyncParsesYamlHiddenCommand()
+  {
+    var dir = Path.Combine(Path.GetTempPath(), $"rexo-yaml-hidden-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(dir);
+    var schemaPath = Path.Combine(dir, "rexo.schema.json");
+    var configPath = Path.Combine(dir, "rexo.yml");
+
+    await File.WriteAllTextAsync(
+        schemaPath,
+        """
+            {
+              "$schema": "https://json-schema.org/draft/2020-12/schema",
+              "type": "object",
+              "required": ["$schema", "schemaVersion", "name", "commands", "aliases"],
+              "properties": {
+                "$schema": { "type": "string" },
+                "schemaVersion": { "type": "string" },
+                "name": { "type": "string" },
+                "commands": { "type": "object" },
+                "aliases": { "type": "object" }
+              }
+            }
+            """);
+
+    await File.WriteAllTextAsync(
+        configPath,
+        """
+            $schema: rexo.schema.json
+            schemaVersion: "1.0"
+            name: yaml-hidden-sample
+            commands:
+              hidden-helper:
+                hidden: true
+                description: Hidden helper
+                options: {}
+                steps: []
+            aliases: {}
+            """);
+
+    try
+    {
+      var config = await RepoConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
+
+      Assert.Equal("yaml-hidden-sample", config.Name);
+      Assert.True(config.Commands!.ContainsKey("hidden-helper"));
+      Assert.True(config.Commands!["hidden-helper"].Hidden);
+    }
+    finally
+    {
+      if (Directory.Exists(dir)) Directory.Delete(dir, true);
+    }
+  }
+
+  [Fact]
     public async Task LoadPolicyAsyncParsesYaml()
     {
         var dir = Path.Combine(Path.GetTempPath(), $"rexo-policy-yaml-{Guid.NewGuid():N}");

@@ -150,7 +150,12 @@ internal sealed class RepoCommandConfigJsonConverter : JsonConverter<RepoCommand
             return null;
         }
 
-        return element.GetBoolean();
+        return element.ValueKind switch
+        {
+            JsonValueKind.True or JsonValueKind.False => element.GetBoolean(),
+            JsonValueKind.String when bool.TryParse(element.GetString(), out var parsed) => parsed,
+            _ => throw new JsonException($"The '{propertyName}' property must be a boolean or boolean string."),
+        };
     }
 
     private static List<RepoStepConfig>? ReadOptionalHookSteps(

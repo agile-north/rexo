@@ -31,7 +31,7 @@ rx release --push
 ## Behavior
 
 - Publishes either a GitHub commit status or a GitHub check run for the resolved commit SHA.
-- Uses the `gh` CLI inside a container image (`ghcr.io/cli/cli:latest`).
+- Uses the `gh` CLI inside a container image (`serversideup/github-cli:latest`).
 - Does not require host GitHub CLI installation.
 - When `--dry-run` is enabled, the policy still resolves version and evaluates the publish path, but it outputs a dry-run message instead of applying remote changes.
 

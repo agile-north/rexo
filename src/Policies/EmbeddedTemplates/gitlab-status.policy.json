@@ -21,11 +21,13 @@
           "default": "Rexo build status"
         }
       },
-      "steps": [
+      "before": [
         {
           "id": "resolve-version",
           "uses": "builtin:resolve-version"
-        },
+        }
+      ],
+      "steps": [
         {
           "id": "publish-status",
           "run": "PROJECT_ID=${CI_PROJECT_ID:-$(glab repo view --json id -q .id)}; if [ \"{{options.dry-run}}\" = \"true\" ]; then echo DRY RUN: would publish GitLab status '{{options.context}}'={{options.state}} for commit {{version.CommitSha}}; else glab api /projects/$PROJECT_ID/statuses/{{version.CommitSha}} -F state={{options.state}} -F context=\"{{options.context}}\" -F description=\"{{options.description}}\"; fi",

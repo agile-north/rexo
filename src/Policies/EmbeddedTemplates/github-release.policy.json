@@ -20,11 +20,13 @@
           "default": ""
         }
       },
-      "steps": [
+      "before": [
         {
           "id": "resolve-version",
           "uses": "builtin:resolve-version"
-        },
+        }
+      ],
+      "steps": [
         {
           "id": "tag-exists",
           "run": "git fetch --tags {{options.remote}} && if git rev-parse --verify --quiet \"refs/tags/{{version.SemVer}}\" >/dev/null 2>&1; then echo TAG_EXISTS; fi",
@@ -48,7 +50,7 @@
           "id": "release",
           "run": "if [ \"{{options.dry-run}}\" = \"true\" ]; then echo DRY RUN: would create or update GitHub release \"{{version.SemVer}}\" for commit {{version.CommitSha}} (prerelease={{version.isPrerelease}}); if [ -n \"{{options.testReportAssetPath}}\" ] || [ -n \"{{options.coverageReportAssetPath}}\" ]; then echo DRY RUN: would upload release assets {{options.testReportAssetPath}} {{options.coverageReportAssetPath}} to release '{{version.SemVer}}'; fi; else gh release create \"{{version.SemVer}}\" --target \"{{version.CommitSha}}\" --prerelease \"{{version.isPrerelease}}\" --generate-notes || gh release edit \"{{version.SemVer}}\" --target \"{{version.CommitSha}}\" --prerelease \"{{version.isPrerelease}}\" --generate-notes; REPO=${GITHUB_REPOSITORY:-$(gh repo view --json nameWithOwner -q .nameWithOwner)}; assets=\"\"; if [ -n \"{{options.testReportAssetPath}}\" ]; then assets=\"{{options.testReportAssetPath}}\"; fi; if [ -n \"{{options.coverageReportAssetPath}}\" ]; then if [ -z \"$assets\" ]; then assets=\"{{options.coverageReportAssetPath}}\"; else assets=\"$assets {{options.coverageReportAssetPath}}\"; fi; fi; if [ -n \"$assets\" ]; then gh release upload \"{{version.SemVer}}\" $assets --clobber; fi; fi",
           "container": {
-            "image": "ghcr.io/cli/cli:latest",
+            "image": "serversideup/github-cli:latest",
             "workingDirectory": "/work"
           }
         }

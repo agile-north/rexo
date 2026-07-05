@@ -16,11 +16,13 @@
           "default": false
         }
       },
-      "steps": [
+      "before": [
         {
           "id": "resolve-version",
           "uses": "builtin:resolve-version"
-        },
+        }
+      ],
+      "steps": [
         {
           "id": "tag-exists",
           "run": "git fetch --tags {{options.remote}} && if git rev-parse --verify --quiet \"refs/tags/{{version.SemVer}}\" >/dev/null 2>&1; then echo TAG_EXISTS; fi",

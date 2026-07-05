@@ -1503,11 +1503,15 @@ public sealed class RepoConfigurationLoaderTests
         var commands = root.GetProperty("commands");
 
         Assert.True(commands.TryGetProperty("post-push", out var command));
-        var steps = command.GetProperty("steps");
-        Assert.Equal(4, steps.GetArrayLength());
+    var before = command.GetProperty("before");
+    Assert.Equal(1, before.GetArrayLength());
+    Assert.Equal("resolve-version", before[0].GetProperty("id").GetString());
 
-        var releaseStep = steps[3];
-        Assert.Equal("release", releaseStep.GetProperty("id").GetString());
+    var steps = command.GetProperty("steps");
+    Assert.Equal(3, steps.GetArrayLength());
+
+    var releaseStep = steps[2];
+    Assert.Equal("release", releaseStep.GetProperty("id").GetString());
         Assert.Contains("gh release create", releaseStep.GetProperty("run").GetString(), StringComparison.Ordinal);
     }
 

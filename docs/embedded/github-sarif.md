@@ -31,7 +31,7 @@ rx release --push
 ## Behavior
 
 - Uploads a SARIF security scan report for the resolved commit SHA.
-- Uses the `gh` CLI inside a container image (`ghcr.io/cli/cli:latest`).
+- Uses the `gh` CLI inside a container image (`serversideup/github-cli:latest`).
 - Does not require host GitHub CLI installation.
 - When `--dry-run` is enabled, the SARIF upload step is skipped.
 

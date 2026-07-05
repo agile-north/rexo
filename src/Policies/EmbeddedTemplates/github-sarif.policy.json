@@ -16,17 +16,19 @@
           "default": "Rexo Security"
         }
       },
-      "steps": [
+      "before": [
         {
           "id": "resolve-version",
           "uses": "builtin:resolve-version"
-        },
+        }
+      ],
+      "steps": [
         {
           "id": "upload-sarif",
           "run": "REPO=${GITHUB_REPOSITORY:-$(gh repo view --json nameWithOwner -q .nameWithOwner)} && REF=${GITHUB_REF:-$(git branch --show-current)} && gh api repos/$REPO/code-scanning/sarifs -F commit_sha={{version.CommitSha}} -F ref=\"$REF\" -F tool_name='{{options.toolName}}' -F sarif=@{{options.sarifPath}}",
           "when": "{{options.dry-run}} != 'true'",
           "container": {
-            "image": "ghcr.io/cli/cli:latest",
+            "image": "serversideup/github-cli:latest",
             "workingDirectory": "/work"
           }
         }

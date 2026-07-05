@@ -54,11 +54,22 @@ public sealed class ParallelStepGroupingTests
             Container: new RepoStepContainerConfig(
                 Image: "mcr.microsoft.com/dotnet/sdk:10.0",
                 Env: new Dictionary<string, string> { ["DOTNET_CLI_TELEMETRY_OPTOUT"] = "1" },
-                WorkingDirectory: "/work"));
+                WorkingDirectory: "/work",
+                Entrypoint: "dotnet",
+                Dockerfile: "Dockerfile",
+                Context: ".",
+                Build: new RepoStepContainerBuildConfig(
+                    Target: "publish",
+                    Args: new Dictionary<string, string> { ["APP_VERSION"] = "1.2.3" })));
 
         Assert.NotNull(step.Container);
         Assert.Equal("mcr.microsoft.com/dotnet/sdk:10.0", step.Container?.Image);
         Assert.Equal("1", step.Container?.Env?["DOTNET_CLI_TELEMETRY_OPTOUT"]);
         Assert.Equal("/work", step.Container?.WorkingDirectory);
+        Assert.Equal("dotnet", step.Container?.Entrypoint);
+        Assert.Equal("Dockerfile", step.Container?.Dockerfile);
+        Assert.Equal(".", step.Container?.Context);
+        Assert.Equal("publish", step.Container?.Build?.Target);
+        Assert.Equal("1.2.3", step.Container?.Build?.Args?["APP_VERSION"]);
     }
 }

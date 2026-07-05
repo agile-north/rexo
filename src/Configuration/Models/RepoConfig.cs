@@ -76,6 +76,15 @@ public sealed record RepoCommandConfig(
 
     /// <summary>Maximum number of steps to run concurrently within a parallel group.</summary>
     public int? MaxParallel { get; init; }
+
+    /// <summary>Optional command hooks that run before the command steps.</summary>
+    public List<RepoStepConfig>? Before { get; init; }
+
+    /// <summary>Optional command hooks that run after the command steps.</summary>
+    public List<RepoStepConfig>? After { get; init; }
+
+    /// <summary>Maximum command delegation depth allowed for this command invocation chain.</summary>
+    public int? MaxDepth { get; init; }
 }
 
 public sealed record RepoArgConfig(
@@ -107,7 +116,15 @@ public sealed record RepoStepConfig(
 public sealed record RepoStepContainerConfig(
     string Image,
     Dictionary<string, string>? Env = null,
-    string? WorkingDirectory = null);
+    string? WorkingDirectory = null,
+    string? Entrypoint = null,
+    string? Dockerfile = null,
+    string? Context = null,
+    RepoStepContainerBuildConfig? Build = null);
+
+public sealed record RepoStepContainerBuildConfig(
+    string? Target = null,
+    Dictionary<string, string>? Args = null);
 
 public sealed record RepoCommandMergeConfig(
     string? Mode = null,
@@ -275,7 +292,11 @@ public sealed record RepoSecurityOutputPathsConfig
 
 public sealed record RepoRuntimeConfig(
     bool? DryRun = null,
-    RepoPushConfig? Push = null);
+    RepoPushConfig? Push = null,
+    RepoRuntimeCommandsConfig? Commands = null);
+
+public sealed record RepoRuntimeCommandsConfig(
+    int? MaxDepth = null);
 
 public sealed record RepoPushConfig(
     bool? DryRun = null,

@@ -40,6 +40,9 @@ public sealed record ExecutionContext(
     /// <summary>Tracks the command call stack for cross-command cycle detection.</summary>
     public IReadOnlyList<string> CommandCallStack { get; init; } = [];
 
+    /// <summary>Maximum delegated command call depth allowed for this execution context.</summary>
+    public int MaxCommandDepth { get; init; } = 5;
+
     public static ExecutionContext Empty(string repositoryRoot) =>
         new(repositoryRoot, null, null, new Dictionary<string, object?>())
         {

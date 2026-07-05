@@ -37,6 +37,15 @@ This keeps builtins and delegated commands in their native execution model.
   "container": {
     "image": "mcr.microsoft.com/dotnet/sdk:10.0",
     "workingDirectory": "/work",
+    "entrypoint": "dotnet",
+    "dockerfile": "Dockerfile",
+    "context": ".",
+    "build": {
+      "target": "publish",
+      "args": {
+        "APP_VERSION": "1.2.3"
+      }
+    },
     "env": {
       "DOTNET_CLI_TELEMETRY_OPTOUT": "1",
       "NUGET_PACKAGES": "/work/.nuget/packages"
@@ -53,8 +62,23 @@ When step.container is set, Rexo executes the rendered run command through Docke
 
 - Repo mount: repository root mounted at /work
 - Container working directory: /work unless container.workingDirectory is provided
-- Shell inside container: /bin/sh -c
+- Shell inside container: /bin/sh -c when no custom entrypoint is provided
 - Container lifecycle: docker run --rm
+
+Optional container fields:
+
+- `container.entrypoint`: passed to `docker run --entrypoint`.
+- `container.dockerfile`: Dockerfile path used to materialize `container.image` before run.
+- `container.context`: docker build context directory (default: repository root).
+- `container.build.target`: optional docker build stage passed as `--target`.
+- `container.build.args`: optional docker build args map passed as repeated `--build-arg key=value`.
+
+When `container.dockerfile` is set, Rexo performs an image preflight:
+
+1. Inspect local `container.image` for label `rexo.container.sourceHash`.
+2. Compute current source hash from Dockerfile content, `.dockerignore` (if present), and resolved paths.
+3. Build image when missing or when hash differs.
+4. Reuse image when hash matches.
 
 ---
 
@@ -160,6 +184,7 @@ Invalid combinations fail config validation during load.
 - Keep container.env scoped to step-specific overrides.
 - If your command needs host tooling state, keep that step native or move state into mounted paths.
 - For cross-platform consistency, prefer shell commands that run correctly under /bin/sh in the container image.
+- When `entrypoint` is set, the rendered `run` command is passed as a single argument to that entrypoint.
 
 ---
 

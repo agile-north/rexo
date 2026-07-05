@@ -347,6 +347,117 @@ public sealed class CommandLayeringTests
     }
 
     [Fact]
+    public async Task CommandHooksCompileIntoBeforeMainAfterOrder()
+    {
+        var config = new RepoConfig(
+            Name: "hooks-order-test",
+            Commands: new Dictionary<string, RepoCommandConfig>
+            {
+                ["pre"] = new RepoCommandConfig(
+                    Description: "pre",
+                    Options: [],
+                    Steps:
+                    [
+                        new RepoStepConfig(Id: "pre-inner", Command: "missing", WhenExists: true)
+                    ]),
+                ["main"] = new RepoCommandConfig(
+                    Description: "main",
+                    Options: [],
+                    Steps:
+                    [
+                        new RepoStepConfig(Id: "main-inner", Command: "missing", WhenExists: true)
+                    ]),
+                ["post"] = new RepoCommandConfig(
+                    Description: "post",
+                    Options: [],
+                    Steps:
+                    [
+                        new RepoStepConfig(Id: "post-inner", Command: "missing", WhenExists: true)
+                    ]),
+                ["release"] = new RepoCommandConfig(
+                    Description: "release",
+                    Options: [],
+                    Steps:
+                    [
+                        new RepoStepConfig(Id: "main", Command: "main")
+                    ])
+                {
+                    Before = [new RepoStepConfig(Command: "pre")],
+                    After = [new RepoStepConfig(Id: "after", Command: "post")],
+                },
+            },
+            Aliases: []);
+
+        var registry = new CommandRegistry();
+        var executor = new DefaultCommandExecutor(registry);
+        var loader = CreateLoader();
+        loader.LoadInto(registry, config, Path.GetTempPath(), executor);
+
+        var result = await executor.ExecuteAsync(
+            "release",
+            EmptyInvocation(Path.GetTempPath()),
+            CancellationToken.None);
+
+        Assert.True(result.Success, $"hooked command should succeed. Message: {result.Message}");
+        Assert.Equal(3, result.Steps.Count);
+        Assert.Equal("cmd-pre", result.Steps[0].StepId);
+        Assert.Equal("main", result.Steps[1].StepId);
+        Assert.Equal("after", result.Steps[2].StepId);
+    }
+
+    [Fact]
+    public async Task CommandDelegationFailsWhenMaxDepthExceeded()
+    {
+        var config = new RepoConfig(
+            Name: "max-depth-test",
+            Commands: new Dictionary<string, RepoCommandConfig>
+            {
+                ["a"] = new RepoCommandConfig(
+                    Description: "a",
+                    Options: [],
+                    Steps:
+                    [
+                        new RepoStepConfig(Id: "call-b", Command: "b")
+                    ]),
+                ["b"] = new RepoCommandConfig(
+                    Description: "b",
+                    Options: [],
+                    Steps:
+                    [
+                        new RepoStepConfig(Id: "call-c", Command: "c")
+                    ]),
+                ["c"] = new RepoCommandConfig(
+                    Description: "c",
+                    Options: [],
+                    Steps:
+                    [
+                        new RepoStepConfig(Id: "leaf", Command: "missing", WhenExists: true)
+                    ]),
+            },
+            Aliases: [])
+        {
+            Runtime = new RepoRuntimeConfig(
+                Commands: new RepoRuntimeCommandsConfig(MaxDepth: 2)),
+        };
+
+        var registry = new CommandRegistry();
+        var executor = new DefaultCommandExecutor(registry);
+        var loader = CreateLoader();
+        loader.LoadInto(registry, config, Path.GetTempPath(), executor);
+
+        var result = await executor.ExecuteAsync(
+            "a",
+            EmptyInvocation(Path.GetTempPath()),
+            CancellationToken.None);
+
+        Assert.False(result.Success, "max depth should fail command delegation chain");
+        Assert.Equal(9, result.ExitCode);
+        var failed = Assert.Single(result.Steps.Where(step => !step.Success));
+        Assert.Equal(Rexo.Core.Models.ErrorCodes.CommandCycle, failed.Outputs["errorCode"]?.ToString());
+        Assert.Contains("maxDepth=2", failed.Outputs["error"]?.ToString() ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CrossCommandCycleIsDetected()
     {
         // build → release → build should produce a cycle error.

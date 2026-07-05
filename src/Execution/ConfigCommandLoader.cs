@@ -12,6 +12,7 @@ using Rexo.Versioning;
 public sealed class ConfigCommandLoader
 {
     private const string DefaultOutputRoot = "artifacts";
+    private const int DefaultMaxCommandDepth = 5;
     internal static readonly System.Text.Json.JsonSerializerOptions IndentedJsonOptions =
         new() { WriteIndented = true };
 
@@ -139,6 +140,11 @@ public sealed class ConfigCommandLoader
         var outputRoot = ResolveOutputRoot(config);
         var ciVariablePrefix = ResolveCiVariablePrefix(config);
         var normalizedCommandConfig = NormalizeCommandConfig(commandConfig);
+        var globalMaxDepth = config.Runtime?.Commands?.MaxDepth ?? DefaultMaxCommandDepth;
+        var invocationMaxDepth = invocation.MaxCommandDepth ?? int.MaxValue;
+        var effectiveMaxDepth = Math.Min(
+            invocationMaxDepth,
+            normalizedCommandConfig.MaxDepth ?? globalMaxDepth);
         var gitInfo = await Git.GitDetector.DetectAsync(repositoryRoot, cancellationToken);
         var ciInfo = CiDetector.Detect();
 
@@ -169,6 +175,7 @@ public sealed class ConfigCommandLoader
             ResolvedOutputs = BuildOutputsContext(config),
             ResolvedSettings = BuildSettingsContext(config),
             ResolvedVars = BuildVarsContext(config),
+            MaxCommandDepth = effectiveMaxDepth,
         };
 
         var stepExecutor = new StepExecutor(commandExecutor, _templateRenderer, _builtinRegistry);
@@ -1050,12 +1057,34 @@ public sealed class ConfigCommandLoader
         new(
             commandConfig.Description,
             commandConfig.Options ?? [],
-            commandConfig.Steps ?? [])
+            BuildCommandSteps(commandConfig))
         {
             Args = commandConfig.Args ?? [],
             Merge = commandConfig.Merge,
             MaxParallel = commandConfig.MaxParallel,
+            MaxDepth = commandConfig.MaxDepth,
         };
+
+    private static List<RepoStepConfig> BuildCommandSteps(RepoCommandConfig commandConfig)
+    {
+        var steps = new List<RepoStepConfig>();
+        if (commandConfig.Before is { Count: > 0 })
+        {
+            steps.AddRange(commandConfig.Before);
+        }
+
+        if (commandConfig.Steps is { Count: > 0 })
+        {
+            steps.AddRange(commandConfig.Steps);
+        }
+
+        if (commandConfig.After is { Count: > 0 })
+        {
+            steps.AddRange(commandConfig.After);
+        }
+
+        return steps;
+    }
 
     private static async Task WriteArtifactManifestAsync(
         string repositoryRoot,
@@ -1674,7 +1703,15 @@ public sealed class ConfigCommandLoader
                 : new Core.Models.StepContainerDefinition(
                     stepConfig.Container.Image,
                     stepConfig.Container.Env,
-                    stepConfig.Container.WorkingDirectory),
+                    stepConfig.Container.WorkingDirectory,
+                    stepConfig.Container.Entrypoint,
+                    stepConfig.Container.Dockerfile,
+                    stepConfig.Container.Context,
+                    stepConfig.Container.Build is null
+                        ? null
+                        : new Core.Models.StepContainerBuildDefinition(
+                            stepConfig.Container.Build.Target,
+                            stepConfig.Container.Build.Args)),
         };
 
     private static IReadOnlyDictionary<string, IReadOnlyList<string>>? BuildStepOutputs(

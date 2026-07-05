@@ -1,6 +1,8 @@
 namespace Rexo.Execution.Tests;
 
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
 using Rexo.Core.Models;
 using Rexo.Templating;
 
@@ -25,6 +27,72 @@ public sealed class StepExecutorWhenConditionTests
 
     private static ExecutionContext EmptyContext() =>
         ExecutionContext.Empty(Path.GetTempPath());
+
+    private static async Task<(string ToolsDir, string LogPath)> CreateFakeDockerAsync()
+    {
+        var toolsDir = Path.Combine(Path.GetTempPath(), $"rexo-fake-docker-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(toolsDir);
+
+        var logPath = Path.Combine(toolsDir, "docker.log");
+        var cmdPath = Path.Combine(toolsDir, "docker.cmd");
+
+        await File.WriteAllTextAsync(cmdPath, """
+                        @echo off
+                        setlocal EnableDelayedExpansion
+
+                        set ROOT=%~dp0
+                        set LOG=%ROOT%docker.log
+
+                        if /I "%~1"=="image" if /I "%~2"=="inspect" (
+                            if not "%REXO_FAKE_IMAGE_HASH%"=="" (
+                                echo %REXO_FAKE_IMAGE_HASH%
+                                exit /b 0
+                            )
+                            exit /b 1
+                        )
+
+                        if /I "%~1"=="build" (
+                            echo build %*>>"%LOG%"
+                            exit /b 0
+                        )
+
+                        if /I "%~1"=="run" (
+                            echo run %*>>"%LOG%"
+                            echo container-run-ok
+                            exit /b 0
+                        )
+
+                        exit /b 0
+                        """);
+
+        return (toolsDir, logPath);
+    }
+
+    private static async Task<string> ComputeExpectedContainerHashAsync(string dockerfilePath, string buildContextPath)
+    {
+        var buffer = new StringBuilder();
+        buffer.Append("dockerfile=");
+        buffer.AppendLine(Path.GetFullPath(dockerfilePath).Replace('\\', '/'));
+        buffer.Append("context=");
+        buffer.AppendLine(Path.GetFullPath(buildContextPath).Replace('\\', '/'));
+        buffer.Append("buildTarget=");
+        buffer.AppendLine(string.Empty);
+
+        var dockerfileContent = await File.ReadAllTextAsync(dockerfilePath);
+        buffer.Append("dockerfileContent=");
+        buffer.AppendLine(dockerfileContent);
+
+        var dockerIgnorePath = Path.Combine(buildContextPath, ".dockerignore");
+        if (File.Exists(dockerIgnorePath))
+        {
+            var dockerIgnoreContent = await File.ReadAllTextAsync(dockerIgnorePath);
+            buffer.Append("dockerignore=");
+            buffer.AppendLine(dockerIgnoreContent);
+        }
+
+        var hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(buffer.ToString()));
+        return Convert.ToHexString(hashBytes).ToLowerInvariant();
+    }
 
     private static BuiltinRegistry TrackingRegistry(out List<string> called)
     {
@@ -459,6 +527,144 @@ public sealed class StepExecutorWhenConditionTests
         Assert.Equal("native", result.Outputs["__executionMode"]?.ToString());
         Assert.Equal("native", result.Outputs["__requestedExecutionMode"]?.ToString());
         Assert.Equal("False", result.Outputs["__containerFallbackUsed"]?.ToString());
+    }
+
+    [Fact]
+    public async Task ContainerRunBuildsImageWhenMissingAndUsesConfiguredEntrypoint()
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        var executor = CreateExecutor();
+        var (toolsDir, logPath) = await CreateFakeDockerAsync();
+        var dockerCommandPath = Path.Combine(toolsDir, "docker.cmd");
+        var repoDir = Path.Combine(Path.GetTempPath(), $"rexo-step-container-repo-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(repoDir);
+
+        var originalPath = Environment.GetEnvironmentVariable("PATH");
+        var originalDockerCommand = Environment.GetEnvironmentVariable("REXO_DOCKER_COMMAND");
+        var originalFakeImageHash = Environment.GetEnvironmentVariable("REXO_FAKE_IMAGE_HASH");
+        Environment.SetEnvironmentVariable("PATH", toolsDir + Path.PathSeparator + originalPath);
+        Environment.SetEnvironmentVariable("REXO_DOCKER_COMMAND", dockerCommandPath);
+        Environment.SetEnvironmentVariable("REXO_FAKE_IMAGE_HASH", null);
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(repoDir, "Dockerfile"), "FROM scratch\n");
+
+            var context = ExecutionContext.Empty(repoDir);
+            var step = new StepDefinition(
+                Id: "container-build-run",
+                Run: "echo hello-from-container",
+                Uses: null,
+                Command: null,
+                When: null)
+            {
+                Container = new StepContainerDefinition(
+                    Image: "rexo/test-image:local",
+                    Env: null,
+                    WorkingDirectory: "/work",
+                    Entrypoint: "custom-entry",
+                    Dockerfile: "Dockerfile",
+                    Context: ".",
+                    Build: new StepContainerBuildDefinition(
+                        Target: "publish",
+                        Args: new Dictionary<string, string> { ["APP_VERSION"] = "1.2.3" })),
+            };
+
+            var result = await executor.ExecuteAsync(step, context, CancellationToken.None);
+
+            Assert.True(result.Success);
+
+            var log = await File.ReadAllTextAsync(logPath);
+            Assert.Contains("build ", log, StringComparison.Ordinal);
+            Assert.Contains("--target publish", log, StringComparison.Ordinal);
+            Assert.Contains("--build-arg APP_VERSION=1.2.3", log, StringComparison.Ordinal);
+            Assert.Contains("run ", log, StringComparison.Ordinal);
+            Assert.Contains("--entrypoint custom-entry", log, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", originalPath);
+            Environment.SetEnvironmentVariable("REXO_DOCKER_COMMAND", originalDockerCommand);
+            Environment.SetEnvironmentVariable("REXO_FAKE_IMAGE_HASH", originalFakeImageHash);
+            if (Directory.Exists(repoDir)) Directory.Delete(repoDir, true);
+            if (Directory.Exists(toolsDir)) Directory.Delete(toolsDir, true);
+        }
+    }
+
+    [Fact]
+    public async Task ContainerRunSkipsBuildWhenDockerfileHashUnchanged()
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        var executor = CreateExecutor();
+        var (toolsDir, logPath) = await CreateFakeDockerAsync();
+        var dockerCommandPath = Path.Combine(toolsDir, "docker.cmd");
+        var repoDir = Path.Combine(Path.GetTempPath(), $"rexo-step-container-hash-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(repoDir);
+
+        var originalPath = Environment.GetEnvironmentVariable("PATH");
+        var originalDockerCommand = Environment.GetEnvironmentVariable("REXO_DOCKER_COMMAND");
+        var originalFakeImageHash = Environment.GetEnvironmentVariable("REXO_FAKE_IMAGE_HASH");
+        Environment.SetEnvironmentVariable("PATH", toolsDir + Path.PathSeparator + originalPath);
+        Environment.SetEnvironmentVariable("REXO_DOCKER_COMMAND", dockerCommandPath);
+        Environment.SetEnvironmentVariable("REXO_FAKE_IMAGE_HASH", null);
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(repoDir, "Dockerfile"), "FROM scratch\n");
+
+            var context = ExecutionContext.Empty(repoDir);
+            var step = new StepDefinition(
+                Id: "container-build-cache",
+                Run: "echo hello-from-container",
+                Uses: null,
+                Command: null,
+                When: null)
+            {
+                Container = new StepContainerDefinition(
+                    Image: "rexo/test-image:local",
+                    Env: null,
+                    WorkingDirectory: "/work",
+                    Entrypoint: null,
+                    Dockerfile: "Dockerfile",
+                    Context: "."),
+            };
+
+            var first = await executor.ExecuteAsync(step, context, CancellationToken.None);
+            Assert.True(first.Success);
+
+            var firstLog = await File.ReadAllTextAsync(logPath);
+            Assert.Contains("build ", firstLog, StringComparison.Ordinal);
+
+            var expectedHash = await ComputeExpectedContainerHashAsync(
+                Path.Combine(repoDir, "Dockerfile"),
+                repoDir);
+            Environment.SetEnvironmentVariable("REXO_FAKE_IMAGE_HASH", expectedHash);
+
+            await File.WriteAllTextAsync(logPath, string.Empty);
+
+            var second = await executor.ExecuteAsync(step, context, CancellationToken.None);
+            Assert.True(second.Success);
+
+            var secondLog = await File.ReadAllTextAsync(logPath);
+            Assert.DoesNotContain("build ", secondLog, StringComparison.Ordinal);
+            Assert.Contains("run ", secondLog, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", originalPath);
+            Environment.SetEnvironmentVariable("REXO_DOCKER_COMMAND", originalDockerCommand);
+            Environment.SetEnvironmentVariable("REXO_FAKE_IMAGE_HASH", originalFakeImageHash);
+            if (Directory.Exists(repoDir)) Directory.Delete(repoDir, true);
+            if (Directory.Exists(toolsDir)) Directory.Delete(toolsDir, true);
+        }
     }
 
     // ──────────────────────────────────────────────────────────────────────────

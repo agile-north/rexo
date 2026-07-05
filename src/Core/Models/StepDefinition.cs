@@ -27,4 +27,12 @@ public sealed record StepDefinition(
 public sealed record StepContainerDefinition(
     string Image,
     IReadOnlyDictionary<string, string>? Env = null,
-    string? WorkingDirectory = null);
+    string? WorkingDirectory = null,
+    string? Entrypoint = null,
+    string? Dockerfile = null,
+    string? Context = null,
+    StepContainerBuildDefinition? Build = null);
+
+public sealed record StepContainerBuildDefinition(
+    string? Target = null,
+    IReadOnlyDictionary<string, string>? Args = null);

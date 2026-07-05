@@ -163,9 +163,22 @@
             "$ref": "#/$defs/step"
           }
         },
+        "before": {
+          "$ref": "#/$defs/commandHook",
+          "description": "Optional hook executed before this command's steps. Supports a command name string or an explicit step array."
+        },
+        "after": {
+          "$ref": "#/$defs/commandHook",
+          "description": "Optional hook executed after this command's steps. Supports a command name string or an explicit step array."
+        },
         "maxParallel": {
           "type": "integer",
           "description": "Maximum concurrent step execution when parallel groups are used.",
+          "minimum": 1
+        },
+        "maxDepth": {
+          "type": "integer",
+          "description": "Maximum delegated command call depth for this command chain.",
           "minimum": 1
         },
         "merge": {
@@ -186,6 +199,21 @@
         },
         {
           "$ref": "#/$defs/commandMergeEnvelope"
+        }
+      ]
+    },
+    "commandHook": {
+      "description": "Command hook input. Accepts either a command name string or a list of explicit steps.",
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/step"
+          }
         }
       ]
     },
@@ -367,6 +395,36 @@
             "workingDirectory": {
               "type": "string",
               "description": "Working directory inside the container. Defaults to /work."
+            },
+            "entrypoint": {
+              "type": "string",
+              "description": "Optional container entrypoint override passed to docker run --entrypoint."
+            },
+            "dockerfile": {
+              "type": "string",
+              "description": "Optional Dockerfile path used to build container.image when missing or stale. Relative paths are resolved from repository root."
+            },
+            "context": {
+              "type": "string",
+              "description": "Optional docker build context directory used with container.dockerfile. Defaults to repository root."
+            },
+            "build": {
+              "type": "object",
+              "description": "Optional docker build options used when container.dockerfile is configured.",
+              "additionalProperties": false,
+              "properties": {
+                "target": {
+                  "type": "string",
+                  "description": "Optional docker build target stage passed as --target."
+                },
+                "args": {
+                  "type": "object",
+                  "description": "Optional docker build arguments passed as --build-arg key=value.",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              }
             }
           }
         },
@@ -2180,6 +2238,19 @@
         "push": {
           "description": "Global push policy merged with per-artifact push overrides.",
           "$ref": "#/$defs/pushRules"
+        },
+        "commands": {
+          "type": "object",
+          "description": "Global command execution policy settings.",
+          "additionalProperties": false,
+          "properties": {
+            "maxDepth": {
+              "type": "integer",
+              "description": "Default maximum delegated command call depth.",
+              "default": 5,
+              "minimum": 1
+            }
+          }
         }
       }
     },

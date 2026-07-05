@@ -19,6 +19,9 @@ internal sealed class RepoCommandConfigJsonConverter : JsonConverter<RepoCommand
             Args = ReadOptionalObject<Dictionary<string, RepoArgConfig>>(root, "args", options),
             StepOps = ReadOptionalObject<RepoCommandStepOpsConfig>(root, "stepOps", options),
             MaxParallel = ReadOptionalInt(root, "maxParallel"),
+            Before = ReadOptionalHookSteps(root, "before", options),
+            After = ReadOptionalHookSteps(root, "after", options),
+            MaxDepth = ReadOptionalInt(root, "maxDepth"),
         };
 
         if (!root.TryGetProperty("merge", out var mergeElement))
@@ -80,6 +83,23 @@ internal sealed class RepoCommandConfigJsonConverter : JsonConverter<RepoCommand
             writer.WriteNumber("maxParallel", value.MaxParallel.Value);
         }
 
+        if (value.Before is { Count: > 0 })
+        {
+            writer.WritePropertyName("before");
+            JsonSerializer.Serialize(writer, value.Before, options);
+        }
+
+        if (value.After is { Count: > 0 })
+        {
+            writer.WritePropertyName("after");
+            JsonSerializer.Serialize(writer, value.After, options);
+        }
+
+        if (value.MaxDepth.HasValue)
+        {
+            writer.WriteNumber("maxDepth", value.MaxDepth.Value);
+        }
+
         writer.WriteEndObject();
     }
 
@@ -114,5 +134,27 @@ internal sealed class RepoCommandConfigJsonConverter : JsonConverter<RepoCommand
         }
 
         return element.GetInt32();
+    }
+
+    private static List<RepoStepConfig>? ReadOptionalHookSteps(
+        JsonElement root,
+        string propertyName,
+        JsonSerializerOptions options)
+    {
+        if (!root.TryGetProperty(propertyName, out var element) ||
+            element.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        return element.ValueKind switch
+        {
+            JsonValueKind.String =>
+            [
+                new RepoStepConfig(Command: element.GetString()),
+            ],
+            JsonValueKind.Array => JsonSerializer.Deserialize<List<RepoStepConfig>>(element.GetRawText(), options),
+            _ => throw new JsonException($"The '{propertyName}' property must be a string, array, or null."),
+        };
     }
 }

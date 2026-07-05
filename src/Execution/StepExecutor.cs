@@ -1,6 +1,8 @@
 namespace Rexo.Execution;
 
 using System.Collections;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using Rexo.Ci;
 using Rexo.Core.Abstractions;
@@ -8,6 +10,9 @@ using Rexo.Core.Models;
 
 public sealed class StepExecutor : IStepExecutor
 {
+    private const string ContainerSourceHashLabel = "rexo.container.sourceHash";
+    private const string DockerCommandEnvVar = "REXO_DOCKER_COMMAND";
+
     private readonly ICommandExecutor _commandExecutor;
     private readonly ITemplateRenderer _templateRenderer;
     private readonly BuiltinRegistry _builtinRegistry;
@@ -188,20 +193,42 @@ public sealed class StepExecutor : IStepExecutor
         var containerWorkingDirectory = string.IsNullOrWhiteSpace(container.WorkingDirectory)
             ? "/work"
             : container.WorkingDirectory;
+
         Console.WriteLine($"  > [container] image={container.Image} workdir={containerWorkingDirectory} mount=/work");
         Console.WriteLine($"  > [container:{container.Image}] {command}");
 
-        var dockerArgs = BuildContainerRunArgs(command, container, context);
-        if (debugEnabled)
-        {
-            Console.WriteLine($"[debug] Container invocation: docker {string.Join(" ", dockerArgs.Select(QuoteForDebug))}");
-            Console.WriteLine($"[debug] Container env materialization: host+file+runtime+container.env (effective={BuildContainerEnvironment(context, container).Count}, file={context.FileEnvironment.Count}, containerOverrides={(container.Env?.Count ?? 0)})");
-        }
-
         try
         {
+            var prepareResult = await EnsureContainerImageAsync(
+                container,
+                context,
+                secrets,
+                debugEnabled,
+                cancellationToken);
+
+            if (prepareResult is not null)
+            {
+                return new ContainerRunResult(
+                    prepareResult,
+                    new RunExecutionMetadata(
+                        "container",
+                        "container",
+                        container.Image,
+                        containerWorkingDirectory,
+                        false,
+                        "container-image-prepare-failed"));
+            }
+
+            var containerEnvironment = BuildContainerEnvironment(context, container);
+            var dockerArgs = BuildContainerRunArgs(command, container, context, containerEnvironment);
+            if (debugEnabled)
+            {
+                Console.WriteLine($"[debug] Container invocation: docker {string.Join(" ", dockerArgs.Select(QuoteForDebug))}");
+                Console.WriteLine($"[debug] Container env materialization: host+file+runtime+container.env (effective={containerEnvironment.Count}, file={context.FileEnvironment.Count}, containerOverrides={(container.Env?.Count ?? 0)})");
+            }
+
             var result = await ShellRunner.RunProcessAsync(
-                "docker",
+                ResolveDockerCommand(),
                 dockerArgs,
                 context.RepositoryRoot,
                 onStdout: line => Console.WriteLine($"    {SecretMasker.Mask(line, secrets)}"),
@@ -244,7 +271,8 @@ public sealed class StepExecutor : IStepExecutor
     private static IReadOnlyList<string> BuildContainerRunArgs(
         string command,
         StepContainerDefinition container,
-        ExecutionContext context)
+        ExecutionContext context,
+        IReadOnlyDictionary<string, string> containerEnvironment)
     {
         var args = new List<string>
         {
@@ -256,18 +284,209 @@ public sealed class StepExecutor : IStepExecutor
             string.IsNullOrWhiteSpace(container.WorkingDirectory) ? "/work" : container.WorkingDirectory,
         };
 
-        foreach (var envVar in BuildContainerEnvironment(context, container))
+        if (!string.IsNullOrWhiteSpace(container.Entrypoint))
+        {
+            args.Add("--entrypoint");
+            args.Add(container.Entrypoint);
+        }
+
+        foreach (var envVar in containerEnvironment)
         {
             args.Add("-e");
             args.Add(envVar.Key + "=" + envVar.Value);
         }
 
         args.Add(container.Image);
-        args.Add("/bin/sh");
-        args.Add("-c");
-        args.Add(command);
+
+        if (!string.IsNullOrWhiteSpace(container.Entrypoint))
+        {
+            // When entrypoint is explicitly overridden, pass the rendered run command as one
+            // argument to the entrypoint to avoid hidden shell behavior.
+            args.Add(command);
+        }
+        else
+        {
+            args.Add("/bin/sh");
+            args.Add("-c");
+            args.Add(command);
+        }
 
         return args;
+    }
+
+    private static async Task<ShellRunResult?> EnsureContainerImageAsync(
+        StepContainerDefinition container,
+        ExecutionContext context,
+        IReadOnlySet<string> secrets,
+        bool debugEnabled,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(container.Dockerfile))
+        {
+            return null;
+        }
+
+        var dockerfilePath = Path.IsPathRooted(container.Dockerfile)
+            ? container.Dockerfile
+            : Path.GetFullPath(Path.Combine(context.RepositoryRoot, container.Dockerfile));
+        var buildContextPath = string.IsNullOrWhiteSpace(container.Context)
+            ? context.RepositoryRoot
+            : (Path.IsPathRooted(container.Context)
+                ? container.Context
+                : Path.GetFullPath(Path.Combine(context.RepositoryRoot, container.Context)));
+
+        if (!File.Exists(dockerfilePath))
+        {
+            return new ShellRunResult(
+                2,
+                string.Empty,
+                $"Container dockerfile not found: '{dockerfilePath}'.");
+        }
+
+        if (!Directory.Exists(buildContextPath))
+        {
+            return new ShellRunResult(
+                2,
+                string.Empty,
+                $"Container build context directory not found: '{buildContextPath}'.");
+        }
+
+        var sourceHash = await ComputeContainerSourceHashAsync(
+            dockerfilePath,
+            buildContextPath,
+            container.Build,
+            cancellationToken);
+        var inspectArgs = new List<string>
+        {
+            "image",
+            "inspect",
+            container.Image,
+            "--format",
+            $"{{{{ index .Config.Labels \"{ContainerSourceHashLabel}\" }}}}",
+        };
+
+        if (debugEnabled)
+        {
+            Console.WriteLine($"[debug] Container image inspect: docker {string.Join(" ", inspectArgs.Select(QuoteForDebug))}");
+        }
+
+        var inspectResult = await ShellRunner.RunProcessAsync(
+            ResolveDockerCommand(),
+            inspectArgs,
+            context.RepositoryRoot,
+            onStdout: line => Console.WriteLine($"    {SecretMasker.Mask(line, secrets)}"),
+            cancellationToken: cancellationToken);
+
+        var existingHash = inspectResult.ExitCode == 0
+            ? inspectResult.Stdout.Trim()
+            : string.Empty;
+
+        if (inspectResult.ExitCode == 0 && string.Equals(existingHash, sourceHash, StringComparison.Ordinal))
+        {
+            if (debugEnabled)
+            {
+                Console.WriteLine($"[debug] Container image '{container.Image}' source hash matches ({sourceHash}); skipping build.");
+            }
+
+            return null;
+        }
+
+        var reason = inspectResult.ExitCode == 0
+            ? "source hash changed"
+            : "image missing or not inspectable";
+        Console.WriteLine($"  > [container:build] Building image '{container.Image}' ({reason}).");
+
+        var buildArgs = new List<string>
+        {
+            "build",
+            "-f",
+            dockerfilePath,
+            "-t",
+            container.Image,
+            "--label",
+            $"{ContainerSourceHashLabel}={sourceHash}",
+        };
+
+        if (!string.IsNullOrWhiteSpace(container.Build?.Target))
+        {
+            buildArgs.Add("--target");
+            buildArgs.Add(container.Build.Target);
+        }
+
+        if (container.Build?.Args is { Count: > 0 } buildArgMap)
+        {
+            foreach (var (name, value) in buildArgMap.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+            {
+                buildArgs.Add("--build-arg");
+                buildArgs.Add(name + "=" + value);
+            }
+        }
+
+        buildArgs.Add(buildContextPath);
+
+        if (debugEnabled)
+        {
+            Console.WriteLine($"[debug] Container image build: docker {string.Join(" ", buildArgs.Select(QuoteForDebug))}");
+        }
+
+        var buildResult = await ShellRunner.RunProcessAsync(
+            ResolveDockerCommand(),
+            buildArgs,
+            context.RepositoryRoot,
+            onStdout: line => Console.WriteLine($"    {SecretMasker.Mask(line, secrets)}"),
+            cancellationToken: cancellationToken);
+
+        return buildResult.ExitCode == 0 ? null : buildResult;
+    }
+
+    private static async Task<string> ComputeContainerSourceHashAsync(
+        string dockerfilePath,
+        string buildContextPath,
+        StepContainerBuildDefinition? build,
+        CancellationToken cancellationToken)
+    {
+        var buffer = new StringBuilder();
+        buffer.Append("dockerfile=");
+        buffer.AppendLine(NormalizePath(dockerfilePath));
+        buffer.Append("context=");
+        buffer.AppendLine(NormalizePath(buildContextPath));
+        buffer.Append("buildTarget=");
+        buffer.AppendLine(build?.Target ?? string.Empty);
+
+        if (build?.Args is { Count: > 0 } buildArgs)
+        {
+            foreach (var (name, value) in buildArgs.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+            {
+                buffer.Append("buildArg=");
+                buffer.Append(name);
+                buffer.Append('=');
+                buffer.AppendLine(value);
+            }
+        }
+
+        var dockerfileContent = await File.ReadAllTextAsync(dockerfilePath, cancellationToken);
+        buffer.Append("dockerfileContent=");
+        buffer.AppendLine(dockerfileContent);
+
+        var dockerIgnorePath = Path.Combine(buildContextPath, ".dockerignore");
+        if (File.Exists(dockerIgnorePath))
+        {
+            var dockerIgnoreContent = await File.ReadAllTextAsync(dockerIgnorePath, cancellationToken);
+            buffer.Append("dockerignore=");
+            buffer.AppendLine(dockerIgnoreContent);
+        }
+
+        var hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(buffer.ToString()));
+        return Convert.ToHexString(hashBytes).ToLowerInvariant();
+    }
+
+    private static string NormalizePath(string path) =>
+        Path.GetFullPath(path).Replace('\\', '/');
+
+    private static string ResolveDockerCommand()
+    {
+        var configured = Environment.GetEnvironmentVariable(DockerCommandEnvVar);
+        return string.IsNullOrWhiteSpace(configured) ? "docker" : configured;
     }
 
     private static Dictionary<string, string> BuildContainerEnvironment(
@@ -496,6 +715,24 @@ public sealed class StepExecutor : IStepExecutor
                 });
         }
 
+        var projectedDepth = context.CommandCallStack.Count + 1;
+        if (projectedDepth > context.MaxCommandDepth)
+        {
+            sw.Stop();
+            var path = string.Join(" -> ", context.CommandCallStack.Append(commandName));
+            return new StepResult(
+                stepId,
+                false,
+                9,
+                sw.Elapsed,
+                new Dictionary<string, object?>
+                {
+                    ["error"] =
+                        $"REXO-CMD-CYCLE: Maximum command delegation depth exceeded (maxDepth={context.MaxCommandDepth})\n\nPath:\n  {path}",
+                    ["errorCode"] = Rexo.Core.Models.ErrorCodes.CommandCycle,
+                });
+        }
+
         var invocation = new CommandInvocation(
             context.Args,
             context.Options,
@@ -504,6 +741,7 @@ public sealed class StepExecutor : IStepExecutor
             context.RepositoryRoot)
         {
             CallStack = context.CommandCallStack,
+            MaxCommandDepth = context.MaxCommandDepth,
         };
 
         var result = await _commandExecutor.ExecuteAsync(commandName, invocation, cancellationToken);

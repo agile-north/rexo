@@ -1271,6 +1271,60 @@ public sealed class RepoConfigurationLoaderTests
   }
 
   [Fact]
+  public async Task LoadAsyncParsesCommandHooksAndMaxDepth()
+  {
+    var dir = Path.Combine(Path.GetTempPath(), $"rexo-hooks-depth-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(dir);
+
+    var configPath = Path.Combine(dir, "rexo.json");
+    await File.WriteAllTextAsync(configPath, """
+      {
+        "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+        "schemaVersion": "1.0",
+        "name": "sample",
+        "runtime": {
+          "commands": {
+            "maxDepth": 7
+          }
+        },
+        "commands": {
+          "release": {
+            "maxDepth": 3,
+            "before": "gh",
+            "after": [
+              { "id": "post-release", "command": "notify" }
+            ],
+            "steps": [
+              { "id": "main", "uses": "builtin:resolve-version" }
+            ]
+          }
+        },
+        "aliases": {}
+      }
+      """);
+
+    try
+    {
+      var config = await RepoConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
+      var release = config.Commands!["release"];
+
+      Assert.Equal(7, config.Runtime?.Commands?.MaxDepth);
+      Assert.Equal(3, release.MaxDepth);
+
+      var before = Assert.Single(release.Before ?? []);
+      Assert.Equal("gh", before.Command);
+
+      var after = Assert.Single(release.After ?? []);
+      Assert.Equal("post-release", after.Id);
+      Assert.Equal("notify", after.Command);
+    }
+    finally
+    {
+      Directory.Delete(dir, true);
+    }
+  }
+
+  [Fact]
   public async Task LoadAsyncParsesRunStepContainer()
   {
     var dir = Path.Combine(Path.GetTempPath(), $"rexo-step-container-{Guid.NewGuid():N}");
@@ -1291,6 +1345,15 @@ public sealed class RepoConfigurationLoaderTests
                 "container": {
                   "image": "mcr.microsoft.com/dotnet/sdk:10.0",
                   "workingDirectory": "/work",
+                  "entrypoint": "dotnet",
+                  "dockerfile": "Dockerfile",
+                  "context": ".",
+                  "build": {
+                    "target": "publish",
+                    "args": {
+                      "APP_VERSION": "1.2.3"
+                    }
+                  },
                   "env": {
                     "DOTNET_CLI_TELEMETRY_OPTOUT": "1"
                   }
@@ -1311,6 +1374,11 @@ public sealed class RepoConfigurationLoaderTests
       Assert.NotNull(step.Container);
       Assert.Equal("mcr.microsoft.com/dotnet/sdk:10.0", step.Container?.Image);
       Assert.Equal("/work", step.Container?.WorkingDirectory);
+      Assert.Equal("dotnet", step.Container?.Entrypoint);
+      Assert.Equal("Dockerfile", step.Container?.Dockerfile);
+      Assert.Equal(".", step.Container?.Context);
+      Assert.Equal("publish", step.Container?.Build?.Target);
+      Assert.Equal("1.2.3", step.Container?.Build?.Args?["APP_VERSION"]);
       Assert.Equal("1", step.Container?.Env?["DOTNET_CLI_TELEMETRY_OPTOUT"]);
     }
     finally

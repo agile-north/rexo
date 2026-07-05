@@ -267,10 +267,10 @@ public static class BuiltinCommandRegistration
             if (visibleCommands.Count > 0)
             {
                 lines.Add(string.Empty);
-            lines.Add("Config-defined commands:");
+                lines.Add("Config-defined commands:");
                 foreach (var (name, cmd) in visibleCommands)
                 {
-                var desc = cmd.Description ?? string.Empty;
+                    var desc = cmd.Description ?? string.Empty;
                 lines.Add($"  {name,-20} {desc}");
             }
             }

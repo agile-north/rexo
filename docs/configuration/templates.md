@@ -84,14 +84,17 @@ The push summary is derived from `__artifacts` and `__pushDecisions` emitted by 
 ## Filters
 
 Pipe syntax: `{{value | slug}}`, `{{value | upper}}`, `{{value | lower}}`,
-`{{value | default(fallback)}}`
+`{{value | default(fallback)}}`, `{{value | coalesce(a, b, 'fallback')}}`
+
+Coalescing operator syntax: `{{args.tag ?? vars.release.tag ?? 'dev'}}`
 
 Supported filters:
 
 - `slug` — Convert to slug format (lowercase, hyphens)
 - `upper` — Convert to uppercase
 - `lower` — Convert to lowercase
-- `default(fallback)` — Use fallback value if variable is empty/missing
+- `default(fallback)` — Use fallback value if variable is empty, whitespace-only, or missing
+- `coalesce(a, b, c)` — Return the first non-empty value from the current value, then each fallback candidate in order. Whitespace-only values count as empty.
 - `prefix(text)` — Prepend text if value is non-empty
 - `suffix(text)` — Append text if value is non-empty
 - `trim` — Remove leading/trailing whitespace
@@ -100,13 +103,21 @@ Supported filters:
 
 Chain filters with pipes:
 
-```
+```text
 {{args.dir | suffix('/dotnet-build.sarif') | prefix('/p:ErrorLog=')}}
+```
+
+Coalescing examples:
+
+```text
+{{args.version | coalesce(vars.release.version, env.RELEASE_VERSION, '0.1.0-dev')}}
+{{args.dir | coalesce(outputs.analysis.reports, 'artifacts/analysis') | suffix('/report.sarif')}}
+{{args.tag ?? vars.release.tag ?? env.RELEASE_TAG ?? 'dev'}}
 ```
 
 Regex replace example:
 
-```
+```text
 {{args.branch | replacePattern(/feature\/(.*)/, '$1')}}
 ```
 
@@ -121,7 +132,7 @@ Supported whole-expression comparisons:
 
 Examples:
 
-```
+```text
 {{version.major == '1'}}        // true if major version is 1
 {{options.ci != ''}}             // true if ci option is set
 {{vars.dotnet.test.coverage.mode == 'none'}}  // true if coverage disabled
@@ -129,7 +140,7 @@ Examples:
 
 Boolean literal support:
 
-```
+```text
 {{options.confirm == true}}      // true if confirm option is true
 {{options.dry-run == true}}      // true if dry-run is enabled for the invocation
 ```

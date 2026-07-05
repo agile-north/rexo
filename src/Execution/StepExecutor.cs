@@ -1,6 +1,5 @@
 namespace Rexo.Execution;
 
-using System.Collections;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -495,14 +494,6 @@ public sealed class StepExecutor : IStepExecutor
     {
         var env = new Dictionary<string, string>(StringComparer.Ordinal);
 
-        foreach (DictionaryEntry entry in Environment.GetEnvironmentVariables())
-        {
-            if (entry.Key is string key && entry.Value is string value)
-            {
-                env[key] = value;
-            }
-        }
-
         foreach (var (key, value) in context.FileEnvironment)
         {
             env[key] = value;
@@ -766,6 +757,44 @@ public sealed class StepExecutor : IStepExecutor
         sw.Stop();
 
         var outputs = new Dictionary<string, object?> { ["message"] = result.Message };
+
+        if (!result.Success)
+        {
+            var propagated = false;
+
+            if (result.StructuredErrors is { Count: > 0 })
+            {
+                var error = result.StructuredErrors[0];
+                outputs["errorCode"] = error.Code;
+                outputs["error"] = error.Message;
+                propagated = true;
+            }
+
+            if (!propagated)
+            {
+                var failedInnerStep = result.Steps.FirstOrDefault(step => !step.Success);
+                if (failedInnerStep is not null)
+                {
+                    if (failedInnerStep.Outputs.TryGetValue("errorCode", out var errorCode))
+                    {
+                        outputs["errorCode"] = errorCode;
+                        propagated = true;
+                    }
+
+                    if (failedInnerStep.Outputs.TryGetValue("error", out var errorMessage))
+                    {
+                        outputs["error"] = errorMessage;
+                        propagated = true;
+                    }
+                }
+            }
+
+            if (!propagated && !string.IsNullOrWhiteSpace(result.Message))
+            {
+                outputs["error"] = result.Message;
+            }
+        }
+
         if (result.Version is not null)
         {
             outputs["__version"] = result.Version;

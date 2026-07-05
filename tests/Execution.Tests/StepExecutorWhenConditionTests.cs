@@ -12,6 +12,8 @@ using Rexo.Templating;
 /// </summary>
 public sealed class StepExecutorWhenConditionTests
 {
+    private static readonly SemaphoreSlim ContainerEnvMutationGate = new(1, 1);
+
     // ──────────────────────────────────────────────────────────────────────────
     // Helpers
     // ──────────────────────────────────────────────────────────────────────────
@@ -537,6 +539,8 @@ public sealed class StepExecutorWhenConditionTests
             return;
         }
 
+        await ContainerEnvMutationGate.WaitAsync();
+
         var executor = CreateExecutor();
         var (toolsDir, logPath) = await CreateFakeDockerAsync();
         var dockerCommandPath = Path.Combine(toolsDir, "docker.cmd");
@@ -576,7 +580,9 @@ public sealed class StepExecutorWhenConditionTests
 
             var result = await executor.ExecuteAsync(step, context, CancellationToken.None);
 
-            Assert.True(result.Success);
+            Assert.True(
+                result.Success,
+                $"Container run should succeed. ExitCode={result.ExitCode}, error={result.Outputs.GetValueOrDefault("error")}, stderr={result.Outputs.GetValueOrDefault("stderr")}, stdout={result.Outputs.GetValueOrDefault("stdout")}");
 
             var log = await File.ReadAllTextAsync(logPath);
             Assert.Contains("build ", log, StringComparison.Ordinal);
@@ -592,6 +598,7 @@ public sealed class StepExecutorWhenConditionTests
             Environment.SetEnvironmentVariable("REXO_FAKE_IMAGE_HASH", originalFakeImageHash);
             if (Directory.Exists(repoDir)) Directory.Delete(repoDir, true);
             if (Directory.Exists(toolsDir)) Directory.Delete(toolsDir, true);
+            ContainerEnvMutationGate.Release();
         }
     }
 
@@ -602,6 +609,8 @@ public sealed class StepExecutorWhenConditionTests
         {
             return;
         }
+
+        await ContainerEnvMutationGate.WaitAsync();
 
         var executor = CreateExecutor();
         var (toolsDir, logPath) = await CreateFakeDockerAsync();
@@ -638,7 +647,9 @@ public sealed class StepExecutorWhenConditionTests
             };
 
             var first = await executor.ExecuteAsync(step, context, CancellationToken.None);
-            Assert.True(first.Success);
+            Assert.True(
+                first.Success,
+                $"First container run should succeed. ExitCode={first.ExitCode}, error={first.Outputs.GetValueOrDefault("error")}, stderr={first.Outputs.GetValueOrDefault("stderr")}, stdout={first.Outputs.GetValueOrDefault("stdout")}");
 
             var firstLog = await File.ReadAllTextAsync(logPath);
             Assert.Contains("build ", firstLog, StringComparison.Ordinal);
@@ -651,7 +662,9 @@ public sealed class StepExecutorWhenConditionTests
             await File.WriteAllTextAsync(logPath, string.Empty);
 
             var second = await executor.ExecuteAsync(step, context, CancellationToken.None);
-            Assert.True(second.Success);
+            Assert.True(
+                second.Success,
+                $"Second container run should succeed. ExitCode={second.ExitCode}, error={second.Outputs.GetValueOrDefault("error")}, stderr={second.Outputs.GetValueOrDefault("stderr")}, stdout={second.Outputs.GetValueOrDefault("stdout")}");
 
             var secondLog = await File.ReadAllTextAsync(logPath);
             Assert.DoesNotContain("build ", secondLog, StringComparison.Ordinal);
@@ -664,6 +677,7 @@ public sealed class StepExecutorWhenConditionTests
             Environment.SetEnvironmentVariable("REXO_FAKE_IMAGE_HASH", originalFakeImageHash);
             if (Directory.Exists(repoDir)) Directory.Delete(repoDir, true);
             if (Directory.Exists(toolsDir)) Directory.Delete(toolsDir, true);
+            ContainerEnvMutationGate.Release();
         }
     }
 

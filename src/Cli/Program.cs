@@ -60,7 +60,7 @@ public static class Program
             "capabilities" => await RunBuiltinAsync(executor, "capabilities", EmptyInvocation(workingDir, outputSettings, dryRun, debug), config, outputSettings, verbose, quiet, cancellationToken),
             "init" => await RunInitBuiltinAsync(executor, cleanArgs, workingDir, config, outputSettings, verbose, quiet, dryRun, debug, cancellationToken),
             "new" => await RunInitBuiltinAsync(executor, cleanArgs, workingDir, config, outputSettings, verbose, quiet, dryRun, debug, cancellationToken),
-            "list" => await RunBuiltinAsync(executor, "list", EmptyInvocation(workingDir, outputSettings, dryRun, debug), config, outputSettings, verbose, quiet, cancellationToken),
+            "list" => await RunListBuiltinAsync(executor, cleanArgs, workingDir, config, outputSettings, verbose, quiet, dryRun, debug, cancellationToken),
             "explain" => await RunExplainAsync(executor, cleanArgs, workingDir, config, outputSettings, verbose, quiet, dryRun, debug, cancellationToken),
             "config" => await RunConfigSubcommandAsync(cleanArgs, executor, workingDir, config, outputSettings, verbose, quiet, dryRun, debug, cancellationToken),
             "policies" => await RunPoliciesSubcommandAsync("policies", cleanArgs, executor, workingDir, config, outputSettings, verbose, quiet, dryRun, debug, cancellationToken),
@@ -287,6 +287,7 @@ public static class Program
             command.Options ?? [],
             command.Steps ?? [])
         {
+            Hidden = command.Hidden,
             Args = command.Args ?? [],
             Merge = command.Merge,
             MaxParallel = command.MaxParallel,
@@ -536,6 +537,32 @@ public static class Program
         var exitCode = await WriteResultAsync(result, invocation, verbose, quiet, cancellationToken);
 
         await WriteRunManifestAsync(result, "init", workingDir, startedAt, completedAt, invocation.JsonFile, config, outputSettings, cancellationToken);
+
+        return exitCode;
+    }
+
+    private static async Task<int> RunListBuiltinAsync(
+        DefaultCommandExecutor executor,
+        IReadOnlyList<string> args,
+        string workingDir,
+        RepoConfig? config,
+        CommandOutputSettings outputSettings,
+        bool verbose,
+        bool quiet,
+        bool dryRun,
+        bool debug,
+        CancellationToken cancellationToken)
+    {
+        var remainingArgs = args.Skip(1).ToList();
+        var (parsedArgs, parsedOptions) = ParseArgsAndOptions(remainingArgs);
+        var invocation = CreateInvocation(parsedArgs, parsedOptions, outputSettings, workingDir, dryRun, debug);
+
+        var startedAt = DateTimeOffset.UtcNow;
+        var result = await ExecuteCommandAsync(executor, "list", invocation, cancellationToken);
+        var completedAt = DateTimeOffset.UtcNow;
+        var exitCode = await WriteResultAsync(result, invocation, verbose, quiet, cancellationToken);
+
+        await WriteRunManifestAsync(result, "list", workingDir, startedAt, completedAt, invocation.JsonFile, config, outputSettings, cancellationToken);
 
         return exitCode;
     }
@@ -1035,6 +1062,7 @@ public static class Program
         Console.WriteLine("Built-in commands:");
         Console.WriteLine("  version                     Show tool version");
         Console.WriteLine("  list                        List all available commands");
+        Console.WriteLine("      --include-hidden        Also show hidden config commands");
         Console.WriteLine("  explain <command>           Explain a command (or alias)");
         Console.WriteLine("  explain version             Show version provider configuration");
         Console.WriteLine("  doctor                      Check environment and configuration");

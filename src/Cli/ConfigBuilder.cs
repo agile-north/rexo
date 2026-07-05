@@ -224,6 +224,7 @@ internal static class ConfigBuilder
             command.Options ?? [],
             command.Steps ?? [])
         {
+            Hidden = command.Hidden,
             Args = command.Args ?? [],
             Merge = command.Merge,
             MaxParallel = command.MaxParallel,

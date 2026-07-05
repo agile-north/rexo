@@ -12,6 +12,7 @@ Each key is a command name (spaces allowed for multi-word commands).
 "commands": {
   "build": {
     "description": "Build the project",
+    "hidden": false,              // optional: omit from default discovery when true
     "before": "gh",                // optional hook: string command alias
     "options": {
       "configuration": { "type": "string", "default": "Release" }
@@ -27,6 +28,39 @@ Each key is a command name (spaces allowed for multi-word commands).
   }
 }
 ```
+
+### Hidden commands (`hidden`)
+
+Use `hidden: true` for helper commands that should stay callable but not appear in default discovery output.
+
+- Hidden commands are omitted from `rx list`.
+- `rx list --include-hidden` shows them on demand.
+- Hidden commands are still executable by name.
+- Hidden commands can still be called from other commands.
+- `rx explain <command>` still works when the hidden command name is explicitly requested.
+- Aliases may target hidden commands.
+
+Example:
+
+```jsonc
+"commands": {
+  "_preflight": {
+    "hidden": true,
+    "steps": [
+      { "uses": "builtin:validate" },
+      { "uses": "builtin:resolve-version" }
+    ]
+  },
+  "release": {
+    "steps": [
+      { "command": "_preflight" },
+      { "uses": "builtin:push-artifacts", "with": { "confirm": "true" } }
+    ]
+  }
+}
+```
+
+`hidden` is a discovery-only feature, not an access-control boundary.
 
 ### Command hooks (`before` / `after`)
 

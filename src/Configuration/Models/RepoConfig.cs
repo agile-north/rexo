@@ -54,6 +54,9 @@ public sealed record RepoCommandConfig(
     Dictionary<string, RepoOptionConfig> Options,
     List<RepoStepConfig> Steps)
 {
+    /// <summary>When true, omit this command from default discovery surfaces like list/help.</summary>
+    public bool? Hidden { get; init; }
+
     public Dictionary<string, RepoArgConfig>? Args { get; init; }
 
     /// <summary>

@@ -812,6 +812,64 @@ public sealed class CliSmokeTests
     }
 
     [Fact]
+    public async Task ListIncludeHiddenShowsHiddenCommandsWhenRequested()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"rexo-cli-list-hidden-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        var originalDirectory = Environment.CurrentDirectory;
+
+        try
+        {
+            await File.WriteAllTextAsync(
+                    Path.Combine(tempDir, "rexo.json"),
+                    """
+                                {
+                                    "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+                                    "schemaVersion": "1.0",
+                                    "name": "sample",
+                                    "commands": {
+                                        "visible": {
+                                            "steps": [
+                                                { "run": "echo visible" }
+                                            ]
+                                        },
+                                        "hidden-helper": {
+                                            "hidden": true,
+                                            "steps": [
+                                                { "run": "echo hidden" }
+                                            ]
+                                        }
+                                    }
+                                }
+                                """);
+
+            Environment.CurrentDirectory = tempDir;
+
+            var defaultListJsonPath = Path.Combine(tempDir, "list-default.json");
+            var defaultListExitCode = await Program.ExecuteAsync(["--json-file", defaultListJsonPath, "--json", "list"], CancellationToken.None);
+            Assert.Equal(0, defaultListExitCode);
+
+            var defaultListOutput = await File.ReadAllTextAsync(defaultListJsonPath);
+            Assert.Contains("visible", defaultListOutput, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("hidden-helper", defaultListOutput, StringComparison.OrdinalIgnoreCase);
+
+            var includeHiddenListJsonPath = Path.Combine(tempDir, "list-include-hidden.json");
+            var includeHiddenListExitCode = await Program.ExecuteAsync(["--json-file", includeHiddenListJsonPath, "--json", "list", "--include-hidden"], CancellationToken.None);
+            Assert.Equal(0, includeHiddenListExitCode);
+
+            var includeHiddenListOutput = await File.ReadAllTextAsync(includeHiddenListJsonPath);
+            Assert.Contains("visible", includeHiddenListOutput, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("hidden-helper", includeHiddenListOutput, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Environment.CurrentDirectory = originalDirectory;
+            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
     public async Task StandardTestStandaloneRunsGracefullyWithNoInnerLayer()
     {
         // When extends: ["embedded:standard"] is used alone (no dotnet/node layer),

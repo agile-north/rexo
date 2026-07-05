@@ -235,6 +235,9 @@ public static class BuiltinCommandRegistration
         CommandRegistry registry,
         RepoConfig? config)
     {
+        var includeHidden = invocation.Options.TryGetValue("include-hidden", out var includeHiddenValue) &&
+            string.Equals(includeHiddenValue, "true", StringComparison.OrdinalIgnoreCase);
+
         var lines = new List<string>();
         lines.Add("Built-in commands:");
         lines.Add("  version              Show the version of repo");
@@ -257,12 +260,19 @@ public static class BuiltinCommandRegistration
 
         if (config is not null && config.Commands?.Count > 0)
         {
-            lines.Add(string.Empty);
-            lines.Add("Config-defined commands:");
-            foreach (var (name, cmd) in config.Commands!)
+            var visibleCommands = config.Commands
+                .Where(entry => includeHidden || entry.Value.Hidden != true)
+                .ToList();
+
+            if (visibleCommands.Count > 0)
             {
+                lines.Add(string.Empty);
+            lines.Add("Config-defined commands:");
+                foreach (var (name, cmd) in visibleCommands)
+                {
                 var desc = cmd.Description ?? string.Empty;
                 lines.Add($"  {name,-20} {desc}");
+            }
             }
         }
 

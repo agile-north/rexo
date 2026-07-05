@@ -448,6 +448,7 @@ public sealed partial class RepoConfigurationLoader
             Options: MergeDictionaries(baseCmd.Options, childCmd.Options) ?? [],
             Steps: baseCmd.Steps ?? [])
         {
+            Hidden = childCmd.Hidden ?? baseCmd.Hidden,
             Args = MergeDictionaries(baseCmd.Args, childCmd.Args),
             MergeConfig = childCmd.MergeConfig,
             Merge = effectiveMode,

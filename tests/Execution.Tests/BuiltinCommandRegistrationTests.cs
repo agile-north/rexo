@@ -442,4 +442,154 @@ public sealed class BuiltinCommandRegistrationTests
         Assert.True(result.Success);
         Assert.Contains("built-in", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task ListOmitsHiddenConfigCommands()
+    {
+        var config = new RepoConfig(
+            Name: "test",
+            Commands: new Dictionary<string, RepoCommandConfig>
+            {
+                ["visible"] = new RepoCommandConfig(
+                    Description: "Shown in list",
+                    Options: [],
+                    Steps: []),
+                ["hidden-helper"] = new RepoCommandConfig(
+                    Description: "Hidden from list",
+                    Options: [],
+                    Steps: [])
+                {
+                    Hidden = true,
+                },
+            },
+            Aliases: [])
+        { SchemaVersion = "1.0" };
+
+        var registry = BuiltinCommandRegistration.CreateDefault(config);
+        var executor = new DefaultCommandExecutor(registry);
+
+        var result = await executor.ExecuteAsync("list", EmptyInvocation(), CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("visible", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("hidden-helper", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ExplainHiddenCommandReturnsCommandDetailsWhenExplicitlyRequested()
+    {
+        var config = new RepoConfig(
+            Name: "test",
+            Commands: new Dictionary<string, RepoCommandConfig>
+            {
+                ["hidden-helper"] = new RepoCommandConfig(
+                    Description: "Reusable hidden helper",
+                    Options: [],
+                    Steps: [new RepoStepConfig { Id = "helper", Uses = "builtin:resolve-version" }])
+                {
+                    Hidden = true,
+                },
+            },
+            Aliases: [])
+        {
+            SchemaVersion = "1.0",
+            Versioning = new RepoVersioningConfig(Provider: "fixed", Fallback: "1.2.3"),
+        };
+
+        var registry = BuiltinCommandRegistration.CreateDefault(config);
+        var executor = new DefaultCommandExecutor(registry);
+
+        var invocation = new CommandInvocation(
+            new Dictionary<string, string> { ["command"] = "hidden-helper" },
+            new Dictionary<string, string?>(),
+            Json: false,
+            JsonFile: null,
+            WorkingDirectory: "C:\\repo");
+
+        var result = await executor.ExecuteAsync("explain", invocation, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("hidden-helper", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Reusable hidden helper", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ExplainAliasToHiddenTargetReturnsAliasAndTargetInfo()
+    {
+        var config = new RepoConfig(
+            Name: "test",
+            Commands: new Dictionary<string, RepoCommandConfig>
+            {
+                ["hidden-helper"] = new RepoCommandConfig(
+                    Description: "Reusable hidden helper",
+                    Options: [],
+                    Steps: [new RepoStepConfig { Id = "helper", Uses = "builtin:resolve-version" }])
+                {
+                    Hidden = true,
+                },
+            },
+            Aliases: new Dictionary<string, string> { ["helper"] = "hidden-helper" })
+        {
+            SchemaVersion = "1.0",
+            Versioning = new RepoVersioningConfig(Provider: "fixed", Fallback: "1.2.3"),
+        };
+
+        var registry = BuiltinCommandRegistration.CreateDefault(config);
+        var executor = new DefaultCommandExecutor(registry);
+
+        var invocation = new CommandInvocation(
+            new Dictionary<string, string> { ["command"] = "helper" },
+            new Dictionary<string, string?>(),
+            Json: false,
+            JsonFile: null,
+            WorkingDirectory: "C:\\repo");
+
+        var result = await executor.ExecuteAsync("explain", invocation, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("helper", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("hidden-helper", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("alias", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ListIncludesHiddenCommandsWhenIncludeHiddenOptionIsTrue()
+    {
+        var config = new RepoConfig(
+            Name: "test",
+            Commands: new Dictionary<string, RepoCommandConfig>
+            {
+                ["visible"] = new RepoCommandConfig(
+                    Description: "Shown in list",
+                    Options: [],
+                    Steps: []),
+                ["hidden-helper"] = new RepoCommandConfig(
+                    Description: "Shown only when requested",
+                    Options: [],
+                    Steps: [])
+                {
+                    Hidden = true,
+                },
+            },
+            Aliases: [])
+        { SchemaVersion = "1.0" };
+
+        var registry = BuiltinCommandRegistration.CreateDefault(config);
+        var executor = new DefaultCommandExecutor(registry);
+        var invocation = new CommandInvocation(
+            new Dictionary<string, string>(),
+            new Dictionary<string, string?>
+            {
+                ["include-hidden"] = "true",
+            },
+            Json: false,
+            JsonFile: null,
+            WorkingDirectory: "C:\\repo");
+
+        var result = await executor.ExecuteAsync("list", invocation, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("visible", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("hidden-helper", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
 }

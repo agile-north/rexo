@@ -458,6 +458,59 @@ public sealed class CommandLayeringTests
     }
 
     [Fact]
+    public async Task HiddenCommandsRemainDirectlyInvokableAndDelegatable()
+    {
+        var config = new RepoConfig(
+            Name: "hidden-command-test",
+            Commands: new Dictionary<string, RepoCommandConfig>
+            {
+                ["hidden-helper"] = new RepoCommandConfig(
+                    Description: "internal helper",
+                    Options: [],
+                    Steps:
+                    [
+                        new RepoStepConfig(Id: "version", Uses: "builtin:resolve-version")
+                    ])
+                {
+                    Hidden = true,
+                },
+                ["public-release"] = new RepoCommandConfig(
+                    Description: "public wrapper",
+                    Options: [],
+                    Steps:
+                    [
+                        new RepoStepConfig(Id: "call-hidden", Command: "hidden-helper")
+                    ]),
+            },
+            Aliases: [])
+        {
+            Versioning = new RepoVersioningConfig(Provider: "fixed", Fallback: "1.2.3"),
+        };
+
+        var registry = new CommandRegistry();
+        var executor = new DefaultCommandExecutor(registry);
+        var loader = CreateLoader();
+        loader.LoadInto(registry, config, Path.GetTempPath(), executor);
+
+        var direct = await executor.ExecuteAsync(
+            "hidden-helper",
+            EmptyInvocation(Path.GetTempPath()),
+            CancellationToken.None);
+
+        Assert.True(direct.Success, $"hidden command should remain directly invokable. Message: {direct.Message}");
+        Assert.NotNull(direct.Version);
+        Assert.Equal("1.2.3", direct.Version?.SemVer);
+
+        var delegated = await executor.ExecuteAsync(
+            "public-release",
+            EmptyInvocation(Path.GetTempPath()),
+            CancellationToken.None);
+
+        Assert.True(delegated.Success, $"public command should be able to delegate to hidden command. Message: {delegated.Message}");
+        Assert.Equal("call-hidden", Assert.Single(delegated.Steps).StepId);
+    }
+
+    [Fact]
     public async Task CrossCommandCycleIsDetected()
     {
         // build → release → build should produce a cycle error.

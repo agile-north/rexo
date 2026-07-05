@@ -1289,6 +1289,7 @@ public sealed class RepoConfigurationLoaderTests
         },
         "commands": {
           "release": {
+            "hidden": true,
             "maxDepth": 3,
             "before": "gh",
             "after": [
@@ -1309,6 +1310,7 @@ public sealed class RepoConfigurationLoaderTests
       var release = config.Commands!["release"];
 
       Assert.Equal(7, config.Runtime?.Commands?.MaxDepth);
+      Assert.True(release.Hidden);
       Assert.Equal(3, release.MaxDepth);
 
       var before = Assert.Single(release.Before ?? []);

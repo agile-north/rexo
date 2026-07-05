@@ -89,7 +89,7 @@ Each step uses exactly one of:
 | `{{version.semVer}}` | Resolved semantic version |
 | `{{steps.<id>.output.<key>}}` | Output from a completed step |
 
-Filters: `| slug`, `| upper`, `| lower`, `| default(fallback)`
+Filters: `| slug`, `| upper`, `| lower`, `| default(fallback)`, `| coalesce(a, b, 'fallback')`; coalescing operator: `??`
 
 ### Versioning
 

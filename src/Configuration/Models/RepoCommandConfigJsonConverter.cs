@@ -16,6 +16,7 @@ internal sealed class RepoCommandConfigJsonConverter : JsonConverter<RepoCommand
 
         var command = new RepoCommandConfig(description, optionsValue, steps)
         {
+            Hidden = ReadOptionalBool(root, "hidden"),
             Args = ReadOptionalObject<Dictionary<string, RepoArgConfig>>(root, "args", options),
             StepOps = ReadOptionalObject<RepoCommandStepOpsConfig>(root, "stepOps", options),
             MaxParallel = ReadOptionalInt(root, "maxParallel"),
@@ -48,6 +49,11 @@ internal sealed class RepoCommandConfigJsonConverter : JsonConverter<RepoCommand
         if (!string.IsNullOrEmpty(value.Description))
         {
             writer.WriteString("description", value.Description);
+        }
+
+        if (value.Hidden.HasValue)
+        {
+            writer.WriteBoolean("hidden", value.Hidden.Value);
         }
 
         writer.WritePropertyName("options");
@@ -134,6 +140,17 @@ internal sealed class RepoCommandConfigJsonConverter : JsonConverter<RepoCommand
         }
 
         return element.GetInt32();
+    }
+
+    private static bool? ReadOptionalBool(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var element) ||
+            element.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        return element.GetBoolean();
     }
 
     private static List<RepoStepConfig>? ReadOptionalHookSteps(

@@ -1059,6 +1059,7 @@ public sealed class ConfigCommandLoader
             commandConfig.Options ?? [],
             BuildCommandSteps(commandConfig))
         {
+            Hidden = commandConfig.Hidden,
             Args = commandConfig.Args ?? [],
             Merge = commandConfig.Merge,
             MaxParallel = commandConfig.MaxParallel,

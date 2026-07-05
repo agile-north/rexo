@@ -119,6 +119,108 @@ public sealed class TemplateRendererTests
     }
 
     [Fact]
+    public void RenderDefaultFilterCanResolveFallbackVariable()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string>
+        {
+            ["fallback"] = "release",
+        });
+
+        var result = renderer.Render("{{args.missing | default(args.fallback)}}", ctx);
+        Assert.Equal("release", result);
+    }
+
+    [Fact]
+    public void RenderCoalesceFilterReturnsCurrentValueWhenPresent()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string>
+        {
+            ["tag"] = "v1",
+            ["fallback"] = "release",
+        });
+
+        var result = renderer.Render("{{args.tag | coalesce(args.fallback, 'dev')}}", ctx);
+        Assert.Equal("v1", result);
+    }
+
+    [Fact]
+    public void RenderCoalesceFilterFallsBackAcrossVariablesAndLiteral()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string>
+        {
+            ["fallback"] = "release",
+        });
+
+        var result = renderer.Render("{{args.tag | coalesce(args.missing, args.fallback, 'dev')}}", ctx);
+        Assert.Equal("release", result);
+    }
+
+    [Fact]
+    public void RenderCoalesceFilterCanResolveEnvironmentFallback()
+    {
+        const string key = "REXO_TEMPLATE_COALESCE_ENV_TEST";
+        var original = Environment.GetEnvironmentVariable(key);
+        Environment.SetEnvironmentVariable(key, "from-env");
+
+        try
+        {
+            var renderer = new TemplateRenderer();
+            var ctx = MakeContext();
+
+            var result = renderer.Render($"{{{{args.tag | coalesce(args.missing, env.{key}, 'dev')}}}}", ctx);
+            Assert.Equal("from-env", result);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(key, original);
+        }
+    }
+
+    [Fact]
+    public void RenderCoalesceFilterTreatsWhitespaceAsEmpty()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string>
+        {
+            ["tag"] = "   ",
+            ["fallback"] = "release",
+        });
+
+        var result = renderer.Render("{{args.tag | coalesce(args.fallback, 'dev')}}", ctx);
+        Assert.Equal("release", result);
+    }
+
+    [Fact]
+    public void RenderSupportsNullCoalescingOperator()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string>
+        {
+            ["fallback"] = "release",
+        });
+
+        var result = renderer.Render("{{args.tag ?? args.fallback ?? 'dev'}}", ctx);
+        Assert.Equal("release", result);
+    }
+
+    [Fact]
+    public void RenderSupportsNullCoalescingOperatorWithFilters()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string>
+        {
+            ["tag"] = "   ",
+            ["fallback"] = "release",
+        });
+
+        var result = renderer.Render("{{args.tag | trim ?? args.fallback | upper ?? 'dev'}}", ctx);
+        Assert.Equal("RELEASE", result);
+    }
+
+    [Fact]
     public void RenderResolvesVersionMajorMinorPatch()
     {
         var renderer = new TemplateRenderer();
@@ -244,6 +346,26 @@ public sealed class TemplateRendererTests
 
         Assert.Equal("true", renderer.Render("{{options.confirm | default(false) == false}}", missing));
         Assert.Equal("false", renderer.Render("{{options.confirm | default(false) == false}}", confirmed));
+    }
+
+    [Fact]
+    public void EqualityExpressionSupportsCoalesceOperands()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string> { ["fallback"] = "release" });
+
+        var result = renderer.Render("{{args.tag | coalesce(args.fallback, 'dev') == 'release'}}", ctx);
+        Assert.Equal("true", result);
+    }
+
+    [Fact]
+    public void EqualityExpressionSupportsNullCoalescingOperatorOperands()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string> { ["fallback"] = "release" });
+
+        var result = renderer.Render("{{args.tag ?? args.fallback ?? 'dev' == 'release'}}", ctx);
+        Assert.Equal("true", result);
     }
 
     [Fact]
@@ -489,6 +611,14 @@ public sealed class TemplateRendererTests
     }
 
     [Fact]
+    public void PrefixFilterReturnsEmptyWhenInputIsWhitespace()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string> { ["val"] = "   " });
+        Assert.Equal("", renderer.Render("{{args.val | prefix('--flag ')}}", ctx));
+    }
+
+    [Fact]
     public void PrefixFilterReturnsEmptyWhenVariableIsMissing()
     {
         var renderer = new TemplateRenderer();
@@ -509,6 +639,14 @@ public sealed class TemplateRendererTests
     {
         var renderer = new TemplateRenderer();
         var ctx = MakeContext(args: new Dictionary<string, string> { ["val"] = "" });
+        Assert.Equal("", renderer.Render("{{args.val | suffix('.sarif')}}", ctx));
+    }
+
+    [Fact]
+    public void SuffixFilterReturnsEmptyWhenInputIsWhitespace()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string> { ["val"] = "   " });
         Assert.Equal("", renderer.Render("{{args.val | suffix('.sarif')}}", ctx));
     }
 
@@ -544,6 +682,17 @@ public sealed class TemplateRendererTests
         Assert.Equal(
             "/p:ErrorLog=artifacts/analysis/sarif/dotnet-build.sarif",
             renderer.Render("{{args.dir | suffix('/dotnet-build.sarif') | prefix('/p:ErrorLog=')}}", ctx));
+    }
+
+    [Fact]
+    public void CoalesceFilterComposesWithLaterFilters()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string> { ["dir"] = "artifacts/analysis/sarif" });
+
+        Assert.Equal(
+            "/p:ErrorLog=artifacts/analysis/sarif/dotnet-build.sarif",
+            renderer.Render("{{args.missing | coalesce(args.dir, 'artifacts/analysis') | suffix('/dotnet-build.sarif') | prefix('/p:ErrorLog=')}}", ctx));
     }
 
     [Fact]

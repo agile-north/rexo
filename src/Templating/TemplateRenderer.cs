@@ -43,6 +43,12 @@ public sealed class TemplateRenderer : ITemplateRenderer
 
     private static string ResolveOperand(string expr, Dictionary<string, object?> root, ExecutionContext context)
     {
+        var coalescingSegments = SplitCoalesceChain(expr);
+        if (coalescingSegments.Count > 1)
+        {
+            return ResolveCoalescedValue(coalescingSegments, root, context);
+        }
+
         var segments = SplitFilterChain(expr);
         var path = segments[0].Trim();
 
@@ -56,7 +62,7 @@ public sealed class TemplateRenderer : ITemplateRenderer
 
         for (var i = 1; i < segments.Count; i++)
         {
-            result = ApplyFilter(segments[i].Trim(), result);
+            result = ApplyFilter(segments[i].Trim(), result, root, context);
         }
 
         return result;
@@ -83,29 +89,18 @@ public sealed class TemplateRenderer : ITemplateRenderer
         return segments;
     }
 
-    private static string ApplyFilter(string filterExpr, string result)
+    private static string ApplyFilter(string filterExpr, string result, Dictionary<string, object?> root, ExecutionContext context)
     {
-        var parenIndex = filterExpr.IndexOf('(', StringComparison.Ordinal);
-        string filterName;
-        string? filterArg;
-
-        if (parenIndex >= 0)
-        {
-            filterName = filterExpr[..parenIndex].Trim();
-            var closeIndex = filterExpr.LastIndexOf(')');
-            filterArg = closeIndex > parenIndex
-                ? filterExpr[(parenIndex + 1)..closeIndex].Trim().Trim('\'', '"')
-                : string.Empty;
-        }
-        else
-        {
-            filterName = filterExpr.Trim();
-            filterArg = null;
-        }
+        ParseFilterExpression(filterExpr, out var filterName, out var filterArgs);
 
         return filterName switch
         {
-            "default" => string.IsNullOrEmpty(result) ? (filterArg ?? string.Empty) : result,
+            "default" => IsEmptyValue(result)
+                ? ResolveCoalescedValue(filterArgs, root, context)
+                : result,
+            "coalesce" => IsEmptyValue(result)
+                ? ResolveCoalescedValue(filterArgs, root, context)
+                : result,
             "slug" => Slug(result),
             "upper" => result.ToUpperInvariant(),
             "lower" => result.ToLowerInvariant(),
@@ -116,17 +111,340 @@ public sealed class TemplateRenderer : ITemplateRenderer
             "filestem" => Path.GetFileNameWithoutExtension(result),
             "urlencode" => Uri.EscapeDataString(result),
             "sha256" => ComputeSha256Hex(result),
-            "prefix" when filterArg is not null => string.IsNullOrEmpty(result) ? string.Empty : filterArg + result,
-            "suffix" when filterArg is not null => string.IsNullOrEmpty(result) ? string.Empty : result + filterArg,
-            "replace" when filterArg is not null => ApplyLiteralReplace(result, filterArg),
-            "replacePattern" when filterArg is not null => ApplyRegexReplace(result, filterArg),
-            "truncate" when filterArg is not null && int.TryParse(filterArg, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var len)
+            "prefix" when filterArgs.Count == 1 => IsEmptyValue(result) ? string.Empty : TrimQuotedString(filterArgs[0]) + result,
+            "suffix" when filterArgs.Count == 1 => IsEmptyValue(result) ? string.Empty : result + TrimQuotedString(filterArgs[0]),
+            "replace" when filterArgs.Count == 2 => ApplyLiteralReplace(result, filterArgs[0], filterArgs[1]),
+            "replacePattern" when filterArgs.Count == 2 => ApplyRegexReplace(result, filterArgs[0], filterArgs[1]),
+            "truncate" when filterArgs.Count == 1 && int.TryParse(TrimQuotedString(filterArgs[0]), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var len)
                 => result.Length > len ? result[..len] : result,
-            "first" when filterArg is not null && int.TryParse(filterArg, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var n)
+            "first" when filterArgs.Count == 1 && int.TryParse(TrimQuotedString(filterArgs[0]), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var n)
                 => result.Length > n ? result[..n] : result,
             _ => result,
         };
     }
+
+    private static void ParseFilterExpression(string filterExpr, out string filterName, out IReadOnlyList<string> filterArgs)
+    {
+        var parenIndex = filterExpr.IndexOf('(', StringComparison.Ordinal);
+        if (parenIndex < 0)
+        {
+            filterName = filterExpr.Trim();
+            filterArgs = [];
+            return;
+        }
+
+        filterName = filterExpr[..parenIndex].Trim();
+        var closeIndex = filterExpr.LastIndexOf(')');
+        if (closeIndex <= parenIndex)
+        {
+            filterArgs = [string.Empty];
+            return;
+        }
+
+        filterArgs = SplitFilterArguments(filterExpr[(parenIndex + 1)..closeIndex]);
+    }
+
+    private static IReadOnlyList<string> SplitFilterArguments(string expr)
+    {
+        if (string.IsNullOrWhiteSpace(expr))
+        {
+            return [];
+        }
+
+        var args = new List<string>();
+        var depth = 0;
+        var start = 0;
+        var inSingleQuote = false;
+        var inDoubleQuote = false;
+        var inRegexLiteral = false;
+        var escaped = false;
+        var atArgumentStart = true;
+
+        for (var i = 0; i < expr.Length; i++)
+        {
+            var c = expr[i];
+
+            if (inRegexLiteral)
+            {
+                if (escaped)
+                {
+                    escaped = false;
+                    continue;
+                }
+
+                if (c == '\\')
+                {
+                    escaped = true;
+                    continue;
+                }
+
+                if (c == '/')
+                {
+                    inRegexLiteral = false;
+                }
+
+                continue;
+            }
+
+            if (escaped)
+            {
+                escaped = false;
+                atArgumentStart = false;
+                continue;
+            }
+
+            if (c == '\\')
+            {
+                escaped = true;
+                atArgumentStart = false;
+                continue;
+            }
+
+            if (inSingleQuote)
+            {
+                if (c == '\'')
+                {
+                    inSingleQuote = false;
+                }
+
+                continue;
+            }
+
+            if (inDoubleQuote)
+            {
+                if (c == '"')
+                {
+                    inDoubleQuote = false;
+                }
+
+                continue;
+            }
+
+            if (c == '\'')
+            {
+                inSingleQuote = true;
+                atArgumentStart = false;
+                continue;
+            }
+
+            if (c == '"')
+            {
+                inDoubleQuote = true;
+                atArgumentStart = false;
+                continue;
+            }
+
+            if (c == '/' && atArgumentStart && HasClosingRegexDelimiter(expr, i))
+            {
+                inRegexLiteral = true;
+                atArgumentStart = false;
+                continue;
+            }
+
+            if (c == '(')
+            {
+                depth++;
+                atArgumentStart = false;
+                continue;
+            }
+
+            if (c == ')')
+            {
+                depth--;
+                atArgumentStart = false;
+                continue;
+            }
+
+            if (c == ',' && depth == 0)
+            {
+                args.Add(expr[start..i].Trim());
+                start = i + 1;
+                atArgumentStart = true;
+                continue;
+            }
+
+            if (!char.IsWhiteSpace(c))
+            {
+                atArgumentStart = false;
+            }
+        }
+
+        args.Add(expr[start..].Trim());
+        return args;
+    }
+
+    private static IReadOnlyList<string> SplitCoalesceChain(string expr)
+    {
+        var segments = new List<string>();
+        var depth = 0;
+        var start = 0;
+        var inSingleQuote = false;
+        var inDoubleQuote = false;
+        var inRegexLiteral = false;
+        var escaped = false;
+        var atSegmentStart = true;
+
+        for (var i = 0; i < expr.Length; i++)
+        {
+            var c = expr[i];
+
+            if (inRegexLiteral)
+            {
+                if (escaped)
+                {
+                    escaped = false;
+                    continue;
+                }
+
+                if (c == '\\')
+                {
+                    escaped = true;
+                    continue;
+                }
+
+                if (c == '/')
+                {
+                    inRegexLiteral = false;
+                }
+
+                continue;
+            }
+
+            if (escaped)
+            {
+                escaped = false;
+                atSegmentStart = false;
+                continue;
+            }
+
+            if (c == '\\')
+            {
+                escaped = true;
+                atSegmentStart = false;
+                continue;
+            }
+
+            if (inSingleQuote)
+            {
+                if (c == '\'')
+                {
+                    inSingleQuote = false;
+                }
+
+                continue;
+            }
+
+            if (inDoubleQuote)
+            {
+                if (c == '"')
+                {
+                    inDoubleQuote = false;
+                }
+
+                continue;
+            }
+
+            if (c == '\'')
+            {
+                inSingleQuote = true;
+                atSegmentStart = false;
+                continue;
+            }
+
+            if (c == '"')
+            {
+                inDoubleQuote = true;
+                atSegmentStart = false;
+                continue;
+            }
+
+            if (c == '/' && atSegmentStart && HasClosingRegexDelimiter(expr, i))
+            {
+                inRegexLiteral = true;
+                atSegmentStart = false;
+                continue;
+            }
+
+            if (c == '(')
+            {
+                depth++;
+                atSegmentStart = false;
+                continue;
+            }
+
+            if (c == ')')
+            {
+                depth--;
+                atSegmentStart = false;
+                continue;
+            }
+
+            if (c == '?' && i + 1 < expr.Length && expr[i + 1] == '?' && depth == 0)
+            {
+                segments.Add(expr[start..i].Trim());
+                start = i + 2;
+                i++;
+                atSegmentStart = true;
+                continue;
+            }
+
+            if (!char.IsWhiteSpace(c))
+            {
+                atSegmentStart = false;
+            }
+        }
+
+        if (segments.Count == 0)
+        {
+            return [expr];
+        }
+
+        segments.Add(expr[start..].Trim());
+        return segments;
+    }
+
+    private static bool HasClosingRegexDelimiter(string expr, int startIndex)
+    {
+        var escaped = false;
+        for (var i = startIndex + 1; i < expr.Length; i++)
+        {
+            var c = expr[i];
+            if (escaped)
+            {
+                escaped = false;
+                continue;
+            }
+
+            if (c == '\\')
+            {
+                escaped = true;
+                continue;
+            }
+
+            if (c == '/')
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string ResolveCoalescedValue(IReadOnlyList<string> filterArgs, Dictionary<string, object?> root, ExecutionContext context)
+    {
+        for (var i = 0; i < filterArgs.Count; i++)
+        {
+            var value = ResolveOperand(filterArgs[i], root, context);
+            if (!IsEmptyValue(value))
+            {
+                return value;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static bool IsEmptyValue(string value) => string.IsNullOrWhiteSpace(value);
 
     private static object? ResolvePath(string path, Dictionary<string, object?> root, ExecutionContext context)
     {
@@ -326,25 +644,15 @@ public sealed class TemplateRenderer : ITemplateRenderer
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
-    private static string ApplyLiteralReplace(string value, string filterArg)
+    private static string ApplyLiteralReplace(string value, string oldValue, string newValue)
     {
-        if (!TrySplitReplaceArgs(filterArg, out var oldValue, out var newValue))
-        {
-            return value;
-        }
-
         oldValue = TrimQuotedString(oldValue);
         newValue = TrimQuotedString(newValue);
         return value.Replace(oldValue, newValue, StringComparison.Ordinal);
     }
 
-    private static string ApplyRegexReplace(string value, string filterArg)
+    private static string ApplyRegexReplace(string value, string oldValue, string newValue)
     {
-        if (!TrySplitReplaceArgs(filterArg, out var oldValue, out var newValue))
-        {
-            return value;
-        }
-
         oldValue = TrimQuotedString(oldValue);
         newValue = TrimQuotedString(newValue);
 
@@ -377,101 +685,6 @@ public sealed class TemplateRenderer : ITemplateRenderer
 
         return value;
     }
-
-    private static bool TrySplitReplaceArgs(string filterArg, out string oldValue, out string newValue)
-    {
-        oldValue = string.Empty;
-        newValue = string.Empty;
-
-        var hasRegexLiteral = false;
-        var regexEnd = -1;
-        if (filterArg.Length > 0 && filterArg[0] == '/')
-        {
-            var escaped = false;
-            for (var i = 1; i < filterArg.Length; i++)
-            {
-                var c = filterArg[i];
-                if (escaped)
-                {
-                    escaped = false;
-                    continue;
-                }
-
-                if (c == '\\')
-                {
-                    escaped = true;
-                    continue;
-                }
-
-                if (c == '/')
-                {
-                    hasRegexLiteral = true;
-                    regexEnd = i;
-                    break;
-                }
-            }
-        }
-
-        var inSingleQuote = false;
-        var inDoubleQuote = false;
-        var escapedChar = false;
-
-        for (var i = 0; i < filterArg.Length; i++)
-        {
-            var c = filterArg[i];
-            if (escapedChar)
-            {
-                escapedChar = false;
-                continue;
-            }
-
-            if (c == '\\')
-            {
-                escapedChar = true;
-                continue;
-            }
-
-            if (inSingleQuote)
-            {
-                if (c == '\'')
-                {
-                    inSingleQuote = false;
-                }
-                continue;
-            }
-
-            if (inDoubleQuote)
-            {
-                if (c == '"')
-                {
-                    inDoubleQuote = false;
-                }
-                continue;
-            }
-
-            if (c == '\'')
-            {
-                inSingleQuote = true;
-                continue;
-            }
-
-            if (c == '"')
-            {
-                inDoubleQuote = true;
-                continue;
-            }
-
-            if (c == ',' && (!hasRegexLiteral || i > regexEnd))
-            {
-                oldValue = filterArg[..i];
-                newValue = filterArg[(i + 1)..];
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     private static bool TryParseRegexLiteral(string input, out string pattern, out RegexOptions options)
     {
         pattern = string.Empty;

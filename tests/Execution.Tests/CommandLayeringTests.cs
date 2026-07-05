@@ -452,7 +452,7 @@ public sealed class CommandLayeringTests
 
         Assert.False(result.Success, "max depth should fail command delegation chain");
         Assert.Equal(9, result.ExitCode);
-        var failed = Assert.Single(result.Steps.Where(step => !step.Success));
+        var failed = Assert.Single(result.Steps, step => !step.Success);
         Assert.Equal(Rexo.Core.Models.ErrorCodes.CommandCycle, failed.Outputs["errorCode"]?.ToString());
         Assert.Contains("maxDepth=2", failed.Outputs["error"]?.ToString() ?? string.Empty, StringComparison.Ordinal);
     }

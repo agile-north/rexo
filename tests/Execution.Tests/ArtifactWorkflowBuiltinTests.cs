@@ -187,6 +187,104 @@ public sealed class ArtifactWorkflowBuiltinTests
         Assert.Equal(["repo-root-name"], dockerProvider.BuildCalls);
     }
 
+    [Fact]
+    public async Task PlanWithPushUsesMappedSecretEnvironmentForNuGetCredentials()
+    {
+        var envName = $"REXO_PLAN_SECRET_{Guid.NewGuid():N}";
+        var original = Environment.GetEnvironmentVariable(envName);
+        Environment.SetEnvironmentVariable(envName, "mapped-plan-secret");
+
+        var repositoryRoot = Path.Combine(Path.GetTempPath(), $"rexo-plan-secrets-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(repositoryRoot);
+
+        try
+        {
+            var builtins = new BuiltinRegistry();
+            var loader = new ConfigCommandLoader(
+                builtins,
+                new TemplateRenderer(),
+                VersionProviderRegistry.CreateDefault(),
+                new ArtifactProviderRegistry());
+
+            var config = new RepoConfig(
+                Name: "plan-secrets-test",
+                Commands: new Dictionary<string, RepoCommandConfig>
+                {
+                    ["plan"] = new RepoCommandConfig(
+                        Description: "plan",
+                        Options: new Dictionary<string, RepoOptionConfig>(),
+                        Steps: [new RepoStepConfig(Id: "plan", Uses: "builtin:plan")]),
+                },
+                Aliases: new Dictionary<string, string>())
+            {
+                Secrets = new RepoSecretsConfig
+                {
+                    Defaults = new RepoSecretDefaultsConfig { Provider = "env", Required = true },
+                    Items = new Dictionary<string, RepoSecretConfig>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["nugetApiKey"] = new RepoSecretConfig
+                        {
+                            Env = envName,
+                            Required = true,
+                            ExposeInTemplates = false,
+                            MapToEnv = "MY_FEED_API_KEY",
+                        },
+                    },
+                },
+                Artifacts =
+                [
+                    new RepoArtifactConfig(
+                        "nuget",
+                        "nuget-lib",
+                        JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                            """
+                            {
+                              "project": "src/Core/Core.csproj",
+                              "target": {
+                                "source": "https://api.nuget.org/v3/index.json",
+                                "apiKeyEnv": "MY_FEED_API_KEY"
+                              }
+                            }
+                            """)!),
+                ],
+            };
+
+            var registry = new CommandRegistry();
+            var executor = new DefaultCommandExecutor(registry);
+            loader.LoadInto(registry, config, repositoryRoot, executor);
+
+            var result = await executor.ExecuteAsync(
+                "plan",
+                new CommandInvocation(
+                    new Dictionary<string, string>(),
+                    new Dictionary<string, string?> { ["push"] = "true" },
+                    Json: false,
+                    JsonFile: null,
+                    WorkingDirectory: repositoryRoot),
+                CancellationToken.None);
+
+            Assert.True(result.Success);
+
+            var payload = ParsePlanPayload(result, "plan");
+            Assert.True(payload.Push.Requested);
+            Assert.True(payload.Push.Eligible);
+            Assert.Empty(payload.Push.SkipReasons);
+
+            var artifact = Assert.Single(payload.Artifacts);
+            Assert.Equal("nuget", artifact.Type);
+            Assert.True(artifact.Push.Eligible);
+            Assert.Empty(artifact.Push.SkipReasons);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(envName, original);
+            if (Directory.Exists(repositoryRoot))
+            {
+                Directory.Delete(repositoryRoot, true);
+            }
+        }
+    }
+
     private static DefaultCommandExecutor CreateExecutor(params IArtifactProvider[] providers)
     {
         var builtins = new BuiltinRegistry();

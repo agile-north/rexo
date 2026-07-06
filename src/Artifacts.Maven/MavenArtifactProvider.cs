@@ -59,7 +59,7 @@ public sealed class MavenArtifactProvider : IArtifactProvider
         var workDir = context.RepositoryRoot;
         var dockerImage = ResolveDockerImage(artifact);
 
-        var fileEnv = RepositoryEnvironmentFiles.Load(context.RepositoryRoot);
+        var fileEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
         var auth = ResolveAuth(artifact, fileEnv);
         IReadOnlyDictionary<string, string?>? envOverrides = auth.HasCredentials
             ? new Dictionary<string, string?>

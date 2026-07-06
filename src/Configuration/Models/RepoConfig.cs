@@ -35,6 +35,12 @@ public sealed record RepoConfig(
     /// <summary>Free-form template variable bag available as <c>{{vars.*}}</c> in step run strings. Supports arbitrary nesting.</summary>
     public Dictionary<string, JsonElement>? Vars { get; init; }
 
+    /// <summary>
+    /// First-class secret configuration. Resolved secrets are available as <c>{{secrets.*}}</c>
+    /// during command execution.
+    /// </summary>
+    public RepoSecretsConfig? Secrets { get; init; }
+
     /// <summary>Declares runtime capability requirements and contract compatibility expectations.</summary>
     public RepoCapabilityConfig? Capabilities { get; init; }
 
@@ -297,6 +303,84 @@ public sealed record RepoRuntimeConfig(
     bool? DryRun = null,
     RepoPushConfig? Push = null,
     RepoRuntimeCommandsConfig? Commands = null);
+
+public sealed record RepoSecretsConfig
+{
+    /// <summary>Global secret defaults applied when individual entries omit values.</summary>
+    public RepoSecretDefaultsConfig? Defaults { get; init; }
+
+    /// <summary>Named provider definitions referenced by secrets via <c>providerRef</c>.</summary>
+    public Dictionary<string, RepoSecretProviderConfig>? Providers { get; init; }
+
+    /// <summary>Named secret entries available as <c>{{secrets.&lt;name&gt;}}</c>.</summary>
+    public Dictionary<string, RepoSecretConfig>? Items { get; init; }
+}
+
+public sealed record RepoSecretDefaultsConfig
+{
+    /// <summary>Default provider type (for example <c>env</c>).</summary>
+    public string? Provider { get; init; }
+
+    /// <summary>Default cache behavior.</summary>
+    public RepoSecretCacheConfig? Cache { get; init; }
+
+    /// <summary>Default required behavior for secret entries.</summary>
+    public bool? Required { get; init; }
+}
+
+public sealed record RepoSecretProviderConfig
+{
+    /// <summary>Provider type (for example <c>env</c>, <c>1password</c>, <c>exec</c>).</summary>
+    public string? Type { get; init; }
+
+    /// <summary>Provider auth values or references, interpreted by provider implementation.</summary>
+    public Dictionary<string, string>? Auth { get; init; }
+
+    /// <summary>Provider settings available to provider implementations.</summary>
+    public Dictionary<string, JsonElement>? Settings { get; init; }
+
+    /// <summary>Default cache behavior for this provider.</summary>
+    public RepoSecretCacheConfig? Cache { get; init; }
+}
+
+public sealed record RepoSecretConfig
+{
+    /// <summary>Reference to a named provider under <c>secrets.providers</c>.</summary>
+    public string? ProviderRef { get; init; }
+
+    /// <summary>Inline provider type override.</summary>
+    public string? Provider { get; init; }
+
+    /// <summary>Provider selector/key/path for the secret value.</summary>
+    public string? Selector { get; init; }
+
+    /// <summary>Environment variable name used by env provider.</summary>
+    public string? Env { get; init; }
+
+    /// <summary>When true (default), unresolved secret fails command execution.</summary>
+    public bool? Required { get; init; }
+
+    /// <summary>When true (default), secret is exposed in templates under <c>secrets.*</c>.</summary>
+    public bool? ExposeInTemplates { get; init; }
+
+    /// <summary>Optional runtime environment variable mapping for command steps.</summary>
+    public string? MapToEnv { get; init; }
+
+    /// <summary>Per-secret cache override.</summary>
+    public RepoSecretCacheConfig? Cache { get; init; }
+
+    /// <summary>Per-secret provider settings.</summary>
+    public Dictionary<string, JsonElement>? Settings { get; init; }
+}
+
+public sealed record RepoSecretCacheConfig
+{
+    /// <summary>Enable per-command in-memory cache.</summary>
+    public bool? Enabled { get; init; }
+
+    /// <summary>Optional TTL for cached values in seconds.</summary>
+    public int? TtlSeconds { get; init; }
+}
 
 public sealed record RepoRuntimeCommandsConfig(
     int? MaxDepth = null);

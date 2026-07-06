@@ -126,6 +126,7 @@ rx explain <command>         # show description, args, options, and steps
 rx config sources            # show which config files were loaded
 rx config resolved           # show the final merged config as JSON
 rx doctor                    # check tool and provider availability
+rx secrets doctor            # validate configured secret resolution safely
 ```
 
 

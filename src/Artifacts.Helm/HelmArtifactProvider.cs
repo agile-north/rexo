@@ -83,7 +83,7 @@ public sealed class HelmArtifactProvider : IArtifactProvider
         var workDir = context.RepositoryRoot;
         var dockerImage = ResolveDockerImage(artifact);
         var outputDir = GetSetting(artifact, "output-directory") ?? workDir;
-        var fileEnv = RepositoryEnvironmentFiles.Load(context.RepositoryRoot);
+        var fileEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
         var repo = ResolveRepository(artifact, fileEnv);
 
         if (string.IsNullOrWhiteSpace(repo))

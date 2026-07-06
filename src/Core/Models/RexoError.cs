@@ -63,6 +63,11 @@ public static class ErrorCodes
     public const string PolicyLoadFailed = "POL-001";
     public const string PolicyViolation = "POL-002";
 
+    // Secret errors (SEC-*)
+    public const string SecretProviderNotFound = "SEC-001";
+    public const string SecretResolutionFailed = "SEC-002";
+    public const string SecretProviderUnavailable = "SEC-003";
+
     // Capability errors (CAP-*)
     public const string CapabilityRequirementNotSupported = "CAP-001";
     public const string CapabilityContractMismatch = "CAP-002";

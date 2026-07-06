@@ -80,6 +80,7 @@ When `rx init --schema-source local --with-policy` is used, both schema files ar
   "aliases": { ... },
   "versioning": { ... },
   "artifacts": [ ... ],
+  "secrets": { ... },
   "runtime": { ... },
   "tests": { ... },
   "analysis": { ... }
@@ -285,6 +286,7 @@ Detailed reference for each config section:
 - [Commands](commands.md) — Define command workflows with options, args, and steps
 - [Versioning](versioning.md) — Configure version providers and auto-detection
 - [Artifacts](../artifacts/README.md) — Configure artifact build/tag/push workflows
+- [Secrets](secrets.md) — Configure first-class secret providers and named secret items
 - [Runtime](runtime.md) — Configure output, push policy, tests, and analysis settings
 - [Template Variables](templates.md) — Use dynamic variables in step commands
 

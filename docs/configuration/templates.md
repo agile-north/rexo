@@ -31,6 +31,7 @@ Available in any `run` step string:
 | `{{outputs.<path>}}` | Resolved output paths from `outputs` config |
 | `{{settings.<path>}}` | Resolved `settings` values |
 | `{{vars.<path>}}` | Resolved `vars` values |
+| `{{secrets.<name>}}` | Resolved secret values for template-exposed items |
 | `{{version.<field>}}` | Resolved version after `builtin:resolve-version` |
 | `{{steps.<id>.outputs.<key>}}` | Raw output from a completed step |
 | `{{steps.<id>.success}}` | Step success (`true`/`false`) |

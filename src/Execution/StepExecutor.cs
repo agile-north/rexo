@@ -88,7 +88,9 @@ public sealed class StepExecutor : IStepExecutor
         CancellationToken cancellationToken)
     {
         var command = _templateRenderer.Render(run, context);
-        var secrets = SecretMasker.CollectSecretValues();
+        var runtimeSecrets = context.ResolvedSecrets.Values
+            .Concat(context.MappedSecretEnvironment.Values);
+        var secrets = SecretMasker.CollectSecretValues(runtimeSecrets);
         var env = BuildNativeRunEnvironment(context);
         ShellRunResult shellResult;
         var executionMetadata = new RunExecutionMetadata("native", "native", null, null, false, null);
@@ -499,6 +501,11 @@ public sealed class StepExecutor : IStepExecutor
             env[key] = value;
         }
 
+        foreach (var (key, value) in context.MappedSecretEnvironment)
+        {
+            env[key] = value;
+        }
+
         foreach (var (key, value) in BuildRexoStepEnvironment(context))
         {
             env[key] = value;
@@ -519,6 +526,11 @@ public sealed class StepExecutor : IStepExecutor
     {
         var env = new Dictionary<string, string?>(StringComparer.Ordinal);
         foreach (var (key, value) in context.FileEnvironment)
+        {
+            env[key] = value;
+        }
+
+        foreach (var (key, value) in context.MappedSecretEnvironment)
         {
             env[key] = value;
         }

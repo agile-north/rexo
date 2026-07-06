@@ -207,9 +207,109 @@ public sealed partial class RepoConfigurationLoader
             Outputs = MergeOutputsConfig(@base.Outputs, child.Outputs),
             Settings = MergeDictionaries(@base.Settings, child.Settings),
             Vars = MergeDictionaries(@base.Vars, child.Vars),
+            Secrets = MergeSecretsConfig(@base.Secrets, child.Secrets),
             Capabilities = MergeCapabilities(@base.Capabilities, child.Capabilities, child.MergeStrategy),
             MergeStrategy = child.MergeStrategy ?? @base.MergeStrategy,
         };
+
+    private static RepoSecretsConfig? MergeSecretsConfig(RepoSecretsConfig? @base, RepoSecretsConfig? child)
+    {
+        if (@base is null) return child;
+        if (child is null) return @base;
+
+        return new RepoSecretsConfig
+        {
+            Defaults = MergeSecretDefaults(@base.Defaults, child.Defaults),
+            Providers = MergeSecretProviders(@base.Providers, child.Providers),
+            Items = MergeSecretItems(@base.Items, child.Items),
+        };
+    }
+
+    private static RepoSecretDefaultsConfig? MergeSecretDefaults(RepoSecretDefaultsConfig? @base, RepoSecretDefaultsConfig? child)
+    {
+        if (@base is null) return child;
+        if (child is null) return @base;
+
+        return new RepoSecretDefaultsConfig
+        {
+            Provider = child.Provider ?? @base.Provider,
+            Cache = MergeSecretCache(@base.Cache, child.Cache),
+            Required = child.Required ?? @base.Required,
+        };
+    }
+
+    private static RepoSecretCacheConfig? MergeSecretCache(RepoSecretCacheConfig? @base, RepoSecretCacheConfig? child)
+    {
+        if (@base is null) return child;
+        if (child is null) return @base;
+
+        return new RepoSecretCacheConfig
+        {
+            Enabled = child.Enabled ?? @base.Enabled,
+            TtlSeconds = child.TtlSeconds ?? @base.TtlSeconds,
+        };
+    }
+
+    private static Dictionary<string, RepoSecretProviderConfig>? MergeSecretProviders(
+        Dictionary<string, RepoSecretProviderConfig>? @base,
+        Dictionary<string, RepoSecretProviderConfig>? child)
+    {
+        if (@base is null or { Count: 0 }) return child;
+        if (child is null or { Count: 0 }) return @base;
+
+        var result = new Dictionary<string, RepoSecretProviderConfig>(@base, StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, childProvider) in child)
+        {
+            if (!result.TryGetValue(name, out var baseProvider))
+            {
+                result[name] = childProvider;
+                continue;
+            }
+
+            result[name] = new RepoSecretProviderConfig
+            {
+                Type = childProvider.Type ?? baseProvider.Type,
+                Auth = MergeDictionaries(baseProvider.Auth, childProvider.Auth),
+                Settings = MergeDictionaries(baseProvider.Settings, childProvider.Settings),
+                Cache = MergeSecretCache(baseProvider.Cache, childProvider.Cache),
+            };
+        }
+
+        return result;
+    }
+
+    private static Dictionary<string, RepoSecretConfig>? MergeSecretItems(
+        Dictionary<string, RepoSecretConfig>? @base,
+        Dictionary<string, RepoSecretConfig>? child)
+    {
+        if (@base is null or { Count: 0 }) return child;
+        if (child is null or { Count: 0 }) return @base;
+
+        var result = new Dictionary<string, RepoSecretConfig>(@base, StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, childSecret) in child)
+        {
+            if (!result.TryGetValue(name, out var baseSecret))
+            {
+                result[name] = childSecret;
+                continue;
+            }
+
+            result[name] = new RepoSecretConfig
+            {
+                ProviderRef = childSecret.ProviderRef ?? baseSecret.ProviderRef,
+                Provider = childSecret.Provider ?? baseSecret.Provider,
+                Selector = childSecret.Selector ?? baseSecret.Selector,
+                Env = childSecret.Env ?? baseSecret.Env,
+                Required = childSecret.Required ?? baseSecret.Required,
+                ExposeInTemplates = childSecret.ExposeInTemplates ?? baseSecret.ExposeInTemplates,
+                MapToEnv = childSecret.MapToEnv ?? baseSecret.MapToEnv,
+                Cache = MergeSecretCache(baseSecret.Cache, childSecret.Cache),
+                Settings = MergeDictionaries(baseSecret.Settings, childSecret.Settings),
+            };
+        }
+
+        return result;
+    }
 
     private static RepoCapabilityConfig? MergeCapabilities(
         RepoCapabilityConfig? @base,

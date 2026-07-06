@@ -462,6 +462,8 @@ public sealed class TemplateRenderer : ITemplateRenderer
             {
                 Dictionary<string, object?> d when d.TryGetValue(part, out var v) => v,
                 IReadOnlyDictionary<string, object?> rd when rd.TryGetValue(part, out var v) => v,
+                Dictionary<string, string> d when d.TryGetValue(part, out var v) => v,
+                IReadOnlyDictionary<string, string> rd when rd.TryGetValue(part, out var v) => v,
                 _ => null,
             };
 
@@ -565,6 +567,7 @@ public sealed class TemplateRenderer : ITemplateRenderer
             ["outputs"] = context.ResolvedOutputs,
             ["settings"] = context.ResolvedSettings,
             ["vars"] = context.ResolvedVars,
+            ["secrets"] = context.ResolvedSecrets,
             ["push"] = BuildPushContext(context),
         };
 

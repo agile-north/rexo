@@ -54,7 +54,7 @@ public sealed class RubyGemsArtifactProvider : IArtifactProvider
         var dockerImage = ResolveDockerImage(artifact);
         var gemPattern = GetSetting(artifact, "gem-pattern") ?? "*.gem";
 
-        var fileEnv = RepositoryEnvironmentFiles.Load(context.RepositoryRoot);
+        var fileEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
         var source = ResolveSource(artifact, fileEnv);
         var auth = ResolveAuth(artifact, fileEnv);
         IReadOnlyDictionary<string, string?>? envOverrides = auth.HasCredentials

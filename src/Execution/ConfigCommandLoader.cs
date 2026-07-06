@@ -7,6 +7,7 @@ using Rexo.Configuration.Models;
 using Rexo.Core.Abstractions;
 using Rexo.Core.Environment;
 using Rexo.Core.Models;
+using Rexo.Execution.Secrets;
 using Rexo.Versioning;
 
 public sealed class ConfigCommandLoader
@@ -20,6 +21,7 @@ public sealed class ConfigCommandLoader
     private readonly ITemplateRenderer _templateRenderer;
     private readonly VersionProviderRegistry _versionProviders;
     private readonly Artifacts.ArtifactProviderRegistry _artifactProviders;
+    private readonly SecretProviderRegistry _secretProviders;
 
     internal VersionProviderRegistry VersionProviders => _versionProviders;
     internal Artifacts.ArtifactProviderRegistry ArtifactProviders => _artifactProviders;
@@ -31,12 +33,14 @@ public sealed class ConfigCommandLoader
         BuiltinRegistry builtinRegistry,
         ITemplateRenderer templateRenderer,
         VersionProviderRegistry versionProviders,
-        Artifacts.ArtifactProviderRegistry artifactProviders)
+        Artifacts.ArtifactProviderRegistry artifactProviders,
+        SecretProviderRegistry? secretProviders = null)
     {
         _builtinRegistry = builtinRegistry;
         _templateRenderer = templateRenderer;
         _versionProviders = versionProviders;
         _artifactProviders = artifactProviders;
+        _secretProviders = secretProviders ?? SecretProviderRegistry.CreateDefault();
     }
 
     public void LoadInto(
@@ -147,6 +151,28 @@ public sealed class ConfigCommandLoader
             normalizedCommandConfig.MaxDepth ?? globalMaxDepth);
         var gitInfo = await Git.GitDetector.DetectAsync(repositoryRoot, cancellationToken);
         var ciInfo = CiDetector.Detect();
+        var fileEnvironment = RepositoryEnvironmentFiles.Load(repositoryRoot);
+        var secretResolver = new ConfigSecretResolver(config, fileEnvironment, _secretProviders);
+        var secretPreflight = await secretResolver.PreflightRequiredAsync(cancellationToken);
+        if (!secretPreflight.Success)
+        {
+            var firstError = secretPreflight.Errors.Count > 0
+                ? secretPreflight.Errors[0]
+                : null;
+            return new CommandResult(
+                commandName,
+                false,
+                9,
+                firstError?.Message ?? "Secret preflight failed.",
+                new Dictionary<string, object?>
+                {
+                    ["error"] = firstError?.Message ?? "Secret preflight failed.",
+                    ["errorCode"] = firstError?.Code ?? ErrorCodes.ConfigSchemaInvalid,
+                })
+            {
+                StructuredErrors = secretPreflight.Errors,
+            };
+        }
 
         var context = new ExecutionContext(
             repositoryRoot,
@@ -168,7 +194,10 @@ public sealed class ConfigCommandLoader
             CiBuildUrl = ciInfo.BuildUrl,
             Args = invocation.Args,
             Options = BuildOptionsWithDefaults(invocation.Options, normalizedCommandConfig),
-            FileEnvironment = RepositoryEnvironmentFiles.Load(repositoryRoot),
+            FileEnvironment = fileEnvironment,
+            ResolvedSecrets = secretPreflight.ResolvedValues,
+            SecretMetadata = secretPreflight.Metadata,
+            MappedSecretEnvironment = secretPreflight.MappedEnvironment,
             CiVariablePrefix = ciVariablePrefix,
             IsDryRun = TryGetOptionBoolean(invocation.Options, "dry-run") == true,
             CommandCallStack = [.. invocation.CallStack, commandName],
@@ -687,7 +716,7 @@ public sealed class ConfigCommandLoader
                 skipReasons.Add(reason);
             }
 
-            foreach (var credentialCheck in GetCredentialChecks(artifact, ctx.RepositoryRoot))
+            foreach (var credentialCheck in GetCredentialChecks(artifact, ctx.RepositoryRoot, ctx.MappedSecretEnvironment))
             {
                 if (!credentialCheck.Available)
                 {
@@ -763,9 +792,14 @@ public sealed class ConfigCommandLoader
         };
     }
 
-    private static IReadOnlyList<PlanCredentialCheck> GetCredentialChecks(RepoArtifactConfig artifact, string repositoryRoot)
+    private static IReadOnlyList<PlanCredentialCheck> GetCredentialChecks(
+        RepoArtifactConfig artifact,
+        string repositoryRoot,
+        IReadOnlyDictionary<string, string> mappedSecretEnvironment)
     {
-        var fileEnv = RepositoryEnvironmentFiles.Load(repositoryRoot);
+        var fileEnv = Artifacts.FeedAuthResolver.OverlayMappedEnvironment(
+            RepositoryEnvironmentFiles.Load(repositoryRoot),
+            mappedSecretEnvironment);
         var ciInferenceEnabled = IsArtifactCiInferenceEnabled(artifact.Settings);
 
         return artifact.Type.ToLowerInvariant() switch

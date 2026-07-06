@@ -37,7 +37,7 @@ public sealed class DockerArtifactProvider : IArtifactProvider
     {
         try
         {
-            var dotEnv = RepositoryEnvironmentFiles.Load(context.RepositoryRoot);
+            var dotEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
             var settings = ResolveBuildSettings(artifact, dotEnv, context);
             var tags = BuildTags(settings.Image, artifact, context);
             var primaryTag = context.Version is not null
@@ -99,7 +99,7 @@ public sealed class DockerArtifactProvider : IArtifactProvider
         ExecutionContext context,
         CancellationToken cancellationToken)
     {
-        var dotEnv = RepositoryEnvironmentFiles.Load(context.RepositoryRoot);
+        var dotEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
         var settings = ResolveBuildSettings(artifact, dotEnv, context);
         var image = settings.Image;
         var tags = BuildTags(image, artifact, context);
@@ -126,7 +126,7 @@ public sealed class DockerArtifactProvider : IArtifactProvider
 
     public IReadOnlyList<string> GetPlannedTags(ArtifactConfig artifact, ExecutionContext context)
     {
-        var dotEnv = RepositoryEnvironmentFiles.Load(context.RepositoryRoot);
+        var dotEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
         var settings = ResolveBuildSettings(artifact, dotEnv, context);
         return BuildTags(settings.Image, artifact, context);
     }
@@ -138,7 +138,7 @@ public sealed class DockerArtifactProvider : IArtifactProvider
     {
         try
         {
-            var dotEnv = RepositoryEnvironmentFiles.Load(context.RepositoryRoot);
+            var dotEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
             var settings = ResolveBuildSettings(artifact, dotEnv, context);
             var image = settings.Image;
             var tags = BuildTags(image, artifact, context);

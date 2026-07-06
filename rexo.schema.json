@@ -95,6 +95,10 @@
       "description": "Free-form template variable bag. All values are accessible as {{vars.*}} in step run strings and support arbitrary nesting (e.g. {{vars.dotnet.solution}}).",
       "$ref": "#/$defs/vars"
     },
+    "secrets": {
+      "description": "First-class secret configuration for runtime resolution and template access under {{secrets.*}}.",
+      "$ref": "#/$defs/secretsConfig"
+    },
     "capabilities": {
       "description": "Runtime capability requirements and compatibility contract expectations.",
       "$ref": "#/$defs/capabilityContract"
@@ -110,6 +114,127 @@
       "type": "object",
       "description": "Free-form template variable bag. Accessible as {{vars.*}} in step run strings. Values can be strings, numbers, booleans, or arbitrarily nested objects.",
       "additionalProperties": true
+    },
+    "secretCacheConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable per-command in-memory cache for the secret or provider."
+        },
+        "ttlSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optional cache TTL in seconds."
+        }
+      }
+    },
+    "secretDefaultsConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "Default secret provider type (for example env, 1password, exec)."
+        },
+        "cache": {
+          "$ref": "#/$defs/secretCacheConfig"
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Default required behavior for secret entries."
+        }
+      }
+    },
+    "secretProviderConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Provider type implementation key."
+        },
+        "auth": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Provider auth values or references interpreted by the provider implementation."
+        },
+        "settings": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Provider-specific settings."
+        },
+        "cache": {
+          "$ref": "#/$defs/secretCacheConfig"
+        }
+      }
+    },
+    "secretItemConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "providerRef": {
+          "type": "string",
+          "description": "Reference to a named provider declared under secrets.providers."
+        },
+        "provider": {
+          "type": "string",
+          "description": "Inline provider type override."
+        },
+        "selector": {
+          "type": "string",
+          "description": "Provider selector/key/path used to resolve the secret."
+        },
+        "env": {
+          "type": "string",
+          "description": "Environment variable name used by env provider."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "When true (default), missing secret fails command execution."
+        },
+        "exposeInTemplates": {
+          "type": "boolean",
+          "description": "When true (default), expose resolved value in templates under secrets.*."
+        },
+        "mapToEnv": {
+          "type": "string",
+          "description": "Optional environment variable name to inject the resolved secret into at runtime."
+        },
+        "cache": {
+          "$ref": "#/$defs/secretCacheConfig"
+        },
+        "settings": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Per-secret provider settings."
+        }
+      }
+    },
+    "secretsConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "defaults": {
+          "$ref": "#/$defs/secretDefaultsConfig"
+        },
+        "providers": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/secretProviderConfig"
+          }
+        },
+        "items": {
+          "type": "object",
+          "description": "Named secret entries exposed as {{secrets.<name>}}.",
+          "additionalProperties": {
+            "$ref": "#/$defs/secretItemConfig"
+          }
+        }
+      }
     },
     "capabilityContract": {
       "type": "object",

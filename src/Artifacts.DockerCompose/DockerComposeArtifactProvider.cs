@@ -51,7 +51,7 @@ public sealed class DockerComposeArtifactProvider : IArtifactProvider
         CancellationToken cancellationToken)
     {
         var workDir = context.RepositoryRoot;
-        var fileEnv = RepositoryEnvironmentFiles.Load(context.RepositoryRoot);
+        var fileEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
         var ciInferenceEnabled = FeedAuthResolver.IsArtifactCiInferenceEnabled(artifact.Settings);
         var registry = FeedAuthResolver.ResolveTargetValue(
             defaultEnvName: "DOCKER_COMPOSE_TARGET_REGISTRY",

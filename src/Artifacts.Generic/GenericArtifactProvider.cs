@@ -20,7 +20,7 @@ public sealed class GenericArtifactProvider : IArtifactProvider
         ExecutionContext context,
         CancellationToken cancellationToken)
     {
-        var fileEnv = RepositoryEnvironmentFiles.Load(context.RepositoryRoot);
+        var fileEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
         var source = FeedAuthResolver.ResolveTargetValue(
             defaultEnvName: "GENERIC_TARGET_SOURCE",
             configuredEnvName: GetSetting(artifact, "target.sourceEnv"),
@@ -91,7 +91,7 @@ public sealed class GenericArtifactProvider : IArtifactProvider
         ExecutionContext context,
         CancellationToken cancellationToken)
     {
-        var fileEnv = RepositoryEnvironmentFiles.Load(context.RepositoryRoot);
+        var fileEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
         var destination = FeedAuthResolver.ResolveTargetValue(
             defaultEnvName: "GENERIC_TARGET_DESTINATION",
             configuredEnvName: GetSetting(artifact, "target.destinationEnv"),

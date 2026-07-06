@@ -47,7 +47,7 @@ public sealed class NpmArtifactProvider : IArtifactProvider
         CancellationToken cancellationToken)
     {
         var workDir = GetSetting(artifact, "directory") ?? context.RepositoryRoot;
-        var fileEnv = RepositoryEnvironmentFiles.Load(context.RepositoryRoot);
+        var fileEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
         var registry = ResolveRegistry(artifact, fileEnv);
         var access = GetSetting(artifact, "access") ?? "public";
         var tag = GetSetting(artifact, "tag") ?? context.Version?.SemVer;

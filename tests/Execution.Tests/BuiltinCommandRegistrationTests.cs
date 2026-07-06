@@ -359,6 +359,120 @@ public sealed class BuiltinCommandRegistrationTests
     }
 
     [Fact]
+    public async Task SecretsDoctorReturnsNoSecretsWhenConfigHasNoSecrets()
+    {
+        var config = new RepoConfig(
+            Name: "test",
+            Commands: new Dictionary<string, RepoCommandConfig>(),
+            Aliases: new Dictionary<string, string>())
+        {
+            SchemaVersion = "1.0",
+        };
+
+        var registry = BuiltinCommandRegistration.CreateDefault(config);
+        var executor = new DefaultCommandExecutor(registry);
+
+        var result = await executor.ExecuteAsync("secrets doctor", EmptyInvocation(), CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("No configured secrets", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SecretsDoctorFailsWhenRequiredSecretMissing()
+    {
+        var envName = $"REXO_MISSING_SECRET_{Guid.NewGuid():N}";
+        var config = new RepoConfig(
+            Name: "test",
+            Commands: new Dictionary<string, RepoCommandConfig>(),
+            Aliases: new Dictionary<string, string>())
+        {
+            SchemaVersion = "1.0",
+            Secrets = new RepoSecretsConfig
+            {
+                Defaults = new RepoSecretDefaultsConfig { Provider = "env", Required = true },
+                Items = new Dictionary<string, RepoSecretConfig>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["apiKey"] = new RepoSecretConfig
+                    {
+                        Env = envName,
+                        Required = true,
+                        ExposeInTemplates = true,
+                    },
+                },
+            },
+        };
+
+        var original = Environment.GetEnvironmentVariable(envName);
+        Environment.SetEnvironmentVariable(envName, null);
+
+        try
+        {
+            var registry = BuiltinCommandRegistration.CreateDefault(config);
+            var executor = new DefaultCommandExecutor(registry);
+
+            var result = await executor.ExecuteAsync("secrets preflight", EmptyInvocation(), CancellationToken.None);
+
+            Assert.False(result.Success);
+            Assert.Equal(9, result.ExitCode);
+            Assert.Contains("missing-required", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+            Assert.NotEmpty(result.StructuredErrors);
+            Assert.Equal(ErrorCodes.SecretResolutionFailed, result.StructuredErrors[0].Code);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(envName, original);
+        }
+    }
+
+    [Fact]
+    public async Task SecretsDoctorShowsMappedSecretMetadataWhenResolved()
+    {
+        var envName = $"REXO_PRESENT_SECRET_{Guid.NewGuid():N}";
+        var config = new RepoConfig(
+            Name: "test",
+            Commands: new Dictionary<string, RepoCommandConfig>(),
+            Aliases: new Dictionary<string, string>())
+        {
+            SchemaVersion = "1.0",
+            Secrets = new RepoSecretsConfig
+            {
+                Defaults = new RepoSecretDefaultsConfig { Provider = "env", Required = true },
+                Items = new Dictionary<string, RepoSecretConfig>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["nugetApiKey"] = new RepoSecretConfig
+                    {
+                        Env = envName,
+                        Required = true,
+                        ExposeInTemplates = false,
+                        MapToEnv = "MY_FEED_API_KEY",
+                    },
+                },
+            },
+        };
+
+        var original = Environment.GetEnvironmentVariable(envName);
+        Environment.SetEnvironmentVariable(envName, "present-secret");
+
+        try
+        {
+            var registry = BuiltinCommandRegistration.CreateDefault(config);
+            var executor = new DefaultCommandExecutor(registry);
+
+            var result = await executor.ExecuteAsync("secrets doctor", EmptyInvocation(), CancellationToken.None);
+
+            Assert.True(result.Success);
+            Assert.Contains("resolved", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("mapToEnv=MY_FEED_API_KEY", result.Message ?? string.Empty, StringComparison.Ordinal);
+            Assert.DoesNotContain("present-secret", result.Message ?? string.Empty, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(envName, original);
+        }
+    }
+
+    [Fact]
     public async Task ExplainAliasWithNoMatchingCommandShowsAliasOnly()
     {
         var config = new RepoConfig(

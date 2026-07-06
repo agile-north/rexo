@@ -71,7 +71,7 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
         var packageVersion = context.Version?.NuGetVersion ?? context.Version?.SemVer;
         var packageTargets = ResolvePackageTargets(context.RepositoryRoot, output, artifact.Name, packageVersion);
         var symbolPattern = ResolveSymbolPattern(artifact, output, packageVersion);
-        var fileEnv = RepositoryEnvironmentFiles.Load(context.RepositoryRoot);
+        var fileEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
         var source = ResolveSource(artifact, fileEnv);
         var auth = ResolveAuth(artifact, source, GetSetting(artifact.Settings, "target.apiKeyEnv"), fileEnv);
         if (!auth.HasCredentials)

@@ -114,7 +114,7 @@ public sealed class HelmOciArtifactProvider : IArtifactProvider
         var output = GetSetting(artifact, "output") ?? Path.Combine("artifacts", "charts");
         var version = context.Version?.SemVer;
 
-        var fileEnv = RepositoryEnvironmentFiles.Load(context.RepositoryRoot);
+        var fileEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
         await TryHelmRegistryLoginAsync(artifact, context, fileEnv, cancellationToken);
 
         var packagePath = TryFindPackagePath(context.RepositoryRoot, output, chartName, version);

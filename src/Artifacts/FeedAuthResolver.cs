@@ -265,6 +265,31 @@ public static class FeedAuthResolver
         return true;
     }
 
+    /// <summary>
+    /// Overlays runtime-mapped secret environment values on top of file environment values.
+    /// Process environment still takes precedence via <see cref="GetEnv"/>.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> OverlayMappedEnvironment(
+        IReadOnlyDictionary<string, string> fileEnv,
+        IReadOnlyDictionary<string, string> mappedEnvironment)
+    {
+        if (mappedEnvironment.Count == 0)
+        {
+            return fileEnv;
+        }
+
+        var merged = new Dictionary<string, string>(fileEnv, StringComparer.Ordinal);
+        foreach (var (key, value) in mappedEnvironment)
+        {
+            if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value))
+            {
+                merged[key] = value;
+            }
+        }
+
+        return merged;
+    }
+
     private static bool TryGetBooleanSetting(
         IReadOnlyDictionary<string, JsonElement> settings,
         string path,

@@ -61,7 +61,7 @@ public sealed class PyPiArtifactProvider : IArtifactProvider
         var distDir = GetSetting(artifact, "dist-dir") ?? "dist/*";
         var dockerImage = ResolveDockerImage(artifact);
 
-        var fileEnv = RepositoryEnvironmentFiles.Load(context.RepositoryRoot);
+        var fileEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
         var repositoryUrl = ResolveRepositoryUrl(artifact, fileEnv);
         var auth = ResolveAuth(artifact, repositoryUrl, fileEnv);
         IReadOnlyDictionary<string, string?>? envOverrides = auth.HasCredentials

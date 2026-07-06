@@ -6,7 +6,9 @@ using System.Xml.Linq;
 using Rexo.Configuration;
 using Rexo.Ci;
 using Rexo.Configuration.Models;
+using Rexo.Core.Environment;
 using Rexo.Core.Models;
+using Rexo.Execution.Secrets;
 using Rexo.Git;
 using Rexo.Policies;
 
@@ -29,6 +31,12 @@ public static class BuiltinCommandRegistration
 
         registry.Register("doctor", async (invocation, ct) =>
             await RunDoctorAsync(invocation, config, ct));
+
+        registry.Register("secrets doctor", async (invocation, ct) =>
+            await RunSecretsDoctorAsync(invocation, config, ct));
+
+        registry.Register("secrets preflight", async (invocation, ct) =>
+            await RunSecretsDoctorAsync(invocation, config, ct));
 
         registry.Register("capabilities", (_, _) =>
             Task.FromResult(RunCapabilities()));
@@ -245,6 +253,8 @@ public static class BuiltinCommandRegistration
         lines.Add("  explain <command>    Explain a command (or alias)");
         lines.Add("  explain version      Show version provider configuration");
         lines.Add("  doctor               Check environment and configuration");
+        lines.Add("  secrets doctor       Validate and summarize configured secrets");
+        lines.Add("  secrets preflight    Alias for secrets doctor");
         lines.Add("  capabilities         Show runtime capability contract and supported features");
         lines.Add("  init                 Create a starter rexo config");
         lines.Add("  init detect          Preview auto detection and recommendations");
@@ -325,7 +335,7 @@ public static class BuiltinCommandRegistration
         }
 
         // Check built-ins (including sub-commands)
-        var builtins = new[] { "version", "list", "explain", "doctor", "capabilities", "init", "new", "run", "help", "ui",
+        var builtins = new[] { "version", "list", "explain", "doctor", "secrets", "secrets doctor", "secrets preflight", "capabilities", "init", "new", "run", "help", "ui",
             "config", "config resolved", "config sources", "config materialize",
             "explain version", "policies", "policies list", "policies show" };
         if (builtins.Contains(commandName, StringComparer.OrdinalIgnoreCase))
@@ -523,6 +533,100 @@ public static class BuiltinCommandRegistration
         }
 
         return CommandResult.Fail("explain", 8, $"Command '{commandName}' not found.");
+    }
+
+    private static async Task<CommandResult> RunSecretsDoctorAsync(
+        CommandInvocation invocation,
+        RepoConfig? config,
+        CancellationToken cancellationToken)
+    {
+        if (config?.Secrets?.Items is not { Count: > 0 } items)
+        {
+            return CommandResult.Ok("secrets doctor", "Secrets doctor:\n  No configured secrets found.");
+        }
+
+        var fileEnvironment = RepositoryEnvironmentFiles.Load(invocation.WorkingDirectory);
+        var resolver = new ConfigSecretResolver(config, fileEnvironment, SecretProviderRegistry.CreateDefault());
+        var preflight = await resolver.PreflightRequiredAsync(cancellationToken);
+
+        var lines = new List<string> { "Secrets doctor:" };
+        foreach (var (name, definition) in items.OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase))
+        {
+            var required = definition.Required
+                ?? config.Secrets?.Defaults?.Required
+                ?? true;
+            var exposeInTemplates = definition.ExposeInTemplates ?? true;
+
+            var resolved = preflight.Metadata.TryGetValue(name, out var metadata);
+            var provider = resolved
+                ? metadata!.Provider
+                : ResolveSecretProviderDisplay(config, definition);
+            var source = resolved ? metadata!.Source : "none";
+            var status = resolved
+                ? "resolved"
+                : (required ? "missing-required" : "unresolved-optional");
+
+            var details = new List<string>
+            {
+                $"provider={provider}",
+                $"required={(required ? "yes" : "no")}",
+                $"templates={(exposeInTemplates ? "yes" : "no")}",
+                $"source={source}",
+            };
+
+            if (!string.IsNullOrWhiteSpace(definition.MapToEnv))
+            {
+                details.Add($"mapToEnv={definition.MapToEnv}");
+            }
+
+            lines.Add($"  [{(resolved ? "OK" : "WARN")}] {name}: {status} ({string.Join(", ", details)})");
+        }
+
+        if (preflight.Errors.Count > 0)
+        {
+            lines.Add("  Errors:");
+            foreach (var error in preflight.Errors)
+            {
+                var source = string.IsNullOrWhiteSpace(error.Source) ? "secrets" : error.Source;
+                lines.Add($"    - [{error.Code}] {source}: {error.Message}");
+            }
+        }
+
+        var message = string.Join(Environment.NewLine, lines);
+        var result = new CommandResult(
+            "secrets doctor",
+            preflight.Success,
+            preflight.Success ? 0 : 9,
+            message,
+            new Dictionary<string, object?>
+            {
+                ["secretsTotal"] = items.Count,
+                ["resolvedCount"] = preflight.Metadata.Count,
+                ["errorCount"] = preflight.Errors.Count,
+            })
+        {
+            StructuredErrors = preflight.Errors,
+        };
+
+        return result;
+    }
+
+    private static string ResolveSecretProviderDisplay(RepoConfig config, RepoSecretConfig item)
+    {
+        if (!string.IsNullOrWhiteSpace(item.Provider))
+        {
+            return item.Provider;
+        }
+
+        if (!string.IsNullOrWhiteSpace(item.ProviderRef)
+            && config.Secrets?.Providers is { Count: > 0 }
+            && config.Secrets.Providers.TryGetValue(item.ProviderRef, out var provider)
+            && !string.IsNullOrWhiteSpace(provider?.Type))
+        {
+            return provider.Type;
+        }
+
+        return config.Secrets?.Defaults?.Provider ?? "env";
     }
 
     private static string FormatOptionDefault(System.Text.Json.JsonElement value) =>

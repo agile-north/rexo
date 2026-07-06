@@ -77,6 +77,57 @@ public sealed class NuGetArtifactProviderTests
     }
 
     [Fact]
+    public async Task PushAsyncUsesMappedSecretEnvironmentForApiKey()
+    {
+        const string mappedKeyName = "MY_FEED_API_KEY";
+        var originalMapped = Environment.GetEnvironmentVariable(mappedKeyName);
+        Environment.SetEnvironmentVariable(mappedKeyName, null);
+
+        try
+        {
+            var invocations = new List<string>();
+            var provider = new NuGetArtifactProvider(
+                runDotnetAsync: (arguments, workingDirectory, cancellationToken) =>
+                {
+                    invocations.Add(arguments);
+                    return Task.FromResult((0, string.Empty));
+                });
+
+            var artifact = new ArtifactConfig(
+                "nuget",
+                "Rexo.Core",
+                JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                    """
+                    {
+                      "output": "artifacts/packages",
+                      "target": {
+                        "source": "https://api.nuget.org/v3/index.json",
+                        "apiKeyEnv": "MY_FEED_API_KEY"
+                      }
+                    }
+                    """)!);
+
+            var context = ExecutionContext.Empty(Path.GetTempPath()) with
+            {
+                MappedSecretEnvironment = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    [mappedKeyName] = "mapped-secret-value",
+                },
+            };
+
+            var result = await provider.PushAsync(artifact, context, CancellationToken.None);
+
+            Assert.True(result.Success);
+            Assert.Single(invocations);
+            Assert.Contains("--api-key mapped-secret-value", invocations[0], StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(mappedKeyName, originalMapped);
+        }
+    }
+
+    [Fact]
     public async Task PushAsyncUsesTargetSourceWhenEnvironmentSourceIsNotSet()
     {
         const string sourceEnvName = "NUGET_TARGET_SOURCE";

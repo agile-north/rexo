@@ -324,7 +324,7 @@ public sealed class SecretsExecutionTests
     public async Task SecretMapToEnvIsInjectedForRunStepEnvironment()
     {
         var config = CreateConfig(
-            runCommand: "pwsh -NoProfile -Command \"if ($env:REXO_MAPPED_SECRET -eq 'mapped-value') { Write-Output ok } else { Write-Output bad; exit 7 }\"",
+            runCommand: "pwsh -NoProfile -Command \"if ([Environment]::GetEnvironmentVariable('REXO_MAPPED_SECRET') -eq 'mapped-value') { Write-Output ok } else { Write-Output bad; exit 7 }\"",
             secrets: new RepoSecretsConfig
             {
                 Defaults = new RepoSecretDefaultsConfig { Provider = "env", Required = true },

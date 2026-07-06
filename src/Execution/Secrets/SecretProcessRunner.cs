@@ -8,6 +8,7 @@ internal static class SecretProcessRunner
     internal static async Task<(bool Success, string Stdout, string Stderr, int ExitCode, string? Error)> RunAsync(
         string command,
         IReadOnlyList<string> args,
+        IReadOnlyDictionary<string, string>? environmentVariables,
         CancellationToken cancellationToken)
     {
         try
@@ -22,6 +23,17 @@ internal static class SecretProcessRunner
                     CreateNoWindow = true,
                 },
             };
+
+            if (environmentVariables is { Count: > 0 })
+            {
+                foreach (var (key, value) in environmentVariables)
+                {
+                    if (!string.IsNullOrWhiteSpace(key))
+                    {
+                        process.StartInfo.Environment[key] = value;
+                    }
+                }
+            }
 
             foreach (var arg in args)
             {
@@ -48,6 +60,12 @@ internal static class SecretProcessRunner
             return (false, string.Empty, string.Empty, 127, $"Command '{command}' was not found.");
         }
     }
+
+    internal static Task<(bool Success, string Stdout, string Stderr, int ExitCode, string? Error)> RunAsync(
+        string command,
+        IReadOnlyList<string> args,
+        CancellationToken cancellationToken) =>
+        RunAsync(command, args, environmentVariables: null, cancellationToken);
 
     internal static IReadOnlyList<string> ParseArguments(string? rawArgs)
     {

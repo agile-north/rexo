@@ -139,6 +139,151 @@ public sealed class SecretsExecutionTests
     }
 
     [Fact]
+    public async Task OnePasswordProviderUsesServiceAccountTokenFromProviderAuth()
+    {
+        var tokenEnvName = $"REXO_TEST_OP_TOKEN_{Guid.NewGuid():N}";
+        var original = Environment.GetEnvironmentVariable(tokenEnvName);
+        Environment.SetEnvironmentVariable(tokenEnvName, "svc-token-value");
+
+        var config = CreateConfig(
+            runCommand: "echo {{secrets.onePassSecret}}",
+            secrets: new RepoSecretsConfig
+            {
+                Providers = new Dictionary<string, RepoSecretProviderConfig>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["op"] = new RepoSecretProviderConfig
+                    {
+                        Type = "1password",
+                        Auth = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                        {
+                            ["serviceAccountTokenEnv"] = tokenEnvName,
+                        },
+                        Settings = ParseSettings(
+                            """
+                            {
+                              "command": "pwsh",
+                              "subcommand": "",
+                              "args": ["-NoProfile", "-Command", "Write-Output ($env:OP_SERVICE_ACCOUNT_TOKEN + '-' + '{selector}')"]
+                            }
+                            """)
+                    },
+                },
+                Items = new Dictionary<string, RepoSecretConfig>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["onePassSecret"] = new RepoSecretConfig
+                    {
+                        ProviderRef = "op",
+                        Selector = "onepass-selector",
+                        Required = true,
+                    },
+                },
+            });
+
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+
+        try
+        {
+            var result = await ExecuteConfigCommandAsync(config, tempRoot);
+
+            Assert.True(result.Success);
+            var step = Assert.Single(result.Steps);
+            var stdout = Assert.IsType<string>(step.Outputs["stdout"]);
+            Assert.Contains("***", stdout, StringComparison.Ordinal);
+            Assert.DoesNotContain("svc-token-value", stdout, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(tokenEnvName, original);
+            Directory.Delete(tempRoot, true);
+        }
+    }
+
+    [Fact]
+    public async Task OnePasswordProviderFailsWithHelpfulMessageWhenOpMissing()
+    {
+        var config = CreateConfig(
+            runCommand: "echo {{secrets.onePassSecret}}",
+            secrets: new RepoSecretsConfig
+            {
+                Defaults = new RepoSecretDefaultsConfig { Provider = "1password", Required = true },
+                Items = new Dictionary<string, RepoSecretConfig>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["onePassSecret"] = new RepoSecretConfig
+                    {
+                        Selector = "onepass-selector",
+                        Required = true,
+                        Settings = ParseSettings(
+                            """
+                            {
+                              "command": "rexo-definitely-missing-op-binary"
+                            }
+                            """)
+                    },
+                },
+            });
+
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+
+        try
+        {
+            var result = await ExecuteConfigCommandAsync(config, tempRoot);
+
+            Assert.False(result.Success);
+            Assert.Contains("not found", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(ErrorCodes.SecretResolutionFailed, result.StructuredErrors[0].Code);
+            Assert.Contains("not found", result.StructuredErrors[0].Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, true);
+        }
+    }
+
+    [Fact]
+    public async Task OnePasswordProviderFailsWithHelpfulMessageWhenNotSignedIn()
+    {
+        var config = CreateConfig(
+            runCommand: "echo {{secrets.onePassSecret}}",
+            secrets: new RepoSecretsConfig
+            {
+                Defaults = new RepoSecretDefaultsConfig { Provider = "1password", Required = true },
+                Items = new Dictionary<string, RepoSecretConfig>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["onePassSecret"] = new RepoSecretConfig
+                    {
+                        Selector = "onepass-selector",
+                        Required = true,
+                        Settings = ParseSettings(
+                            """
+                            {
+                              "command": "pwsh",
+                              "subcommand": "",
+                              "args": ["-NoProfile", "-Command", "Write-Error 'You are not currently signed in. Run op signin.'; exit 1"]
+                            }
+                            """)
+                    },
+                },
+            });
+
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+
+        try
+        {
+            var result = await ExecuteConfigCommandAsync(config, tempRoot);
+
+            Assert.False(result.Success);
+            Assert.Contains("signed in", result.StructuredErrors[0].Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, true);
+        }
+    }
+
+    [Fact]
     public async Task SecretIsAvailableInTemplateContext()
     {
         var config = CreateConfig(

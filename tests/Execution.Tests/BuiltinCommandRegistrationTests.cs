@@ -416,8 +416,8 @@ public sealed class BuiltinCommandRegistrationTests
             Assert.False(result.Success);
             Assert.Equal(9, result.ExitCode);
             Assert.Contains("missing-required", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains("SEC-001", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
             Assert.NotEmpty(result.StructuredErrors);
+            Assert.Equal(ErrorCodes.SecretResolutionFailed, result.StructuredErrors[0].Code);
         }
         finally
         {

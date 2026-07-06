@@ -200,6 +200,8 @@ Recommendation:
 - use service-account auth for CI/non-interactive execution
 - use ambient local `op signin` for developer machines unless your team standardizes on service accounts
 
+If you see repeated auth prompts across separate `rx` runs, that is usually 1Password CLI session state, not Rexo secret caching. The durable mitigation is to use service-account or Connect auth for non-interactive flows; Rexo only resolves secrets within the current process and does not manage a long-lived 1Password session.
+
 ## Artifact auth integration example
 
 Mapped secret env values can be consumed by existing artifact auth settings without changing artifact schema.

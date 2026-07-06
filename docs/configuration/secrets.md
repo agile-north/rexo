@@ -50,14 +50,29 @@ For each secret item, provider selection is:
 
 1. `secrets.items.<name>.provider`
 2. `secrets.items.<name>.providerRef` -> `secrets.providers.<ref>.type`
-3. `secrets.defaults.provider`
-4. fallback: `env`
+3. `secrets.items.<name>.providerChain`
+4. `secrets.defaults.providerChain`
+5. `secrets.defaults.provider`
+6. fallback: `env` when no explicit provider is configured
+
+If a provider chain is configured, Rexo evaluates candidates in order and skips candidates whose `runtime` does not match the current process:
+
+- `local` matches non-CI execution
+- `ci` matches any detected CI
+- a CI provider name such as `github-actions`, `azure-devops`, `gitlab-ci`, or `bitbucket-pipelines` matches that runtime only
+
+Routes can also override `selector` and `env`, so the same secret item name can keep one logical identity while pointing at different backing names in different runtimes or providers.
+
+The built-in `github-actions` secret provider is env-backed: it resolves from the current job environment, which lets you keep GitHub Actions-specific secret selection explicit without introducing GitHub API calls into the runtime.
+
+Set `stopOnFirstError: true` when you want the first provider failure to stop resolution instead of falling through to the next candidate.
 
 ## Required and optional behavior
 
 - Required secrets fail command execution during preflight when unresolved.
 - Optional secrets are warmed for template use when `exposeInTemplates` is true.
 - `mapToEnv` injects resolved values into runtime environment for command steps and artifact provider auth resolution.
+- `providerChain` makes it easy to prefer local tooling such as 1Password on developer machines and native CI secret sources in pipelines without branching scripts.
 
 ## Exec provider example
 

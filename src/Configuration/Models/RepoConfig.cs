@@ -321,6 +321,15 @@ public sealed record RepoSecretDefaultsConfig
     /// <summary>Default provider type (for example <c>env</c>).</summary>
     public string? Provider { get; init; }
 
+    /// <summary>Ordered provider chain evaluated by runtime-aware resolution.</summary>
+    public IReadOnlyList<RepoSecretProviderRouteConfig>? ProviderChain { get; init; }
+
+    /// <summary>When true (default), fall back to environment lookup after configured providers fail.</summary>
+    public bool? FallbackToEnvironment { get; init; }
+
+    /// <summary>When true, stop at the first provider error instead of falling back to the next candidate.</summary>
+    public bool? StopOnFirstError { get; init; }
+
     /// <summary>Default cache behavior.</summary>
     public RepoSecretCacheConfig? Cache { get; init; }
 
@@ -351,6 +360,15 @@ public sealed record RepoSecretConfig
     /// <summary>Inline provider type override.</summary>
     public string? Provider { get; init; }
 
+    /// <summary>Ordered provider chain evaluated by runtime-aware resolution.</summary>
+    public IReadOnlyList<RepoSecretProviderRouteConfig>? ProviderChain { get; init; }
+
+    /// <summary>When true (default), fall back to environment lookup after configured providers fail.</summary>
+    public bool? FallbackToEnvironment { get; init; }
+
+    /// <summary>When true, stop at the first provider error instead of falling back to the next candidate.</summary>
+    public bool? StopOnFirstError { get; init; }
+
     /// <summary>Provider selector/key/path for the secret value.</summary>
     public string? Selector { get; init; }
 
@@ -371,6 +389,24 @@ public sealed record RepoSecretConfig
 
     /// <summary>Per-secret provider settings.</summary>
     public Dictionary<string, JsonElement>? Settings { get; init; }
+}
+
+public sealed record RepoSecretProviderRouteConfig
+{
+    /// <summary>Reference to a named provider under <c>secrets.providers</c>.</summary>
+    public string? ProviderRef { get; init; }
+
+    /// <summary>Inline provider type override.</summary>
+    public string? Provider { get; init; }
+
+    /// <summary>Selector override for this route.</summary>
+    public string? Selector { get; init; }
+
+    /// <summary>Environment variable override for this route.</summary>
+    public string? Env { get; init; }
+
+    /// <summary>Runtime filter for the candidate. Use <c>ci</c>, <c>local</c>, or a CI provider name such as <c>github-actions</c>.</summary>
+    public string? Runtime { get; init; }
 }
 
 public sealed record RepoSecretCacheConfig

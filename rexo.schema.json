@@ -138,6 +138,21 @@
           "type": "string",
           "description": "Default secret provider type (for example env, 1password, exec)."
         },
+        "providerChain": {
+          "type": "array",
+          "description": "Ordered provider candidates evaluated at runtime until one resolves the secret.",
+          "items": {
+            "$ref": "#/$defs/secretProviderRouteConfig"
+          }
+        },
+        "fallbackToEnvironment": {
+          "type": "boolean",
+          "description": "When true (default), fall back to environment lookup after configured providers fail."
+        },
+        "stopOnFirstError": {
+          "type": "boolean",
+          "description": "When true, stop the chain on the first provider error instead of falling back to the next candidate."
+        },
         "cache": {
           "$ref": "#/$defs/secretCacheConfig"
         },
@@ -172,6 +187,32 @@
         }
       }
     },
+    "secretProviderRouteConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "providerRef": {
+          "type": "string",
+          "description": "Reference to a named provider declared under secrets.providers."
+        },
+        "provider": {
+          "type": "string",
+          "description": "Inline provider type override."
+        },
+        "selector": {
+          "type": "string",
+          "description": "Selector override for this route."
+        },
+        "env": {
+          "type": "string",
+          "description": "Environment variable override for this route."
+        },
+        "runtime": {
+          "type": "string",
+          "description": "Runtime filter for the candidate. Use local, ci, or a CI provider name such as github-actions."
+        }
+      }
+    },
     "secretItemConfig": {
       "type": "object",
       "additionalProperties": false,
@@ -183,6 +224,21 @@
         "provider": {
           "type": "string",
           "description": "Inline provider type override."
+        },
+        "providerChain": {
+          "type": "array",
+          "description": "Ordered provider candidates evaluated at runtime until one resolves the secret.",
+          "items": {
+            "$ref": "#/$defs/secretProviderRouteConfig"
+          }
+        },
+        "fallbackToEnvironment": {
+          "type": "boolean",
+          "description": "When true (default), fall back to environment lookup after configured providers fail."
+        },
+        "stopOnFirstError": {
+          "type": "boolean",
+          "description": "When true, stop the chain on the first provider error instead of falling back to the next candidate."
         },
         "selector": {
           "type": "string",

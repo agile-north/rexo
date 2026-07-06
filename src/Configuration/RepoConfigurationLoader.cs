@@ -233,6 +233,9 @@ public sealed partial class RepoConfigurationLoader
         return new RepoSecretDefaultsConfig
         {
             Provider = child.Provider ?? @base.Provider,
+            ProviderChain = MergeSecretRoutes(@base.ProviderChain, child.ProviderChain),
+            FallbackToEnvironment = child.FallbackToEnvironment ?? @base.FallbackToEnvironment,
+            StopOnFirstError = child.StopOnFirstError ?? @base.StopOnFirstError,
             Cache = MergeSecretCache(@base.Cache, child.Cache),
             Required = child.Required ?? @base.Required,
         };
@@ -298,6 +301,9 @@ public sealed partial class RepoConfigurationLoader
             {
                 ProviderRef = childSecret.ProviderRef ?? baseSecret.ProviderRef,
                 Provider = childSecret.Provider ?? baseSecret.Provider,
+                ProviderChain = MergeSecretRoutes(baseSecret.ProviderChain, childSecret.ProviderChain),
+                FallbackToEnvironment = childSecret.FallbackToEnvironment ?? baseSecret.FallbackToEnvironment,
+                StopOnFirstError = childSecret.StopOnFirstError ?? baseSecret.StopOnFirstError,
                 Selector = childSecret.Selector ?? baseSecret.Selector,
                 Env = childSecret.Env ?? baseSecret.Env,
                 Required = childSecret.Required ?? baseSecret.Required,
@@ -308,6 +314,19 @@ public sealed partial class RepoConfigurationLoader
             };
         }
 
+        return result;
+    }
+
+    private static IReadOnlyList<RepoSecretProviderRouteConfig>? MergeSecretRoutes(
+        IReadOnlyList<RepoSecretProviderRouteConfig>? @base,
+        IReadOnlyList<RepoSecretProviderRouteConfig>? child)
+    {
+        if (@base is null or { Count: 0 }) return child;
+        if (child is null or { Count: 0 }) return @base;
+
+        var result = new List<RepoSecretProviderRouteConfig>(@base.Count + child.Count);
+        result.AddRange(@base);
+        result.AddRange(child);
         return result;
     }
 

@@ -128,4 +128,66 @@ public sealed class RepoConfigurationLoaderSecretsYamlTests
             }
         }
     }
+
+    [Fact]
+    public async Task LoadAsyncParsesYamlSecretsProviderChain()
+    {
+        var originalOverlay = Environment.GetEnvironmentVariable("REXO_OVERLAY");
+        Environment.SetEnvironmentVariable("REXO_OVERLAY", null);
+
+        var dir = Path.Combine(Path.GetTempPath(), $"rexo-yaml-secrets-chain-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        var configPath = Path.Combine(dir, "rexo.yml");
+
+        await File.WriteAllTextAsync(
+            configPath,
+            """
+            $schema: https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json
+            schemaVersion: "1.0"
+            name: yaml-secrets-chain-sample
+            commands:
+              run:
+                description: Run
+                options: {}
+                steps:
+                  - run: echo hi
+            aliases: {}
+            secrets:
+              defaults:
+                providerChain:
+                  - runtime: local
+                    providerRef: localExec
+                  - runtime: ci
+                    provider: env
+              providers:
+                localExec:
+                  type: exec
+                  settings:
+                    command: pwsh
+              items:
+                chainSecret:
+                  required: true
+            """);
+
+        try
+        {
+            var config = await RepoConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
+
+            Assert.NotNull(config.Secrets);
+            Assert.NotNull(config.Secrets!.Defaults!.ProviderChain);
+            Assert.Equal(2, config.Secrets.Defaults.ProviderChain!.Count);
+            Assert.Equal("local", config.Secrets.Defaults.ProviderChain[0].Runtime);
+            Assert.Equal("localExec", config.Secrets.Defaults.ProviderChain[0].ProviderRef);
+            Assert.Equal("ci", config.Secrets.Defaults.ProviderChain[1].Runtime);
+            Assert.Equal("env", config.Secrets.Defaults.ProviderChain[1].Provider);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("REXO_OVERLAY", originalOverlay);
+            if (Directory.Exists(dir))
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+    }
 }

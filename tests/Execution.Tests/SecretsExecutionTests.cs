@@ -535,6 +535,54 @@ public sealed class SecretsExecutionTests
         }
     }
 
+    [Fact]
+    public async Task SecretsDoctorUsesAzureDevOpsProviderWhenSelectedByCiChain()
+    {
+        var envName = $"REXO_TEST_ADO_SECRET_{Guid.NewGuid():N}";
+        var config = CreateConfig(
+            runCommand: "echo hi",
+            secrets: new RepoSecretsConfig
+            {
+                Defaults = new RepoSecretDefaultsConfig
+                {
+                    ProviderChain =
+                    [
+                        new RepoSecretProviderRouteConfig { Provider = "azure-devops", Runtime = "azure-devops", Env = envName },
+                    ]
+                },
+                Items = new Dictionary<string, RepoSecretConfig>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["runtimeSecret"] = new RepoSecretConfig
+                    {
+                        Required = true,
+                        ExposeInTemplates = false,
+                    },
+                },
+            });
+
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+
+        var originalCi = Environment.GetEnvironmentVariable("TF_BUILD");
+        var originalSecret = Environment.GetEnvironmentVariable(envName);
+        try
+        {
+            Environment.SetEnvironmentVariable("TF_BUILD", "True");
+            Environment.SetEnvironmentVariable(envName, "ado-chain-value");
+
+            var result = await ExecuteBuiltinCommandAsync(config, tempRoot, "secrets doctor");
+
+            Assert.True(result.Success);
+            Assert.Contains("provider=azure-devops", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("TF_BUILD", originalCi);
+            Environment.SetEnvironmentVariable(envName, originalSecret);
+            Directory.Delete(tempRoot, true);
+        }
+    }
+
     private static async Task<CommandResult> ExecuteConfigCommandAsync(RepoConfig config, string repositoryRoot, string commandName = "run")
     {
         var builtins = new BuiltinRegistry();

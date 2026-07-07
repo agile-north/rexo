@@ -12,6 +12,7 @@ public sealed class SecretProviderRegistry
         registry.Register(new ExecSecretProvider());
         registry.Register(new OnePasswordSecretProvider());
         registry.Register(new GitHubActionsSecretProvider());
+        registry.Register(new AzureDevOpsSecretProvider());
         return registry;
     }
 

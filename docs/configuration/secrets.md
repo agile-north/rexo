@@ -44,16 +44,22 @@ Use `secrets.items` to define named secrets, then consume them through:
 }
 ```
 
-## Provider resolution order
+## Provider resolution
 
-For each secret item, provider selection is:
+Rexo resolves each secret item using the first matching branch below.
 
-1. `secrets.items.<name>.provider`
-2. `secrets.items.<name>.providerRef` -> `secrets.providers.<ref>.type`
-3. `secrets.items.<name>.providerChain`
-4. `secrets.defaults.providerChain`
-5. `secrets.defaults.provider`
-6. fallback: `env` when no explicit provider is configured
+### 1. Inline provider or provider reference
+
+If `secrets.items.<name>.provider` or `secrets.items.<name>.providerRef` is set, Rexo resolves that route first.
+If the provider fails, it only falls back to environment lookup when `fallbackToEnvironment` is enabled.
+
+### 2. Provider chain
+
+If no inline provider is set, Rexo evaluates these chains in order:
+
+1. `secrets.items.<name>.providerChain`
+2. `secrets.defaults.providerChain`
+3. `secrets.defaults.provider`
 
 If a provider chain is configured, Rexo evaluates candidates in order and skips candidates whose `runtime` does not match the current process:
 
@@ -63,9 +69,18 @@ If a provider chain is configured, Rexo evaluates candidates in order and skips 
 
 Routes can also override `selector` and `env`, so the same secret item name can keep one logical identity while pointing at different backing names in different runtimes or providers.
 
-The built-in `github-actions` secret provider is env-backed: it resolves from the current job environment, which lets you keep GitHub Actions-specific secret selection explicit without introducing GitHub API calls into the runtime.
+The built-in `github-actions` and `azure-devops` secret providers are env-backed aliases: they resolve from the current job environment, which lets you keep CI-specific selection explicit without introducing provider API calls into the runtime.
+
+### 3. Environment fallback
+
+When no provider succeeds, Rexo falls back to `env` by default.
+Set `fallbackToEnvironment: false` to disable that fallback.
 
 Set `stopOnFirstError: true` when you want the first provider failure to stop resolution instead of falling through to the next candidate.
+
+Both `fallbackToEnvironment` and `stopOnFirstError` can be set at `secrets.defaults` or on an individual secret item. Item values override defaults.
+
+If you want one secret name to use 1Password locally and env in CI, prefer a runtime-aware provider chain rather than a single global 1Password default.
 
 ## Required and optional behavior
 

@@ -452,7 +452,7 @@ internal sealed class ConfigSecretResolver : ISecretResolver
 
     private static string? ResolveCandidateSelector(RepoSecretProviderRouteConfig candidate, RepoSecretConfig item)
     {
-        return candidate.Selector ?? item.Selector ?? item.Env ?? item.Provider ?? item.ProviderRef;
+        return candidate.Selector ?? candidate.Env ?? item.Selector ?? item.Env ?? item.Provider ?? item.ProviderRef;
     }
 
     private static string? ResolveCandidateEnv(RepoSecretProviderRouteConfig candidate, RepoSecretConfig item)

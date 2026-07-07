@@ -76,6 +76,9 @@ The built-in `github-actions` and `azure-devops` secret providers are env-backed
 When no provider succeeds, Rexo falls back to `env` by default.
 Set `fallbackToEnvironment: false` to disable that fallback.
 
+If an environment value begins with `op://`, Rexo treats it as a 1Password selector and resolves it through the 1Password provider automatically.
+That lets you keep the item configured as `env` while storing a 1Password reference in the environment on developer machines.
+
 Set `stopOnFirstError: true` when you want the first provider failure to stop resolution instead of falling through to the next candidate.
 
 Both `fallbackToEnvironment` and `stopOnFirstError` can be set at `secrets.defaults` or on an individual secret item. Item values override defaults.

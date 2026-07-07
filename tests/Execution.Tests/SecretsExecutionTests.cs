@@ -284,6 +284,63 @@ public sealed class SecretsExecutionTests
     }
 
     [Fact]
+    public async Task EnvProviderCanDereferenceOnePasswordSelectors()
+    {
+        var envName = $"REXO_TEST_OP_ENV_{Guid.NewGuid():N}";
+        var selectorValue = "op://vault/item/field";
+        var config = CreateConfig(
+            runCommand: "echo hi",
+            secrets: new RepoSecretsConfig
+            {
+                Providers = new Dictionary<string, RepoSecretProviderConfig>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["op"] = new RepoSecretProviderConfig
+                    {
+                        Type = "1password",
+                        Settings = ParseSettings(
+                            """
+                            {
+                              "command": "pwsh",
+                              "subcommand": "",
+                              "args": ["-NoProfile", "-Command", "Write-Output indirect-secret-value"]
+                            }
+                            """)
+                    },
+                },
+                Defaults = new RepoSecretDefaultsConfig { Provider = "env", Required = true },
+                Items = new Dictionary<string, RepoSecretConfig>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["apiKey"] = new RepoSecretConfig
+                    {
+                        Env = envName,
+                        Required = true,
+                        ExposeInTemplates = false,
+                    },
+                },
+            });
+
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+
+        var originalSecret = Environment.GetEnvironmentVariable(envName);
+        try
+        {
+            Environment.SetEnvironmentVariable(envName, selectorValue);
+
+            var result = await ExecuteBuiltinCommandAsync(config, tempRoot, "secrets doctor");
+
+            Assert.True(result.Success);
+            Assert.Contains("provider=1password", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("source=1password", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(envName, originalSecret);
+            Directory.Delete(tempRoot, true);
+        }
+    }
+
+    [Fact]
     public async Task SecretIsAvailableInTemplateContext()
     {
         var config = CreateConfig(
@@ -649,4 +706,5 @@ public sealed class SecretsExecutionTests
         return JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json)
             ?? throw new InvalidOperationException("Failed to deserialize settings JSON.");
     }
+
 }

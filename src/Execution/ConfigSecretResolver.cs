@@ -217,7 +217,7 @@ internal sealed class ConfigSecretResolver : ISecretResolver
             var envName = ResolveCandidateEnv(candidate.Route, item);
 
             var result = providerType.Equals("env", StringComparison.OrdinalIgnoreCase)
-                ? ResolveFromEnvironment(name, item, providerType, envName, selector)
+                ? await ResolveFromEnvironmentAsync(name, item, providerType, cachePolicy, envName, selector, cancellationToken)
                 : await ResolveFromProviderAsync(name, item, providerType, cachePolicy, cancellationToken, candidate.Route.ProviderRef, selector);
 
             if (result.Success)
@@ -495,18 +495,25 @@ internal sealed class ConfigSecretResolver : ISecretResolver
             : $"Secret '{name}' could not be resolved from any configured provider.";
     }
 
-    private SecretResolution ResolveFromEnvironment(string name, RepoSecretConfig item, string providerType, string? envOverride = null, string? selectorOverride = null)
+    private async Task<SecretResolution> ResolveFromEnvironmentAsync(
+        string name,
+        RepoSecretConfig item,
+        string providerType,
+        SecretCachePolicy cachePolicy,
+        string? envOverride = null,
+        string? selectorOverride = null,
+        CancellationToken cancellationToken = default)
     {
         var envName = envOverride ?? selectorOverride ?? item.Env ?? item.Selector ?? name;
         var fromProcess = Environment.GetEnvironmentVariable(envName);
         if (!string.IsNullOrWhiteSpace(fromProcess))
         {
-            return new SecretResolution(name, true, fromProcess, providerType, "env", null, false);
+            return await ResolveEnvironmentValueAsync(name, item, providerType, cachePolicy, fromProcess, "env", envName, cancellationToken);
         }
 
         if (_fileEnvironment.TryGetValue(envName, out var fromFile) && !string.IsNullOrWhiteSpace(fromFile))
         {
-            return new SecretResolution(name, true, fromFile, providerType, "file-env", null, false);
+            return await ResolveEnvironmentValueAsync(name, item, providerType, cachePolicy, fromFile, "file-env", envName, cancellationToken);
         }
 
         return new SecretResolution(
@@ -518,6 +525,75 @@ internal sealed class ConfigSecretResolver : ISecretResolver
             $"Required environment secret '{envName}' for '{name}' is missing.",
             false);
     }
+
+    private async Task<SecretResolution> ResolveEnvironmentValueAsync(
+        string name,
+        RepoSecretConfig item,
+        string providerType,
+        SecretCachePolicy cachePolicy,
+        string value,
+        string source,
+        string envName,
+        CancellationToken cancellationToken)
+    {
+        if (!LooksLikeOnePasswordSelector(value))
+        {
+            return new SecretResolution(name, true, value, providerType, source, null, false);
+        }
+
+        var onePasswordProviderRef = ResolveImplicitOnePasswordProviderRef();
+        var onePasswordResolution = await ResolveFromProviderAsync(
+            name,
+            item,
+            "1password",
+            cachePolicy,
+            cancellationToken,
+            providerRefOverride: onePasswordProviderRef,
+            selectorOverride: value);
+
+        if (onePasswordResolution.Success)
+        {
+            return onePasswordResolution;
+        }
+
+        return new SecretResolution(
+            name,
+            false,
+            null,
+            providerType,
+            source,
+            $"Environment secret '{envName}' for '{name}' points to 1Password selector '{value}', but 1Password resolution failed: {onePasswordResolution.Error}",
+            false);
+    }
+
+    private static bool LooksLikeOnePasswordSelector(string value) =>
+        value.StartsWith("op://", StringComparison.OrdinalIgnoreCase);
+
+    private string? ResolveImplicitOnePasswordProviderRef()
+    {
+        if (_config.Secrets?.Providers is not { Count: > 0 } providers)
+        {
+            return null;
+        }
+
+        if (providers.TryGetValue("op", out var opProvider) && IsOnePasswordProvider(opProvider))
+        {
+            return "op";
+        }
+
+        foreach (var (providerRef, provider) in providers)
+        {
+            if (IsOnePasswordProvider(provider))
+            {
+                return providerRef;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsOnePasswordProvider(RepoSecretProviderConfig? provider) =>
+        provider is not null && string.Equals(provider.Type, "1password", StringComparison.OrdinalIgnoreCase);
 
     private static SecretResolution ResolveUnsupportedProvider(string name, RepoSecretConfig item, string providerType)
     {

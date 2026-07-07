@@ -284,6 +284,63 @@ public sealed class SecretsExecutionTests
     }
 
     [Fact]
+    public async Task EnvProviderCanDereferenceOnePasswordSelectors()
+    {
+        var envName = $"REXO_TEST_OP_ENV_{Guid.NewGuid():N}";
+        var selectorValue = "op://vault/item/field";
+        var config = CreateConfig(
+            runCommand: "echo hi",
+            secrets: new RepoSecretsConfig
+            {
+                Providers = new Dictionary<string, RepoSecretProviderConfig>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["op"] = new RepoSecretProviderConfig
+                    {
+                        Type = "1password",
+                        Settings = ParseSettings(
+                            """
+                            {
+                              "command": "pwsh",
+                              "subcommand": "",
+                              "args": ["-NoProfile", "-Command", "Write-Output indirect-secret-value"]
+                            }
+                            """)
+                    },
+                },
+                Defaults = new RepoSecretDefaultsConfig { Provider = "env", Required = true },
+                Items = new Dictionary<string, RepoSecretConfig>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["apiKey"] = new RepoSecretConfig
+                    {
+                        Env = envName,
+                        Required = true,
+                        ExposeInTemplates = false,
+                    },
+                },
+            });
+
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+
+        var originalSecret = Environment.GetEnvironmentVariable(envName);
+        try
+        {
+            Environment.SetEnvironmentVariable(envName, selectorValue);
+
+            var result = await ExecuteBuiltinCommandAsync(config, tempRoot, "secrets doctor");
+
+            Assert.True(result.Success);
+            Assert.Contains("provider=1password", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("source=1password", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(envName, originalSecret);
+            Directory.Delete(tempRoot, true);
+        }
+    }
+
+    [Fact]
     public async Task SecretIsAvailableInTemplateContext()
     {
         var config = CreateConfig(
@@ -363,7 +420,242 @@ public sealed class SecretsExecutionTests
         }
     }
 
-    private static async Task<CommandResult> ExecuteConfigCommandAsync(RepoConfig config, string repositoryRoot)
+    [Fact]
+    public async Task SecretsDoctorUsesLocalRuntimeProviderChainWhenNotInCi()
+    {
+        var config = CreateConfig(
+            runCommand: "echo hi",
+            secrets: new RepoSecretsConfig
+            {
+                Defaults = new RepoSecretDefaultsConfig
+                {
+                    ProviderChain =
+                    [
+                        new RepoSecretProviderRouteConfig { ProviderRef = "localExec", Runtime = "local", Selector = "local-chain-value" },
+                        new RepoSecretProviderRouteConfig { Provider = "env", Runtime = "ci", Env = "REXO_TEST_CHAIN_SECRET" },
+                    ]
+                },
+                Providers = new Dictionary<string, RepoSecretProviderConfig>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["localExec"] = new RepoSecretProviderConfig
+                    {
+                        Type = "exec",
+                        Settings = ParseSettings(
+                            """
+                            {
+                              "command": "pwsh",
+                              "args": "-NoProfile -Command \"Write-Output local-chain-value\"",
+                              "mode": "raw"
+                            }
+                            """)
+                    }
+                },
+                Items = new Dictionary<string, RepoSecretConfig>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["runtimeSecret"] = new RepoSecretConfig
+                    {
+                        Required = true,
+                        ExposeInTemplates = false,
+                    },
+                },
+            });
+
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+
+        var originalCi = Environment.GetEnvironmentVariable("GITHUB_ACTIONS");
+        var originalGenericCi = Environment.GetEnvironmentVariable("CI");
+        try
+        {
+            Environment.SetEnvironmentVariable("GITHUB_ACTIONS", null);
+            Environment.SetEnvironmentVariable("CI", null);
+
+            var result = await ExecuteBuiltinCommandAsync(config, tempRoot, "secrets doctor");
+
+            Assert.True(result.Success);
+            Assert.Contains("provider=exec", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("GITHUB_ACTIONS", originalCi);
+            Environment.SetEnvironmentVariable("CI", originalGenericCi);
+            Directory.Delete(tempRoot, true);
+        }
+    }
+
+    [Fact]
+    public async Task SecretsDoctorUsesCiRuntimeProviderChainWhenInCi()
+    {
+        var config = CreateConfig(
+            runCommand: "echo hi",
+            secrets: new RepoSecretsConfig
+            {
+                Defaults = new RepoSecretDefaultsConfig
+                {
+                    ProviderChain =
+                    [
+                        new RepoSecretProviderRouteConfig { ProviderRef = "localExec", Runtime = "local", Selector = "local-chain-value" },
+                        new RepoSecretProviderRouteConfig { Provider = "env", Runtime = "ci", Env = "REXO_TEST_CHAIN_SECRET" },
+                    ]
+                },
+                Providers = new Dictionary<string, RepoSecretProviderConfig>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["localExec"] = new RepoSecretProviderConfig
+                    {
+                        Type = "exec",
+                        Settings = ParseSettings(
+                            """
+                            {
+                              "command": "pwsh",
+                              "args": "-NoProfile -Command \"Write-Output local-chain-value\"",
+                              "mode": "raw"
+                            }
+                            """)
+                    }
+                },
+                Items = new Dictionary<string, RepoSecretConfig>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["runtimeSecret"] = new RepoSecretConfig
+                    {
+                        Required = true,
+                        ExposeInTemplates = false,
+                    },
+                },
+            });
+
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+
+        var originalCi = Environment.GetEnvironmentVariable("GITHUB_ACTIONS");
+        var originalGenericCi = Environment.GetEnvironmentVariable("CI");
+        var originalSecret = Environment.GetEnvironmentVariable("REXO_TEST_CHAIN_SECRET");
+        try
+        {
+            Environment.SetEnvironmentVariable("GITHUB_ACTIONS", "true");
+            Environment.SetEnvironmentVariable("CI", "true");
+            Environment.SetEnvironmentVariable("REXO_TEST_CHAIN_SECRET", "ci-chain-value");
+
+            var result = await ExecuteBuiltinCommandAsync(config, tempRoot, "secrets doctor");
+
+            Assert.True(result.Success);
+            Assert.Contains("provider=env", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("GITHUB_ACTIONS", originalCi);
+            Environment.SetEnvironmentVariable("CI", originalGenericCi);
+            Environment.SetEnvironmentVariable("REXO_TEST_CHAIN_SECRET", originalSecret);
+            Directory.Delete(tempRoot, true);
+        }
+    }
+
+    [Fact]
+    public async Task SecretsDoctorUsesGitHubActionsProviderWhenSelectedByCiChain()
+    {
+        var envName = $"REXO_TEST_GHA_SECRET_{Guid.NewGuid():N}";
+        var config = CreateConfig(
+            runCommand: "echo hi",
+            secrets: new RepoSecretsConfig
+            {
+                Defaults = new RepoSecretDefaultsConfig
+                {
+                    ProviderChain =
+                    [
+                        new RepoSecretProviderRouteConfig { Provider = "github-actions", Runtime = "github-actions" },
+                    ]
+                },
+                Items = new Dictionary<string, RepoSecretConfig>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["runtimeSecret"] = new RepoSecretConfig
+                    {
+                        Env = envName,
+                        Required = true,
+                        ExposeInTemplates = false,
+                    },
+                },
+            });
+
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+
+        var originalCi = Environment.GetEnvironmentVariable("GITHUB_ACTIONS");
+        var originalGenericCi = Environment.GetEnvironmentVariable("CI");
+        var originalSecret = Environment.GetEnvironmentVariable(envName);
+        try
+        {
+            Environment.SetEnvironmentVariable("GITHUB_ACTIONS", "true");
+            Environment.SetEnvironmentVariable("CI", "true");
+            Environment.SetEnvironmentVariable(envName, "gha-chain-value");
+
+            var result = await ExecuteBuiltinCommandAsync(config, tempRoot, "secrets doctor");
+
+            Assert.True(result.Success);
+            Assert.Contains("provider=github-actions", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("GITHUB_ACTIONS", originalCi);
+            Environment.SetEnvironmentVariable("CI", originalGenericCi);
+            Environment.SetEnvironmentVariable(envName, originalSecret);
+            Directory.Delete(tempRoot, true);
+        }
+    }
+
+    [Fact]
+    public async Task SecretsDoctorUsesAzureDevOpsProviderWhenSelectedByCiChain()
+    {
+        var envName = $"REXO_TEST_ADO_SECRET_{Guid.NewGuid():N}";
+        var config = CreateConfig(
+            runCommand: "echo hi",
+            secrets: new RepoSecretsConfig
+            {
+                Defaults = new RepoSecretDefaultsConfig
+                {
+                    ProviderChain =
+                    [
+                        new RepoSecretProviderRouteConfig { Provider = "azure-devops", Runtime = "azure-devops", Env = envName },
+                    ]
+                },
+                Items = new Dictionary<string, RepoSecretConfig>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["runtimeSecret"] = new RepoSecretConfig
+                    {
+                        Required = true,
+                        ExposeInTemplates = false,
+                    },
+                },
+            });
+
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+
+        var originalCi = Environment.GetEnvironmentVariable("TF_BUILD");
+        var originalGithubActions = Environment.GetEnvironmentVariable("GITHUB_ACTIONS");
+        var originalGenericCi = Environment.GetEnvironmentVariable("CI");
+        var originalSecret = Environment.GetEnvironmentVariable(envName);
+        try
+        {
+            Environment.SetEnvironmentVariable("GITHUB_ACTIONS", null);
+            Environment.SetEnvironmentVariable("CI", null);
+            Environment.SetEnvironmentVariable("TF_BUILD", "True");
+            Environment.SetEnvironmentVariable(envName, "ado-chain-value");
+
+            var result = await ExecuteBuiltinCommandAsync(config, tempRoot, "secrets doctor");
+
+            Assert.True(result.Success);
+            Assert.Contains("provider=azure-devops", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("TF_BUILD", originalCi);
+            Environment.SetEnvironmentVariable("GITHUB_ACTIONS", originalGithubActions);
+            Environment.SetEnvironmentVariable("CI", originalGenericCi);
+            Environment.SetEnvironmentVariable(envName, originalSecret);
+            Directory.Delete(tempRoot, true);
+        }
+    }
+
+    private static async Task<CommandResult> ExecuteConfigCommandAsync(RepoConfig config, string repositoryRoot, string commandName = "run")
     {
         var builtins = new BuiltinRegistry();
         var artifactProviders = new Artifacts.ArtifactProviderRegistry();
@@ -384,7 +676,22 @@ public sealed class SecretsExecutionTests
             null,
             repositoryRoot);
 
-        return await executor.ExecuteAsync("run", invocation, CancellationToken.None);
+        return await executor.ExecuteAsync(commandName, invocation, CancellationToken.None);
+    }
+
+    private static async Task<CommandResult> ExecuteBuiltinCommandAsync(RepoConfig config, string repositoryRoot, string commandName)
+    {
+        var registry = BuiltinCommandRegistration.CreateDefault(config);
+        var executor = new DefaultCommandExecutor(registry);
+
+        var invocation = new CommandInvocation(
+            new Dictionary<string, string>(),
+            new Dictionary<string, string?>(),
+            false,
+            null,
+            repositoryRoot);
+
+        return await executor.ExecuteAsync(commandName, invocation, CancellationToken.None);
     }
 
     private static RepoConfig CreateConfig(string runCommand, RepoSecretsConfig secrets)
@@ -414,4 +721,5 @@ public sealed class SecretsExecutionTests
         return JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json)
             ?? throw new InvalidOperationException("Failed to deserialize settings JSON.");
     }
+
 }

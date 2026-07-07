@@ -2,6 +2,7 @@ namespace Rexo.Execution;
 
 using System.Text.Json;
 using Rexo.Configuration.Models;
+using Rexo.Ci;
 using Rexo.Core.Abstractions;
 using Rexo.Core.Models;
 using Rexo.Execution.Secrets;
@@ -15,15 +16,20 @@ internal sealed class ConfigSecretResolver : ISecretResolver
     private readonly Dictionary<string, string> _resolvedValues = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, SecretResolutionMetadata> _metadata = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _mappedEnvironment = new(StringComparer.Ordinal);
+    private readonly CiInfo _ciInfo;
+
+    private readonly record struct SecretRouteSelection(RepoSecretProviderRouteConfig Route, bool IsImplicitEnvironmentFallback);
 
     public ConfigSecretResolver(
         RepoConfig config,
         IReadOnlyDictionary<string, string> fileEnvironment,
-        SecretProviderRegistry providers)
+        SecretProviderRegistry providers,
+        CiInfo? ciInfo = null)
     {
         _config = config;
         _fileEnvironment = fileEnvironment;
         _providers = providers;
+        _ciInfo = ciInfo ?? CiDetector.Detect();
     }
 
     public IReadOnlyDictionary<string, string> ResolvedValues => _resolvedValues;
@@ -124,12 +130,7 @@ internal sealed class ConfigSecretResolver : ISecretResolver
             }
         }
 
-        var providerType = ResolveProviderType(item);
-        var result = providerType switch
-        {
-            "env" => ResolveFromEnvironment(name, item, providerType),
-            _ => await ResolveFromProviderAsync(name, item, providerType, cachePolicy, cancellationToken),
-        };
+        var result = await ResolveFromCandidateChainAsync(name, item, cachePolicy, cancellationToken);
 
         if (result.Success)
         {
@@ -161,23 +162,118 @@ internal sealed class ConfigSecretResolver : ISecretResolver
         return result;
     }
 
+    private async Task<SecretResolution> ResolveFromCandidateChainAsync(
+        string name,
+        RepoSecretConfig item,
+        SecretCachePolicy cachePolicy,
+        CancellationToken cancellationToken)
+    {
+        var candidates = BuildCandidates(item).ToList();
+        if (candidates.Count == 0)
+        {
+            return new SecretResolution(
+                name,
+                false,
+                null,
+                ResolveProviderType(item),
+                "none",
+                GetFallbackErrorMessage(name, item),
+                false);
+        }
+
+        SecretResolution? firstFailure = null;
+        SecretResolution? lastFailure = null;
+        foreach (var candidate in candidates)
+        {
+            if (!IsCandidateApplicable(candidate.Route.Runtime))
+            {
+                continue;
+            }
+
+            var providerType = ResolveCandidateProviderType(candidate.Route);
+            if (string.IsNullOrWhiteSpace(providerType))
+            {
+                var missingProvider = new SecretResolution(
+                    name,
+                    false,
+                    null,
+                    candidate.Route.ProviderRef ?? candidate.Route.Provider ?? "unknown",
+                    "none",
+                    $"Secret provider reference '{candidate.Route.ProviderRef ?? candidate.Route.Provider ?? "unknown"}' could not be resolved.",
+                    false);
+
+                if (ShouldStopOnFirstError(item))
+                {
+                    return missingProvider;
+                }
+
+                firstFailure ??= missingProvider;
+                lastFailure = missingProvider;
+
+                continue;
+            }
+
+            var selector = ResolveCandidateSelector(candidate.Route, item);
+            var envName = ResolveCandidateEnv(candidate.Route, item);
+
+            var result = providerType.Equals("env", StringComparison.OrdinalIgnoreCase)
+                ? await ResolveFromEnvironmentAsync(name, item, providerType, cachePolicy, envName, selector, cancellationToken)
+                : await ResolveFromProviderAsync(name, item, providerType, cachePolicy, cancellationToken, candidate.Route.ProviderRef, selector);
+
+            if (result.Success)
+            {
+                return result;
+            }
+
+            firstFailure ??= result;
+            lastFailure = result;
+
+            if (ShouldStopOnFirstError(item))
+            {
+                return result;
+            }
+
+            if (candidate.IsImplicitEnvironmentFallback && firstFailure is not null)
+            {
+                return firstFailure;
+            }
+        }
+
+        if (lastFailure is not null)
+        {
+            return lastFailure;
+        }
+
+        return new SecretResolution(
+            name,
+            false,
+            null,
+            ResolveProviderType(item),
+            "none",
+            GetFallbackErrorMessage(name, item),
+            false);
+    }
+
     private async Task<SecretResolution> ResolveFromProviderAsync(
         string name,
         RepoSecretConfig item,
         string providerType,
         SecretCachePolicy cachePolicy,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? providerRefOverride = null,
+        string? selectorOverride = null)
     {
-        if (!_providers.TryResolve(providerType, out var provider) || provider is null)
+        var provider = ResolveProvider(providerType, providerRefOverride);
+        if (provider is null)
         {
             return ResolveUnsupportedProvider(name, item, providerType);
         }
 
-        var providerConfig = ResolveProvider(item);
+        var providerConfig = ResolveProvider(item, providerRefOverride);
         var request = new SecretRequest(
             Name: name,
             Provider: providerType,
-            Selector: item.Selector ?? item.Env ?? name,
+            Selector: selectorOverride ?? item.Selector ?? item.Env ?? name,
             Required: IsRequired(item),
             CachePolicy: cachePolicy,
             Auth: providerConfig?.Auth,
@@ -190,6 +286,21 @@ internal sealed class ConfigSecretResolver : ISecretResolver
         }
 
         return resolution with { Cached = cachePolicy.Enabled };
+    }
+
+    private ISecretProvider? ResolveProvider(string providerType, string? providerRefOverride)
+    {
+        if (!string.IsNullOrWhiteSpace(providerRefOverride) &&
+            _config.Secrets?.Providers is { Count: > 0 } providers &&
+            providers.TryGetValue(providerRefOverride, out var providerConfig) &&
+            !string.IsNullOrWhiteSpace(providerConfig.Type) &&
+            _providers.TryResolve(providerConfig.Type, out var providerByRef) &&
+            providerByRef is not null)
+        {
+            return providerByRef;
+        }
+
+        return _providers.TryResolve(providerType, out var provider) ? provider : null;
     }
 
     private SecretCachePolicy ResolveCachePolicy(RepoSecretConfig item)
@@ -246,28 +357,163 @@ internal sealed class ConfigSecretResolver : ISecretResolver
         return "env";
     }
 
-    private RepoSecretProviderConfig? ResolveProvider(RepoSecretConfig item)
+    private RepoSecretProviderConfig? ResolveProvider(RepoSecretConfig item, string? providerRefOverride = null)
     {
-        if (string.IsNullOrWhiteSpace(item.ProviderRef) || _config.Secrets?.Providers is not { Count: > 0 } providers)
+        var providerRef = providerRefOverride ?? item.ProviderRef;
+        if (string.IsNullOrWhiteSpace(providerRef) || _config.Secrets?.Providers is not { Count: > 0 } providers)
         {
             return null;
         }
 
-        return providers.TryGetValue(item.ProviderRef, out var provider) ? provider : null;
+        return providers.TryGetValue(providerRef, out var provider) ? provider : null;
     }
 
-    private SecretResolution ResolveFromEnvironment(string name, RepoSecretConfig item, string providerType)
+    private IEnumerable<SecretRouteSelection> BuildCandidates(RepoSecretConfig item)
     {
-        var envName = item.Env ?? item.Selector ?? name;
+        if (!string.IsNullOrWhiteSpace(item.Provider) || !string.IsNullOrWhiteSpace(item.ProviderRef))
+        {
+            yield return new SecretRouteSelection(
+                new RepoSecretProviderRouteConfig
+                {
+                    Provider = item.Provider,
+                    ProviderRef = item.ProviderRef,
+                }, false);
+
+            if (ShouldFallbackToEnvironment(item))
+            {
+                yield return new SecretRouteSelection(new RepoSecretProviderRouteConfig { Provider = "env" }, true);
+            }
+
+            yield break;
+        }
+
+        if (item.ProviderChain is { Count: > 0 })
+        {
+            foreach (var route in item.ProviderChain)
+            {
+                yield return new SecretRouteSelection(route, false);
+            }
+
+            if (ShouldFallbackToEnvironment(item))
+            {
+                yield return new SecretRouteSelection(new RepoSecretProviderRouteConfig { Provider = "env" }, true);
+            }
+
+            yield break;
+        }
+
+        var defaults = _config.Secrets?.Defaults;
+        if (defaults?.ProviderChain is { Count: > 0 })
+        {
+            foreach (var route in defaults.ProviderChain)
+            {
+                yield return new SecretRouteSelection(route, false);
+            }
+
+            if (ShouldFallbackToEnvironment(item))
+            {
+                yield return new SecretRouteSelection(new RepoSecretProviderRouteConfig { Provider = "env" }, true);
+            }
+
+            yield break;
+        }
+
+        if (!string.IsNullOrWhiteSpace(defaults?.Provider))
+        {
+            yield return new SecretRouteSelection(new RepoSecretProviderRouteConfig { Provider = defaults.Provider }, false);
+            if (ShouldFallbackToEnvironment(item))
+            {
+                yield return new SecretRouteSelection(new RepoSecretProviderRouteConfig { Provider = "env" }, true);
+            }
+
+            yield break;
+        }
+
+        if (ShouldFallbackToEnvironment(item))
+        {
+            yield return new SecretRouteSelection(new RepoSecretProviderRouteConfig { Provider = "env" }, true);
+        }
+    }
+
+    private string? ResolveCandidateProviderType(RepoSecretProviderRouteConfig candidate)
+    {
+        if (!string.IsNullOrWhiteSpace(candidate.Provider))
+        {
+            return candidate.Provider;
+        }
+
+        if (string.IsNullOrWhiteSpace(candidate.ProviderRef) || _config.Secrets?.Providers is not { Count: > 0 } providers)
+        {
+            return null;
+        }
+
+        return providers.TryGetValue(candidate.ProviderRef, out var provider) ? provider.Type : null;
+    }
+
+    private static string? ResolveCandidateSelector(RepoSecretProviderRouteConfig candidate, RepoSecretConfig item)
+    {
+        return candidate.Selector ?? candidate.Env ?? item.Selector ?? item.Env ?? item.Provider ?? item.ProviderRef;
+    }
+
+    private static string? ResolveCandidateEnv(RepoSecretProviderRouteConfig candidate, RepoSecretConfig item)
+    {
+        return candidate.Env ?? item.Env ?? candidate.Selector ?? item.Selector;
+    }
+
+    private bool IsCandidateApplicable(string? runtime)
+    {
+        if (string.IsNullOrWhiteSpace(runtime) || string.Equals(runtime, "any", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (string.Equals(runtime, "ci", StringComparison.OrdinalIgnoreCase))
+        {
+            return _ciInfo.IsCi;
+        }
+
+        if (string.Equals(runtime, "local", StringComparison.OrdinalIgnoreCase))
+        {
+            return !_ciInfo.IsCi;
+        }
+
+        return string.Equals(runtime, _ciInfo.Provider, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool ShouldStopOnFirstError(RepoSecretConfig item) => item.StopOnFirstError
+        ?? _config.Secrets?.Defaults?.StopOnFirstError
+        ?? false;
+
+    private bool ShouldFallbackToEnvironment(RepoSecretConfig item) => item.FallbackToEnvironment
+        ?? _config.Secrets?.Defaults?.FallbackToEnvironment
+        ?? true;
+
+    private string GetFallbackErrorMessage(string name, RepoSecretConfig item)
+    {
+        return ShouldStopOnFirstError(item)
+            ? $"Secret '{name}' could not be resolved because the selected provider failed."
+            : $"Secret '{name}' could not be resolved from any configured provider.";
+    }
+
+    private async Task<SecretResolution> ResolveFromEnvironmentAsync(
+        string name,
+        RepoSecretConfig item,
+        string providerType,
+        SecretCachePolicy cachePolicy,
+        string? envOverride = null,
+        string? selectorOverride = null,
+        CancellationToken cancellationToken = default)
+    {
+        var envName = envOverride ?? selectorOverride ?? item.Env ?? item.Selector ?? name;
         var fromProcess = Environment.GetEnvironmentVariable(envName);
         if (!string.IsNullOrWhiteSpace(fromProcess))
         {
-            return new SecretResolution(name, true, fromProcess, providerType, "env", null, false);
+            return await ResolveEnvironmentValueAsync(name, item, providerType, cachePolicy, fromProcess, "env", envName, cancellationToken);
         }
 
         if (_fileEnvironment.TryGetValue(envName, out var fromFile) && !string.IsNullOrWhiteSpace(fromFile))
         {
-            return new SecretResolution(name, true, fromFile, providerType, "file-env", null, false);
+            return await ResolveEnvironmentValueAsync(name, item, providerType, cachePolicy, fromFile, "file-env", envName, cancellationToken);
         }
 
         return new SecretResolution(
@@ -279,6 +525,75 @@ internal sealed class ConfigSecretResolver : ISecretResolver
             $"Required environment secret '{envName}' for '{name}' is missing.",
             false);
     }
+
+    private async Task<SecretResolution> ResolveEnvironmentValueAsync(
+        string name,
+        RepoSecretConfig item,
+        string providerType,
+        SecretCachePolicy cachePolicy,
+        string value,
+        string source,
+        string envName,
+        CancellationToken cancellationToken)
+    {
+        if (!LooksLikeOnePasswordSelector(value))
+        {
+            return new SecretResolution(name, true, value, providerType, source, null, false);
+        }
+
+        var onePasswordProviderRef = ResolveImplicitOnePasswordProviderRef();
+        var onePasswordResolution = await ResolveFromProviderAsync(
+            name,
+            item,
+            "1password",
+            cachePolicy,
+            cancellationToken,
+            providerRefOverride: onePasswordProviderRef,
+            selectorOverride: value);
+
+        if (onePasswordResolution.Success)
+        {
+            return onePasswordResolution;
+        }
+
+        return new SecretResolution(
+            name,
+            false,
+            null,
+            providerType,
+            source,
+            $"Environment secret '{envName}' for '{name}' points to 1Password selector '{value}', but 1Password resolution failed: {onePasswordResolution.Error}",
+            false);
+    }
+
+    private static bool LooksLikeOnePasswordSelector(string value) =>
+        value.StartsWith("op://", StringComparison.OrdinalIgnoreCase);
+
+    private string? ResolveImplicitOnePasswordProviderRef()
+    {
+        if (_config.Secrets?.Providers is not { Count: > 0 } providers)
+        {
+            return null;
+        }
+
+        if (providers.TryGetValue("op", out var opProvider) && IsOnePasswordProvider(opProvider))
+        {
+            return "op";
+        }
+
+        foreach (var (providerRef, provider) in providers)
+        {
+            if (IsOnePasswordProvider(provider))
+            {
+                return providerRef;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsOnePasswordProvider(RepoSecretProviderConfig? provider) =>
+        provider is not null && string.Equals(provider.Type, "1password", StringComparison.OrdinalIgnoreCase);
 
     private static SecretResolution ResolveUnsupportedProvider(string name, RepoSecretConfig item, string providerType)
     {

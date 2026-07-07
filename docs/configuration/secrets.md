@@ -44,20 +44,53 @@ Use `secrets.items` to define named secrets, then consume them through:
 }
 ```
 
-## Provider resolution order
+## Provider resolution
 
-For each secret item, provider selection is:
+Rexo resolves each secret item using the first matching branch below.
 
-1. `secrets.items.<name>.provider`
-2. `secrets.items.<name>.providerRef` -> `secrets.providers.<ref>.type`
+### 1. Inline provider or provider reference
+
+If `secrets.items.<name>.provider` or `secrets.items.<name>.providerRef` is set, Rexo resolves that route first.
+If the provider fails, it only falls back to environment lookup when `fallbackToEnvironment` is enabled.
+
+### 2. Provider chain
+
+If no inline provider is set, Rexo evaluates these chains in order:
+
+1. `secrets.items.<name>.providerChain`
+2. `secrets.defaults.providerChain`
 3. `secrets.defaults.provider`
-4. fallback: `env`
+
+If a provider chain is configured, Rexo evaluates candidates in order and skips candidates whose `runtime` does not match the current process:
+
+- `local` matches non-CI execution
+- `ci` matches any detected CI
+- a CI provider name such as `github-actions`, `azure-devops`, `gitlab-ci`, or `bitbucket-pipelines` matches that runtime only
+
+Routes can also override `selector` and `env`, so the same secret item name can keep one logical identity while pointing at different backing names in different runtimes or providers.
+
+The built-in `github-actions` and `azure-devops` secret providers are env-backed aliases: they resolve from the current job environment, which lets you keep CI-specific selection explicit without introducing provider API calls into the runtime.
+
+### 3. Environment fallback
+
+When no provider succeeds, Rexo falls back to `env` by default.
+Set `fallbackToEnvironment: false` to disable that fallback.
+
+If an environment value begins with `op://`, Rexo treats it as a 1Password selector and resolves it through the 1Password provider automatically.
+That lets you keep the item configured as `env` while storing a 1Password reference in the environment on developer machines.
+
+Set `stopOnFirstError: true` when you want the first provider failure to stop resolution instead of falling through to the next candidate.
+
+Both `fallbackToEnvironment` and `stopOnFirstError` can be set at `secrets.defaults` or on an individual secret item. Item values override defaults.
+
+If you want one secret name to use 1Password locally and env in CI, prefer a runtime-aware provider chain rather than a single global 1Password default.
 
 ## Required and optional behavior
 
 - Required secrets fail command execution during preflight when unresolved.
 - Optional secrets are warmed for template use when `exposeInTemplates` is true.
 - `mapToEnv` injects resolved values into runtime environment for command steps and artifact provider auth resolution.
+- `providerChain` makes it easy to prefer local tooling such as 1Password on developer machines and native CI secret sources in pipelines without branching scripts.
 
 ## Exec provider example
 
@@ -184,6 +217,8 @@ Recommendation:
 - prefer `...Env` forms so tokens stay out of `rexo.json`
 - use service-account auth for CI/non-interactive execution
 - use ambient local `op signin` for developer machines unless your team standardizes on service accounts
+
+If you see repeated auth prompts across separate `rx` runs, that is usually 1Password CLI session state, not Rexo secret caching. The durable mitigation is to use service-account or Connect auth for non-interactive flows; Rexo only resolves secrets within the current process and does not manage a long-lived 1Password session.
 
 ## Artifact auth integration example
 

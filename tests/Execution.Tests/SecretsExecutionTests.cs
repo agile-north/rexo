@@ -464,9 +464,11 @@ public sealed class SecretsExecutionTests
         Directory.CreateDirectory(tempRoot);
 
         var originalCi = Environment.GetEnvironmentVariable("GITHUB_ACTIONS");
+        var originalGenericCi = Environment.GetEnvironmentVariable("CI");
         try
         {
             Environment.SetEnvironmentVariable("GITHUB_ACTIONS", null);
+            Environment.SetEnvironmentVariable("CI", null);
 
             var result = await ExecuteBuiltinCommandAsync(config, tempRoot, "secrets doctor");
 
@@ -476,6 +478,7 @@ public sealed class SecretsExecutionTests
         finally
         {
             Environment.SetEnvironmentVariable("GITHUB_ACTIONS", originalCi);
+            Environment.SetEnvironmentVariable("CI", originalGenericCi);
             Directory.Delete(tempRoot, true);
         }
     }
@@ -524,10 +527,12 @@ public sealed class SecretsExecutionTests
         Directory.CreateDirectory(tempRoot);
 
         var originalCi = Environment.GetEnvironmentVariable("GITHUB_ACTIONS");
+        var originalGenericCi = Environment.GetEnvironmentVariable("CI");
         var originalSecret = Environment.GetEnvironmentVariable("REXO_TEST_CHAIN_SECRET");
         try
         {
             Environment.SetEnvironmentVariable("GITHUB_ACTIONS", "true");
+            Environment.SetEnvironmentVariable("CI", "true");
             Environment.SetEnvironmentVariable("REXO_TEST_CHAIN_SECRET", "ci-chain-value");
 
             var result = await ExecuteBuiltinCommandAsync(config, tempRoot, "secrets doctor");
@@ -538,6 +543,7 @@ public sealed class SecretsExecutionTests
         finally
         {
             Environment.SetEnvironmentVariable("GITHUB_ACTIONS", originalCi);
+            Environment.SetEnvironmentVariable("CI", originalGenericCi);
             Environment.SetEnvironmentVariable("REXO_TEST_CHAIN_SECRET", originalSecret);
             Directory.Delete(tempRoot, true);
         }
@@ -573,10 +579,12 @@ public sealed class SecretsExecutionTests
         Directory.CreateDirectory(tempRoot);
 
         var originalCi = Environment.GetEnvironmentVariable("GITHUB_ACTIONS");
+        var originalGenericCi = Environment.GetEnvironmentVariable("CI");
         var originalSecret = Environment.GetEnvironmentVariable(envName);
         try
         {
             Environment.SetEnvironmentVariable("GITHUB_ACTIONS", "true");
+            Environment.SetEnvironmentVariable("CI", "true");
             Environment.SetEnvironmentVariable(envName, "gha-chain-value");
 
             var result = await ExecuteBuiltinCommandAsync(config, tempRoot, "secrets doctor");
@@ -587,6 +595,7 @@ public sealed class SecretsExecutionTests
         finally
         {
             Environment.SetEnvironmentVariable("GITHUB_ACTIONS", originalCi);
+            Environment.SetEnvironmentVariable("CI", originalGenericCi);
             Environment.SetEnvironmentVariable(envName, originalSecret);
             Directory.Delete(tempRoot, true);
         }
@@ -621,9 +630,13 @@ public sealed class SecretsExecutionTests
         Directory.CreateDirectory(tempRoot);
 
         var originalCi = Environment.GetEnvironmentVariable("TF_BUILD");
+        var originalGithubActions = Environment.GetEnvironmentVariable("GITHUB_ACTIONS");
+        var originalGenericCi = Environment.GetEnvironmentVariable("CI");
         var originalSecret = Environment.GetEnvironmentVariable(envName);
         try
         {
+            Environment.SetEnvironmentVariable("GITHUB_ACTIONS", null);
+            Environment.SetEnvironmentVariable("CI", null);
             Environment.SetEnvironmentVariable("TF_BUILD", "True");
             Environment.SetEnvironmentVariable(envName, "ado-chain-value");
 
@@ -635,6 +648,8 @@ public sealed class SecretsExecutionTests
         finally
         {
             Environment.SetEnvironmentVariable("TF_BUILD", originalCi);
+            Environment.SetEnvironmentVariable("GITHUB_ACTIONS", originalGithubActions);
+            Environment.SetEnvironmentVariable("CI", originalGenericCi);
             Environment.SetEnvironmentVariable(envName, originalSecret);
             Directory.Delete(tempRoot, true);
         }

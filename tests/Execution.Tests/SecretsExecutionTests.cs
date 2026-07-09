@@ -655,6 +655,63 @@ public sealed class SecretsExecutionTests
         }
     }
 
+    [Fact]
+    public async Task SecretsDoctorUsesGitLabProviderWhenSelectedByCiChain()
+    {
+        var envName = $"REXO_TEST_GITLAB_SECRET_{Guid.NewGuid():N}";
+        var config = CreateConfig(
+            runCommand: "echo hi",
+            secrets: new RepoSecretsConfig
+            {
+                Defaults = new RepoSecretDefaultsConfig
+                {
+                    ProviderChain =
+                    [
+                        new RepoSecretProviderRouteConfig { Provider = "gitlab-ci", Runtime = "gitlab-ci", Env = envName },
+                    ]
+                },
+                Items = new Dictionary<string, RepoSecretConfig>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["runtimeSecret"] = new RepoSecretConfig
+                    {
+                        Required = true,
+                        ExposeInTemplates = false,
+                    },
+                },
+            });
+
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+
+        var originalGitlabCi = Environment.GetEnvironmentVariable("GITLAB_CI");
+        var originalGithubActions = Environment.GetEnvironmentVariable("GITHUB_ACTIONS");
+        var originalAzureDevOps = Environment.GetEnvironmentVariable("TF_BUILD");
+        var originalGenericCi = Environment.GetEnvironmentVariable("CI");
+        var originalSecret = Environment.GetEnvironmentVariable(envName);
+        try
+        {
+            Environment.SetEnvironmentVariable("GITHUB_ACTIONS", null);
+            Environment.SetEnvironmentVariable("TF_BUILD", null);
+            Environment.SetEnvironmentVariable("GITLAB_CI", "true");
+            Environment.SetEnvironmentVariable("CI", "true");
+            Environment.SetEnvironmentVariable(envName, "gitlab-chain-value");
+
+            var result = await ExecuteBuiltinCommandAsync(config, tempRoot, "secrets doctor");
+
+            Assert.True(result.Success);
+            Assert.Contains("provider=gitlab-ci", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("GITLAB_CI", originalGitlabCi);
+            Environment.SetEnvironmentVariable("GITHUB_ACTIONS", originalGithubActions);
+            Environment.SetEnvironmentVariable("TF_BUILD", originalAzureDevOps);
+            Environment.SetEnvironmentVariable("CI", originalGenericCi);
+            Environment.SetEnvironmentVariable(envName, originalSecret);
+            Directory.Delete(tempRoot, true);
+        }
+    }
+
     private static async Task<CommandResult> ExecuteConfigCommandAsync(RepoConfig config, string repositoryRoot, string commandName = "run")
     {
         var builtins = new BuiltinRegistry();

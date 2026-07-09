@@ -69,7 +69,92 @@ If a provider chain is configured, Rexo evaluates candidates in order and skips 
 
 Routes can also override `selector` and `env`, so the same secret item name can keep one logical identity while pointing at different backing names in different runtimes or providers.
 
-The built-in `github-actions` and `azure-devops` secret providers are env-backed aliases: they resolve from the current job environment, which lets you keep CI-specific selection explicit without introducing provider API calls into the runtime.
+The built-in `github-actions`, `azure-devops`, and `gitlab-ci` secret providers are env-backed aliases: they resolve from the current job environment, which lets you keep CI-specific selection explicit without introducing provider API calls into the runtime.
+
+For advanced GitLab scenarios, use provider type `gitlab` with mode-specific settings.
+
+### GitLab provider modes
+
+`gitlab` supports these modes:
+
+- `env` (default): selector is treated as an environment variable name.
+- `variables` (or `api`): fetches a CI variable from GitLab API.
+- `vault`: posts selector + OIDC token to a configured vault endpoint and reads value from response JSON.
+
+Token precedence for `variables` mode is configurable via `tokenPrecedence`.
+Default precedence is:
+
+1. `token` (auth/settings)
+2. `tokenEnv` (auth/settings environment variable indirection)
+3. `CI_JOB_TOKEN`
+4. `GITLAB_TOKEN`
+
+OIDC precedence for `vault` mode is configurable via `oidcTokenPrecedence`.
+Default precedence is:
+
+1. `oidcToken` (auth/settings)
+2. `oidcTokenEnv` (auth/settings environment variable indirection)
+3. `CI_JOB_JWT_V2`
+4. `CI_JOB_JWT`
+
+#### GitLab variables API example
+
+```jsonc
+{
+  "secrets": {
+    "providers": {
+      "gitlabApi": {
+        "type": "gitlab",
+        "settings": {
+          "mode": "variables",
+          "baseUrl": "https://gitlab.example.com",
+          "projectId": "12345",
+          "tokenPrecedence": "ciJobToken,gitlabToken"
+        }
+      }
+    },
+    "items": {
+      "registryPassword": {
+        "providerRef": "gitlabApi",
+        "selector": "REGISTRY_PASSWORD",
+        "mapToEnv": "REGISTRY_PASSWORD"
+      }
+    }
+  }
+}
+```
+
+Notes:
+
+- `groupId` can be used instead of `projectId`.
+- `environmentScope` can be set to pass GitLab variable environment filtering.
+- `variablesEndpoint` can override URL construction when needed.
+
+#### GitLab vault example
+
+```jsonc
+{
+  "secrets": {
+    "providers": {
+      "gitlabVault": {
+        "type": "gitlab",
+        "settings": {
+          "mode": "vault",
+          "vaultEndpoint": "https://vault-gateway.example.com/gitlab/resolve",
+          "oidcTokenEnv": "CI_JOB_JWT_V2"
+        }
+      }
+    },
+    "items": {
+      "nugetApiKey": {
+        "providerRef": "gitlabVault",
+        "selector": "kv/data/feeds/nuget/api-key",
+        "mapToEnv": "NUGET_API_KEY"
+      }
+    }
+  }
+}
+```
 
 ### 3. Environment fallback
 

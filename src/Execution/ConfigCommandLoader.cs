@@ -224,7 +224,7 @@ public sealed class ConfigCommandLoader
             if (group.Count == 1)
             {
                 var stepConfig = group[0];
-                var stepDef = BuildStepDefinition(stepConfig);
+                var stepDef = BuildStepDefinition(stepConfig, currentContext, _templateRenderer);
                 var stepResult = await stepExecutor.ExecuteAsync(stepDef, currentContext, cancellationToken);
                 stepResult = EnrichWithFileOutputs(stepDef, stepResult, currentContext, repositoryRoot, _templateRenderer);
                 executed = [(stepConfig, stepResult)];
@@ -241,7 +241,7 @@ public sealed class ConfigCommandLoader
                 var enriched = new List<(RepoStepConfig Config, StepResult Result)>(executed.Count);
                 foreach (var (cfg, res) in executed)
                 {
-                    var def = BuildStepDefinition(cfg);
+                    var def = BuildStepDefinition(cfg, currentContext, _templateRenderer);
                     enriched.Add((cfg, EnrichWithFileOutputs(def, res, currentContext, repositoryRoot, _templateRenderer)));
                 }
 
@@ -1718,7 +1718,10 @@ public sealed class ConfigCommandLoader
         }
     }
 
-    private static StepDefinition BuildStepDefinition(RepoStepConfig stepConfig) =>
+    private static StepDefinition BuildStepDefinition(
+        RepoStepConfig stepConfig,
+        ExecutionContext context,
+        ITemplateRenderer templateRenderer) =>
         new(
             Id: stepConfig.Id,
             Run: stepConfig.Run,
@@ -1735,19 +1738,49 @@ public sealed class ConfigCommandLoader
             StepOutputs = BuildStepOutputs(stepConfig.Outputs),
             Container = stepConfig.Container is null
                 ? null
-                : new Core.Models.StepContainerDefinition(
-                    stepConfig.Container.Image,
-                    stepConfig.Container.Env,
-                    stepConfig.Container.WorkingDirectory,
-                    stepConfig.Container.Entrypoint,
-                    stepConfig.Container.Dockerfile,
-                    stepConfig.Container.Context,
-                    stepConfig.Container.Build is null
-                        ? null
-                        : new Core.Models.StepContainerBuildDefinition(
-                            stepConfig.Container.Build.Target,
-                            stepConfig.Container.Build.Args)),
+                : BuildStepContainerDefinition(stepConfig.Container, context, templateRenderer),
         };
+
+    private static Core.Models.StepContainerDefinition BuildStepContainerDefinition(
+        RepoStepContainerConfig container,
+        ExecutionContext context,
+        ITemplateRenderer templateRenderer) =>
+        new(
+            templateRenderer.Render(container.Image, context),
+            RenderStringDictionary(container.Env, context, templateRenderer),
+            container.WorkingDirectory is null ? null : templateRenderer.Render(container.WorkingDirectory, context),
+            container.Entrypoint is null ? null : templateRenderer.Render(container.Entrypoint, context),
+            container.Dockerfile is null ? null : templateRenderer.Render(container.Dockerfile, context),
+            container.Context is null ? null : templateRenderer.Render(container.Context, context),
+            container.Build is null
+                ? null
+                : new Core.Models.StepContainerBuildDefinition(
+                    container.Build.Target is null ? null : templateRenderer.Render(container.Build.Target, context),
+                    RenderStringDictionary(container.Build.Args, context, templateRenderer)));
+
+    private static IReadOnlyDictionary<string, string>? RenderStringDictionary(
+        IReadOnlyDictionary<string, string>? source,
+        ExecutionContext context,
+        ITemplateRenderer templateRenderer)
+    {
+        if (source is null)
+        {
+            return null;
+        }
+
+        if (source.Count == 0)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var rendered = new Dictionary<string, string>(source.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in source)
+        {
+            rendered[key] = templateRenderer.Render(value, context);
+        }
+
+        return rendered;
+    }
 
     private static IReadOnlyDictionary<string, IReadOnlyList<string>>? BuildStepOutputs(
         Dictionary<string, string[]>? outputs)
@@ -2001,7 +2034,7 @@ public sealed class ConfigCommandLoader
         return groups;
     }
 
-    private static async Task<List<(RepoStepConfig Config, StepResult Result)>> ExecuteParallelGroupAsync(
+    private async Task<List<(RepoStepConfig Config, StepResult Result)>> ExecuteParallelGroupAsync(
         IReadOnlyList<RepoStepConfig> group,
         StepExecutor stepExecutor,
         ExecutionContext snapshot,
@@ -2009,7 +2042,7 @@ public sealed class ConfigCommandLoader
         CancellationToken cancellationToken)
     {
         var pending = group
-            .Select(sc => (Config: sc, Definition: BuildStepDefinition(sc)))
+            .Select(sc => (Config: sc, Definition: BuildStepDefinition(sc, snapshot, _templateRenderer)))
             .ToList();
 
         var results = new List<(RepoStepConfig Config, StepResult Result)>();

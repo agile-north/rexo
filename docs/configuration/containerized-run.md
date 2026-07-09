@@ -158,6 +158,8 @@ Run manifests include per-step execution metadata:
 Containerized run steps preserve existing run-step features:
 
 - Template expansion in step.run
+- Template expansion is also available in container fields such as image, dockerfile,
+  context, workingDirectory, entrypoint, env values, and build args.
 - stdout/stderr capture
 - outputPattern extraction
 - outputFile writing

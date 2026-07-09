@@ -2,6 +2,10 @@
 
 Use dynamic variables and filters in `run` step commands.
 
+Containerized run-step fields also support the same template sources, including
+`container.image`, `container.dockerfile`, `container.context`, `container.workingDirectory`,
+`container.entrypoint`, `container.env.*`, and `container.build.args.*`.
+
 ---
 
 ## Template Variable Source

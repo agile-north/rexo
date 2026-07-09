@@ -1,6 +1,7 @@
 namespace Rexo.Execution.Tests;
 
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using Rexo.Artifacts;
 using Rexo.Configuration;
@@ -17,6 +18,8 @@ using Rexo.Versioning;
 [Collection("CommandLayering")]
 public sealed class CommandLayeringTests
 {
+    private static readonly SemaphoreSlim ContainerEnvMutationGate = new(1, 1);
+
     // ─── helpers ────────────────────────────────────────────────────────────
 
     private static readonly string SchemaUri =
@@ -53,6 +56,46 @@ public sealed class CommandLayeringTests
           {{extra ?? string.Empty}}
         }
         """;
+
+    private static async Task<(string ToolsDir, string LogPath)> CreateFakeDockerAsync()
+    {
+        var toolsDir = Path.Combine(Path.GetTempPath(), $"rexo-fake-docker-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(toolsDir);
+
+        var logPath = Path.Combine(toolsDir, "docker.log");
+        var cmdPath = Path.Combine(toolsDir, "docker.cmd");
+
+        await File.WriteAllTextAsync(cmdPath, """
+                        @echo off
+                        setlocal EnableDelayedExpansion
+
+                        set ROOT=%~dp0
+                        set LOG=%ROOT%docker.log
+
+                        if /I "%~1"=="image" if /I "%~2"=="inspect" (
+                            if not "%REXO_FAKE_IMAGE_HASH%"=="" (
+                                echo %REXO_FAKE_IMAGE_HASH%
+                                exit /b 0
+                            )
+                            exit /b 1
+                        )
+
+                        if /I "%~1"=="build" (
+                            echo build %*>>"%LOG%"
+                            exit /b 0
+                        )
+
+                        if /I "%~1"=="run" (
+                            echo run %*>>"%LOG%"
+                            echo container-run-ok
+                            exit /b 0
+                        )
+
+                        exit /b 0
+                        """);
+
+        return (toolsDir, logPath);
+    }
 
     // ─── config merge tests (no shell execution) ─────────────────────────────
 
@@ -270,6 +313,113 @@ public sealed class CommandLayeringTests
             if (Directory.Exists(dir)) Directory.Delete(dir, true);
         }
     }
+
+        [Fact]
+        public async Task ContainerFieldsCanUseTemplatesFromVars()
+        {
+                if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+                {
+                        return;
+                }
+
+                await ContainerEnvMutationGate.WaitAsync();
+
+                var dir = Path.Combine(Path.GetTempPath(), $"rexo-container-template-{Guid.NewGuid():N}");
+                Directory.CreateDirectory(dir);
+                var (toolsDir, logPath) = await CreateFakeDockerAsync();
+                var dockerCommandPath = Path.Combine(toolsDir, "docker.cmd");
+
+                var originalPath = Environment.GetEnvironmentVariable("PATH");
+                var originalDockerCommand = Environment.GetEnvironmentVariable("REXO_DOCKER_COMMAND");
+                var originalFakeImageHash = Environment.GetEnvironmentVariable("REXO_FAKE_IMAGE_HASH");
+                Environment.SetEnvironmentVariable("PATH", toolsDir + Path.PathSeparator + originalPath);
+                Environment.SetEnvironmentVariable("REXO_DOCKER_COMMAND", dockerCommandPath);
+                Environment.SetEnvironmentVariable("REXO_FAKE_IMAGE_HASH", null);
+
+                try
+                {
+                        await File.WriteAllTextAsync(Path.Combine(dir, "Dockerfile"), "FROM scratch\n");
+                        var json = """
+                        {
+                            "$schema": "__SCHEMA_URI__",
+                            "schemaVersion": "1.0",
+                            "name": "templated-container",
+                            "vars": {
+                                "container": {
+                                    "image": "rexo/test-image:local",
+                                    "workdir": "/workspace",
+                                    "entrypoint": "custom-entry",
+                                    "dockerfile": "Dockerfile",
+                                    "context": ".",
+                                    "buildTarget": "publish",
+                                    "appVersion": "1.2.3",
+                                    "env": "prod"
+                                }
+                            },
+                            "commands": {
+                                "run-template": {
+                                    "steps": [
+                                        {
+                                            "run": "echo hello-from-template",
+                                            "container": {
+                                                "image": "{{vars.container.image}}",
+                                                "workingDirectory": "{{vars.container.workdir}}",
+                                                "entrypoint": "{{vars.container.entrypoint}}",
+                                                "dockerfile": "{{vars.container.dockerfile}}",
+                                                "context": "{{vars.container.context}}",
+                                                "env": {
+                                                    "APP_ENV": "{{vars.container.env}}"
+                                                },
+                                                "build": {
+                                                    "target": "{{vars.container.buildTarget}}",
+                                                    "args": {
+                                                        "APP_VERSION": "{{vars.container.appVersion}}"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    ]
+                                }
+                            },
+                            "aliases": {}
+                        }
+                        """.Replace("__SCHEMA_URI__", SchemaUri, StringComparison.Ordinal);
+                        await File.WriteAllTextAsync(Path.Combine(dir, "rexo.json"), json);
+
+                        var config = await RepoConfigurationLoader.LoadAsync(Path.Combine(dir, "rexo.json"), CancellationToken.None);
+                        var registry = new CommandRegistry();
+                        var executor = new DefaultCommandExecutor(registry);
+                        var loader = CreateLoader();
+                        loader.LoadInto(registry, config, dir, executor);
+
+                        var result = await executor.ExecuteAsync(
+                                "run-template",
+                                EmptyInvocation(dir),
+                                CancellationToken.None);
+
+                        Assert.True(result.Success, $"Container command should succeed. Message: {result.Message}");
+
+                        var log = await File.ReadAllTextAsync(logPath);
+                        Assert.Contains("build ", log, StringComparison.Ordinal);
+                        Assert.Contains("-t rexo/test-image:local", log, StringComparison.Ordinal);
+                        Assert.Contains("--target publish", log, StringComparison.Ordinal);
+                        Assert.Contains("--build-arg APP_VERSION=1.2.3", log, StringComparison.Ordinal);
+                        Assert.Contains("run ", log, StringComparison.Ordinal);
+                        Assert.Contains("--entrypoint custom-entry", log, StringComparison.Ordinal);
+                        Assert.Contains("-w /workspace", log, StringComparison.Ordinal);
+                        Assert.Contains("-e APP_ENV=prod", log, StringComparison.Ordinal);
+                        Assert.Contains("hello-from-template", log, StringComparison.Ordinal);
+                }
+                finally
+                {
+                        Environment.SetEnvironmentVariable("PATH", originalPath);
+                        Environment.SetEnvironmentVariable("REXO_DOCKER_COMMAND", originalDockerCommand);
+                        Environment.SetEnvironmentVariable("REXO_FAKE_IMAGE_HASH", originalFakeImageHash);
+                        if (Directory.Exists(dir)) Directory.Delete(dir, true);
+                        if (Directory.Exists(toolsDir)) Directory.Delete(toolsDir, true);
+                        ContainerEnvMutationGate.Release();
+                }
+        }
 
     // ─── runtime tests (command execution) ──────────────────────────────────
 

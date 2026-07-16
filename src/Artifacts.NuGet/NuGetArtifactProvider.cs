@@ -33,7 +33,7 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
 
         Directory.CreateDirectory(Path.Combine(context.RepositoryRoot, output));
 
-        var args = $"pack {project} --configuration Release --output {output} --no-build";
+        var args = $"pack {project} --configuration Release --output {output}";
         if (!string.IsNullOrEmpty(version))
         {
             args += $" /p:Version={version}";

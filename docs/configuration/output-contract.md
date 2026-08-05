@@ -22,6 +22,8 @@ wildcards, or `regex:...` expressions.
 
 Configured output paths are materialized before command steps run, which keeps commands
 portable while still letting analyzers and test runners write into the resolved paths.
+Any directories created for that materialization are cleaned up after the command finishes if
+they remain empty.
 
 For a defaults-and-provider quick reference, see [CI Output Emission](ci-output-emission.md).
 

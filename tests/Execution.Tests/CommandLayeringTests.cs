@@ -206,6 +206,10 @@ public sealed class CommandLayeringTests
                 string.Equals(s.Command, "analyze", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(analyzeSteps, s => s.Run is not null &&
                 s.Run.Contains("dotnet format", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(analyzeSteps, s => s.Run is not null &&
+                s.Run.Contains("warnaserror", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(analyzeSteps, s => s.Run is not null &&
+                s.Run.Contains("abspath", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {

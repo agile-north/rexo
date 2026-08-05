@@ -229,7 +229,7 @@ public sealed class CliSmokeTests
     }
 
     [Fact]
-    public async Task ConfigCommandMaterializesAnalysisOutputDirectories()
+    public async Task ConfigCommandCleansUpEmptyAnalysisOutputDirectories()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), $"rexo-cli-analysis-dirs-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDir);
@@ -266,8 +266,9 @@ public sealed class CliSmokeTests
             var exitCode = await Program.ExecuteAsync(["noop"], CancellationToken.None);
             Assert.Equal(0, exitCode);
 
-            Assert.True(Directory.Exists(Path.Combine(tempDir, "artifacts", "analysis")));
-            Assert.True(Directory.Exists(Path.Combine(tempDir, "artifacts", "analysis", "sarif")));
+            Assert.False(Directory.Exists(Path.Combine(tempDir, "artifacts", "analysis")));
+            Assert.False(Directory.Exists(Path.Combine(tempDir, "artifacts", "analysis", "sarif")));
+            Assert.True(File.Exists(Path.Combine(tempDir, "artifacts", "manifests", "commands.json")));
         }
         finally
         {

@@ -100,6 +100,7 @@ Supported filters:
 - `lower` — Convert to lowercase
 - `default(fallback)` — Use fallback value if variable is empty, whitespace-only, or missing
 - `coalesce(a, b, c)` — Return the first non-empty value from the current value, then each fallback candidate in order. Whitespace-only values count as empty.
+- `abspath` — Resolve a repo-relative path to an absolute path rooted at the current repository.
 - `prefix(text)` — Prepend text if value is non-empty
 - `suffix(text)` — Append text if value is non-empty
 - `trim` — Remove leading/trailing whitespace
@@ -109,7 +110,7 @@ Supported filters:
 Chain filters with pipes:
 
 ```text
-{{args.dir | suffix('/dotnet-build.sarif') | prefix('/p:ErrorLog=')}}
+{{args.dir | suffix('/dotnet-build.sarif') | abspath | prefix('/p:ErrorLog=')}}
 ```
 
 Coalescing examples:

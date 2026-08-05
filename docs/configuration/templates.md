@@ -140,7 +140,6 @@ Examples:
 ```text
 {{version.major == '1'}}        // true if major version is 1
 {{options.ci != ''}}             // true if ci option is set
-{{vars.dotnet.test.coverage.mode == 'none'}}  // true if coverage disabled
 ```
 
 Boolean literal support:
@@ -183,17 +182,6 @@ This design enables policy-layer branching with missing vars defaulting graceful
   "when": "{{push.anyBlocked}}"
 }
 ```
-
-### Branch selection based on missing var
-
-```json
-{
-  "id": "dotnet-test-no-coverage",
-  "when": "{{vars.dotnet.test.coverage.mode == 'none'}}"
-}
-```
-
-When `vars.dotnet.test.coverage.mode` is not set, this expression evaluates to `false` (coverage enabled by default).
 
 ### Build arg composition
 

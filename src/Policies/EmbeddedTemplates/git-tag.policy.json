@@ -16,6 +16,7 @@
           "default": false
         }
       },
+      "merge": "append",
       "before": [
         {
           "id": "resolve-version",

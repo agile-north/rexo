@@ -192,7 +192,11 @@ public sealed partial class RepoConfigurationLoader
     private static RepoConfig MergeConfigs(RepoConfig @base, RepoConfig child, bool policyMerge = false) =>
         new(
             Name: string.IsNullOrEmpty(child.Name) ? @base.Name : child.Name,
-            Commands: MergeCommandDictionaries(@base.Commands, child.Commands, policyMerge),
+            Commands: MergeCommandDictionaries(
+                @base.Commands,
+                child.Commands,
+                policyMerge,
+                child.Runtime?.Commands?.DefaultMergeMode ?? @base.Runtime?.Commands?.DefaultMergeMode),
             Aliases: MergeDictionaries(@base.Aliases, child.Aliases))
         {
             Schema = child.Schema ?? @base.Schema,
@@ -478,7 +482,8 @@ public sealed partial class RepoConfigurationLoader
     private static Dictionary<string, RepoCommandConfig>? MergeCommandDictionaries(
         Dictionary<string, RepoCommandConfig>? @base,
         Dictionary<string, RepoCommandConfig>? child,
-        bool policyMerge = false)
+        bool policyMerge = false,
+        string? defaultMergeMode = null)
     {
         if (@base is null or { Count: 0 }) return child;
         if (child is null or { Count: 0 }) return @base;
@@ -488,7 +493,7 @@ public sealed partial class RepoConfigurationLoader
         {
             if (result.TryGetValue(kvp.Key, out var baseCmd))
             {
-                result[kvp.Key] = MergeCommandConfigs(kvp.Key, baseCmd, kvp.Value, policyMerge);
+                result[kvp.Key] = MergeCommandConfigs(kvp.Key, baseCmd, kvp.Value, policyMerge, defaultMergeMode);
             }
             else
             {
@@ -503,7 +508,8 @@ public sealed partial class RepoConfigurationLoader
         string commandName,
         RepoCommandConfig baseCmd,
         RepoCommandConfig childCmd,
-        bool policyMerge = false)
+        bool policyMerge = false,
+        string? defaultMergeMode = null)
     {
         var effectiveMode = childCmd.MergeConfig?.Mode ?? childCmd.Merge;
         var effectiveStepOps = childCmd.MergeConfig?.Steps ?? childCmd.StepOps;
@@ -518,15 +524,7 @@ public sealed partial class RepoConfigurationLoader
 
         if (explicitMerge is not null)
         {
-            return explicitMerge.ToUpperInvariant() switch
-            {
-                "LAYER" => baseCmd,
-                "REPLACE" => childCmd,
-                "APPEND" => MergeCommandAppend(baseCmd, childCmd),
-                "PREPEND" => MergeCommandPrepend(baseCmd, childCmd),
-                "WRAP" => MergeCommandWrap(commandName, baseCmd, childCmd),
-                _ => childCmd,
-            };
+            return ApplyMergeMode(commandName, baseCmd, childCmd, explicitMerge);
         }
 
         if (policyMerge)
@@ -547,13 +545,38 @@ public sealed partial class RepoConfigurationLoader
             {
                 return MergeCommandBaseWrap(commandName, baseCmd, childCmd);
             }
+        }
 
+        if (!string.IsNullOrWhiteSpace(defaultMergeMode))
+        {
+            return ApplyMergeMode(commandName, baseCmd, childCmd, defaultMergeMode);
+        }
+
+        if (policyMerge)
+        {
             // Neither side has a self-ref: base layer wins (child layer is suppressed).
             return baseCmd;
         }
 
-        // Default (non-policy, no explicit merge): child replaces base.
+        // Default (non-policy, no explicit merge, no runtime default): child replaces base.
         return childCmd;
+    }
+
+    private static RepoCommandConfig ApplyMergeMode(
+        string commandName,
+        RepoCommandConfig baseCmd,
+        RepoCommandConfig childCmd,
+        string mergeMode)
+    {
+        return mergeMode.ToUpperInvariant() switch
+        {
+            "LAYER" => baseCmd,
+            "REPLACE" => childCmd,
+            "APPEND" => MergeCommandAppend(baseCmd, childCmd),
+            "PREPEND" => MergeCommandPrepend(baseCmd, childCmd),
+            "WRAP" => MergeCommandWrap(commandName, baseCmd, childCmd),
+            _ => childCmd,
+        };
     }
 
     private static RepoCommandConfig BuildBaseCommandForStepOperations(
@@ -626,16 +649,26 @@ public sealed partial class RepoConfigurationLoader
 
     private static RepoCommandConfig MergeCommandAppend(RepoCommandConfig baseCmd, RepoCommandConfig childCmd)
     {
-        var steps = new List<RepoStepConfig>(baseCmd.Steps);
-        steps.AddRange(childCmd.Steps);
-        return baseCmd with { Steps = steps };
+        var steps = new List<RepoStepConfig>(BuildCommandSteps(baseCmd));
+        steps.AddRange(BuildCommandSteps(childCmd));
+
+        return CreateMergedCommand(
+            baseCmd,
+            childCmd,
+            steps,
+            preferFirstMetadata: true);
     }
 
     private static RepoCommandConfig MergeCommandPrepend(RepoCommandConfig baseCmd, RepoCommandConfig childCmd)
     {
-        var steps = new List<RepoStepConfig>(childCmd.Steps);
-        steps.AddRange(baseCmd.Steps);
-        return childCmd with { Steps = steps };
+        var steps = new List<RepoStepConfig>(BuildCommandSteps(childCmd));
+        steps.AddRange(BuildCommandSteps(baseCmd));
+
+        return CreateMergedCommand(
+            childCmd,
+            baseCmd,
+            steps,
+            preferFirstMetadata: true);
     }
 
     private static RepoCommandConfig MergeCommandWrap(
@@ -643,31 +676,42 @@ public sealed partial class RepoConfigurationLoader
         RepoCommandConfig baseCmd,
         RepoCommandConfig childCmd)
     {
-        var continuationIdx = childCmd.Steps.FindIndex(s =>
+        var childSteps = BuildCommandSteps(childCmd);
+        var baseSteps = BuildCommandSteps(baseCmd);
+
+        var continuationIdx = childSteps.FindIndex(s =>
             string.Equals(s.Command, commandName, StringComparison.OrdinalIgnoreCase));
 
         if (continuationIdx < 0)
         {
             // No continuation marker: fallback — child steps first, base steps after.
-            var fallback = new List<RepoStepConfig>(childCmd.Steps);
-            fallback.AddRange(baseCmd.Steps);
-            return childCmd with { Steps = fallback };
+            var fallback = new List<RepoStepConfig>(childSteps);
+            fallback.AddRange(baseSteps);
+            return CreateMergedCommand(
+                childCmd,
+                baseCmd,
+                fallback,
+                preferFirstMetadata: true);
         }
 
-        var steps = new List<RepoStepConfig>(childCmd.Steps.Count - 1 + baseCmd.Steps.Count);
-        for (var i = 0; i < childCmd.Steps.Count; i++)
+        var steps = new List<RepoStepConfig>(childSteps.Count - 1 + baseSteps.Count);
+        for (var i = 0; i < childSteps.Count; i++)
         {
             if (i == continuationIdx)
             {
-                steps.AddRange(baseCmd.Steps);
+                steps.AddRange(baseSteps);
             }
             else
             {
-                steps.Add(childCmd.Steps[i]);
+                steps.Add(childSteps[i]);
             }
         }
 
-        return childCmd with { Steps = steps };
+        return CreateMergedCommand(
+            childCmd,
+            baseCmd,
+            steps,
+            preferFirstMetadata: true);
     }
 
     private static RepoCommandConfig MergeCommandBaseWrap(
@@ -675,31 +719,81 @@ public sealed partial class RepoConfigurationLoader
         RepoCommandConfig baseCmd,
         RepoCommandConfig childCmd)
     {
-        var continuationIdx = baseCmd.Steps.FindIndex(s =>
+        var baseSteps = BuildCommandSteps(baseCmd);
+        var childSteps = BuildCommandSteps(childCmd);
+
+        var continuationIdx = baseSteps.FindIndex(s =>
             string.Equals(s.Command, commandName, StringComparison.OrdinalIgnoreCase));
 
         if (continuationIdx < 0)
         {
             // No continuation marker in base: fallback — base steps first, child steps after.
-            var fallback = new List<RepoStepConfig>(baseCmd.Steps);
-            fallback.AddRange(childCmd.Steps);
-            return baseCmd with { Steps = fallback };
+            var fallback = new List<RepoStepConfig>(baseSteps);
+            fallback.AddRange(childSteps);
+            return CreateMergedCommand(
+                baseCmd,
+                childCmd,
+                fallback,
+                preferFirstMetadata: true);
         }
 
-        var steps = new List<RepoStepConfig>(baseCmd.Steps.Count - 1 + childCmd.Steps.Count);
-        for (var i = 0; i < baseCmd.Steps.Count; i++)
+        var steps = new List<RepoStepConfig>(baseSteps.Count - 1 + childSteps.Count);
+        for (var i = 0; i < baseSteps.Count; i++)
         {
             if (i == continuationIdx)
             {
-                steps.AddRange(childCmd.Steps);
+                steps.AddRange(childSteps);
             }
             else
             {
-                steps.Add(baseCmd.Steps[i]);
+                steps.Add(baseSteps[i]);
             }
         }
 
-        return baseCmd with { Steps = steps };
+        return CreateMergedCommand(
+            baseCmd,
+            childCmd,
+            steps,
+            preferFirstMetadata: true);
+    }
+
+    private static List<RepoStepConfig> BuildCommandSteps(RepoCommandConfig commandConfig)
+    {
+        var steps = new List<RepoStepConfig>();
+        if (commandConfig.Before is { Count: > 0 })
+        {
+            steps.AddRange(commandConfig.Before);
+        }
+
+        if (commandConfig.Steps is { Count: > 0 })
+        {
+            steps.AddRange(commandConfig.Steps);
+        }
+
+        if (commandConfig.After is { Count: > 0 })
+        {
+            steps.AddRange(commandConfig.After);
+        }
+
+        return steps;
+    }
+
+    private static RepoCommandConfig CreateMergedCommand(
+        RepoCommandConfig primary,
+        RepoCommandConfig secondary,
+        List<RepoStepConfig> steps,
+        bool preferFirstMetadata)
+    {
+        return new RepoCommandConfig(
+            Description: preferFirstMetadata ? primary.Description ?? secondary.Description : secondary.Description ?? primary.Description,
+            Options: MergeDictionaries(primary.Options, secondary.Options) ?? [],
+            Steps: steps)
+        {
+            Hidden = preferFirstMetadata ? primary.Hidden ?? secondary.Hidden : secondary.Hidden ?? primary.Hidden,
+            Args = MergeDictionaries(primary.Args, secondary.Args),
+            MaxParallel = preferFirstMetadata ? primary.MaxParallel ?? secondary.MaxParallel : secondary.MaxParallel ?? primary.MaxParallel,
+            MaxDepth = preferFirstMetadata ? primary.MaxDepth ?? secondary.MaxDepth : secondary.MaxDepth ?? primary.MaxDepth,
+        };
     }
 
     private static Dictionary<TKey, TValue> MergeDictionaries<TKey, TValue>(

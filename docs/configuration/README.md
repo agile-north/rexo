@@ -9,6 +9,8 @@ see [Builtins Reference](../builtins/README.md).
 For machine-readable CLI output and sidecar run-manifest fields,
 see [Output Contract](./output-contract.md).
 
+For a focused CI output emission quick reference, see [CI Output Emission](./ci-output-emission.md).
+
 For detailed run-step container wrapping behavior (scope, defaults, env precedence,
 fallback, and validation), see [Containerized Run Steps](./containerized-run.md).
 
@@ -212,6 +214,10 @@ If you also want commit status publishing for the release flow, add `embedded:gi
 ```json
 { "extends": ["embedded:standard", "embedded:git-tag", "embedded:github-status", "embedded:github-release"] }
 ```
+
+These `post-push` policies compose by shared command name. Each of them uses
+`merge: append`, so the order in `extends` controls the final release-hook sequence
+and any merged option metadata.
 
 For richer GitHub CI metadata and security report uploads, also add `embedded:github-status` and `embedded:github-sarif`:
 

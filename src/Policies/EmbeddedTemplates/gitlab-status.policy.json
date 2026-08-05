@@ -21,6 +21,7 @@
           "default": "Rexo build status"
         }
       },
+      "merge": "append",
       "before": [
         {
           "id": "resolve-version",

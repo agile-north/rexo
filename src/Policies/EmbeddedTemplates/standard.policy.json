@@ -125,6 +125,11 @@
           "uses": "builtin:resolve-version"
         },
         {
+          "id": "build-content",
+          "command": "build",
+          "whenExists": true
+        },
+        {
           "id": "pre-build",
           "command": "pre-build",
           "whenExists": true

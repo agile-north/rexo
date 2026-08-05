@@ -49,6 +49,9 @@ rx release --push
 Because `embedded:standard` defines the `release` workflow and `embedded:github-release`
 provides `post-push`, the GitHub release step runs automatically when `--push` is requested.
 
+When stacked with other `post-push` policies, this template uses `merge: append` so its
+steps and options stay part of the composed release-hook chain in `extends` order.
+
 If you do not use `embedded:standard`, the policy can still be used directly via `rx post-push`
 or composed into a custom command sequence.
 

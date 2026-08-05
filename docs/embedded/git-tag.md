@@ -49,6 +49,9 @@ rx release --push
 - If you use `embedded:standard`, `post-push` runs automatically as part of `rx release --push`.
 - If you do not use `embedded:standard`, you can still use this policy directly by running `rx post-push` or by composing it into your own command flow.
 
+When stacked with other `post-push` policies, this template uses `merge: append` so the
+tagging steps stay in the composed release-hook chain.
+
 ## Options
 
 - `--remote` — Git remote to push the tag to. Defaults to `origin`.

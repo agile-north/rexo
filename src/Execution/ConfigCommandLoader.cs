@@ -174,6 +174,12 @@ public sealed class ConfigCommandLoader
             };
         }
 
+        var resolvedOutputs = BuildOutputsContext(config);
+        if (emitRuntimeFiles)
+        {
+            EnsureConfiguredOutputDirectories(repositoryRoot, resolvedOutputs);
+        }
+
         var context = new ExecutionContext(
             repositoryRoot,
             gitInfo.Branch,
@@ -201,7 +207,7 @@ public sealed class ConfigCommandLoader
             CiVariablePrefix = ciVariablePrefix,
             IsDryRun = TryGetOptionBoolean(invocation.Options, "dry-run") == true,
             CommandCallStack = [.. invocation.CallStack, commandName],
-            ResolvedOutputs = BuildOutputsContext(config),
+            ResolvedOutputs = resolvedOutputs,
             ResolvedSettings = BuildSettingsContext(config),
             ResolvedVars = BuildVarsContext(config),
             MaxCommandDepth = effectiveMaxDepth,
@@ -1873,6 +1879,71 @@ public sealed class ConfigCommandLoader
             ["logs"] = logs,
             ["temp"] = temp,
         };
+    }
+
+    private static void EnsureConfiguredOutputDirectories(
+        string repositoryRoot,
+        IReadOnlyDictionary<string, object?> outputs)
+    {
+        EnsureOutputDirectory(repositoryRoot, outputs, treatAsFile: false, "tests", "results");
+        EnsureOutputDirectory(repositoryRoot, outputs, treatAsFile: false, "tests", "coverage");
+        EnsureOutputDirectory(repositoryRoot, outputs, treatAsFile: false, "tests", "reports");
+        EnsureOutputDirectory(repositoryRoot, outputs, treatAsFile: false, "analysis", "reports");
+        EnsureOutputDirectory(repositoryRoot, outputs, treatAsFile: false, "analysis", "sarif");
+        EnsureOutputDirectory(repositoryRoot, outputs, treatAsFile: true, "security", "audit");
+        EnsureOutputDirectory(repositoryRoot, outputs, treatAsFile: false, "security", "reports");
+        EnsureOutputDirectory(repositoryRoot, outputs, treatAsFile: false, "security", "sarif");
+        EnsureOutputDirectory(repositoryRoot, outputs, treatAsFile: false, "packages");
+        EnsureOutputDirectory(repositoryRoot, outputs, treatAsFile: false, "manifests");
+        EnsureOutputDirectory(repositoryRoot, outputs, treatAsFile: false, "logs");
+        EnsureOutputDirectory(repositoryRoot, outputs, treatAsFile: false, "temp");
+    }
+
+    private static void EnsureOutputDirectory(
+        string repositoryRoot,
+        IReadOnlyDictionary<string, object?> outputs,
+        bool treatAsFile,
+        params string[] pathSegments)
+    {
+        var outputPath = ResolveOutputPath(outputs, pathSegments);
+        if (string.IsNullOrWhiteSpace(outputPath))
+        {
+            return;
+        }
+
+        var absolutePath = Path.IsPathRooted(outputPath)
+            ? outputPath
+            : Path.GetFullPath(Path.Combine(repositoryRoot, outputPath));
+
+        var targetDirectory = treatAsFile
+            ? Path.GetDirectoryName(absolutePath)
+            : absolutePath;
+
+        if (!string.IsNullOrWhiteSpace(targetDirectory))
+        {
+            Directory.CreateDirectory(targetDirectory);
+        }
+    }
+
+    private static string? ResolveOutputPath(
+        IReadOnlyDictionary<string, object?> outputs,
+        params string[] pathSegments)
+    {
+        object? current = outputs;
+
+        foreach (var segment in pathSegments)
+        {
+            if (current is IReadOnlyDictionary<string, object?> dictionary &&
+                dictionary.TryGetValue(segment, out var next))
+            {
+                current = next;
+                continue;
+            }
+
+            return null;
+        }
+
+        return current?.ToString();
     }
 
     private static string ResolveOutputPath(string root, string? configuredPath, string defaultRelativePath)

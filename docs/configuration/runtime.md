@@ -21,6 +21,24 @@ Controls dry-run mode for the current run.
 
 `runtime.push.dryRun` can be used to force push-related commands into dry-run mode even when the global runtime flag is off.
 
+## `runtime.commands`
+
+Controls command delegation depth and the fallback merge behavior for same-name command collisions.
+
+```jsonc
+"runtime": {
+  "commands": {
+    "defaultMergeMode": "append",
+    "maxDepth": 5
+  }
+}
+```
+
+- `defaultMergeMode` (optional): fallback merge mode used when a child command does not specify `merge.mode` or legacy `merge`. Accepts the same values as command-level merge modes: `layer`, `replace`, `append`, `prepend`, `wrap`.
+- `maxDepth` (default: `5`): maximum delegated command call depth.
+- The runtime default is useful for multi-stack repositories that want same-name commands to fan out without repeating merge metadata on every child command.
+- Keep replace-style behavior when you want explicit collisions to stay single-owner, especially for side-effect-heavy commands.
+
 ---
 
 ## `runtime.output`

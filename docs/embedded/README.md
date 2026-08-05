@@ -20,12 +20,17 @@ Rexo ships lifecycle policies as embedded resources in the CLI assembly
 Current embedded policies:
 
 - [standard](standard.md) — General lifecycle commands (`build`, `test`, `verify`, `release`, `push`, etc.)
-- [dotnet](dotnet.md) — Dotnet-focused command surface with `restore`, `format`, `ci` helpers
+- [dotnet](dotnet.md) — Dotnet-focused command surface with `restore`, `build`, `test`, `analyze`, `format`, `release` helpers
 - [git-tag](git-tag.md) — Generic git tag creation for versioned repositories
 - [github-status](github-status.md) — GitHub commit status or check run publishing for test/coverage metadata and CI-aware GitHub Actions handling
 - [github-sarif](github-sarif.md) — GitHub SARIF security scan upload after push
 - [gitlab-status](gitlab-status.md) — GitLab commit status publishing after push
 - [github-release](github-release.md) — GitHub CLI release automation for `post-push` (recommended with `embedded:standard`, but callable directly when composed into custom flows)
+
+The `post-push` templates in this family are intentionally composable by name. They use
+`merge: append`, so the `extends` order determines the final step sequence and merged
+options. Keep `embedded:standard` first, then add `embedded:git-tag`, `embedded:github-status`,
+`embedded:github-sarif`, and `embedded:github-release` in the order you want them to run.
 
 Embedded policies are never applied implicitly.
 
@@ -57,6 +62,7 @@ Design intent:
 - Repo config says what this repo emits (artifacts, versioning, outputs, vars).
 - Embedded policy says how this repo behaves (lifecycle command shape).
 - `embedded:standard` is the recommended lifecycle baseline when you want policy-provided commands.
+- `embedded:standard`'s `build` command includes a continuation point so toolchain overlays can slot their build step between version resolution and artifact packaging.
 
 ## Policy Selection Guidance
 

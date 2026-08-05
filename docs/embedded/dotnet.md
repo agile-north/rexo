@@ -97,6 +97,9 @@ Recommended customization path:
 }
 ```
 
+The runtime materializes configured output directories before command steps run, so
+`analyze` can write reports and SARIF files without shell-specific setup.
+
 ### Supported Optional vars
 
 - `vars.dotnet.solution`: solution or project path passed to dotnet commands.

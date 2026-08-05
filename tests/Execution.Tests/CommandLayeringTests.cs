@@ -253,14 +253,14 @@ public sealed class CommandLayeringTests
     }
 
     [Fact]
-    public async Task DotnetAndStandardExtendsBuildIsWonByBaseDotnet()
+    public async Task DotnetAndStandardExtendsBuildComposesViaStandardContinuation()
     {
         var dir = Path.Combine(Path.GetTempPath(), $"rexo-layer-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         try
         {
-            // standard.build has no self-ref, dotnet.build has no self-ref.
-            // policyMerge rule: neither has self-ref → base (dotnet) wins.
+            // standard.build has a same-name continuation step, so dotnet.build
+            // is inlined between resolve-version and the artifact steps.
             var json = MinimalJson("test-repo", """
                 "extends": ["embedded:dotnet", "embedded:standard"]
                 """);
@@ -269,11 +269,14 @@ public sealed class CommandLayeringTests
 
             Assert.NotNull(config.Commands);
             var buildSteps = config.Commands.GetValueOrDefault("build")?.Steps ?? [];
-            // dotnet.build has "dotnet build" steps
-            Assert.Contains(buildSteps, s => s.Run is not null &&
-                s.Run.Contains("dotnet build", StringComparison.OrdinalIgnoreCase));
-            // standard.build artifact steps are suppressed (no self-ref from either side)
-            Assert.DoesNotContain(buildSteps, s => s.Uses == "builtin:build-artifacts");
+            Assert.Equal(7, buildSteps.Count);
+            Assert.Equal("validate", buildSteps[0].Id);
+            Assert.Equal("version", buildSteps[1].Id);
+            Assert.Equal("dotnet-build", buildSteps[2].Id);
+            Assert.Equal("pre-build", buildSteps[3].Id);
+            Assert.Equal("build-artifacts", buildSteps[4].Id);
+            Assert.Equal("tag-artifacts", buildSteps[5].Id);
+            Assert.Equal("post-build", buildSteps[6].Id);
         }
         finally
         {

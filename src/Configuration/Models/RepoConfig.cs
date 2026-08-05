@@ -115,6 +115,7 @@ public sealed record RepoStepConfig(
     string? Description = null,
     bool? WhenExists = null,
     bool? ContinueOnError = null,
+    bool? AlwaysRun = null,
     bool? Parallel = null,
     string[]? DependsOn = null,
     string? OutputPattern = null,
@@ -270,7 +271,7 @@ public sealed record RepoTestOutputPathsConfig
     /// <summary>Test result files directory. Default: <c>~/tests</c> (relative to <c>outputs.root</c>).</summary>
     public string? Results { get; init; }
 
-    /// <summary>Coverage output directory. Default: <c>~/coverage</c> (relative to <c>outputs.root</c>).</summary>
+    /// <summary>Coverage output directory. Default: <c>~/tests/coverage</c> (relative to <c>outputs.root</c>).</summary>
     public string? Coverage { get; init; }
 
     /// <summary>Test report output directory. Default: <c>~/tests/reports</c> (relative to <c>outputs.root</c>).</summary>

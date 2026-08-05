@@ -61,7 +61,7 @@ Options:
 
 ## Customization Via vars.dotnet
 
-Coverage is enabled by default for the dotnet overlay using `--collect:"XPlat Code Coverage"`.
+Coverage is enabled by default for the dotnet overlay using `--collect:"XPlat Code Coverage"` and writes to `outputs.tests.coverage` by default.
 
 Recommended customization path:
 

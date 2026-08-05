@@ -219,18 +219,29 @@ public sealed class ConfigCommandLoader
             var currentContext = context;
             var artifactEntries = new List<Core.Models.ArtifactManifestEntry>();
             var pushDecisionEntries = new List<Core.Models.PushDecision>();
-            CommandResult? failedResult = null;
+            var hardFailureSeen = false;
+            var firstFailureStepId = string.Empty;
+            var firstFailureExitCode = 0;
 
             // Group consecutive parallel steps; sequential steps are singleton groups
             var stepGroups = GroupSteps(normalizedCommandConfig.Steps);
 
             foreach (var group in stepGroups)
             {
+                var effectiveGroup = hardFailureSeen
+                    ? group.Where(step => step.AlwaysRun == true).ToList()
+                    : group;
+
+                if (effectiveGroup.Count == 0)
+                {
+                    continue;
+                }
+
                 List<(RepoStepConfig Config, StepResult Result)> executed;
 
-                if (group.Count == 1)
+                if (effectiveGroup.Count == 1)
                 {
-                    var stepConfig = group[0];
+                    var stepConfig = effectiveGroup[0];
                     var stepDef = BuildStepDefinition(stepConfig, currentContext, _templateRenderer);
                     var stepResult = await stepExecutor.ExecuteAsync(stepDef, currentContext, cancellationToken);
                     stepResult = EnrichWithFileOutputs(stepDef, stepResult, currentContext, repositoryRoot, _templateRenderer);
@@ -239,7 +250,7 @@ public sealed class ConfigCommandLoader
                 else
                 {
                     executed = await ExecuteParallelGroupAsync(
-                        group,
+                        effectiveGroup,
                         stepExecutor,
                         currentContext,
                         normalizedCommandConfig.MaxParallel,
@@ -255,7 +266,7 @@ public sealed class ConfigCommandLoader
                     executed = enriched;
                 }
 
-                foreach (var (_, stepResult) in executed)
+                foreach (var (stepConfig, stepResult) in executed)
                 {
                     stepResults.Add(stepResult);
                     currentContext = currentContext.WithStep(stepResult);
@@ -277,42 +288,42 @@ public sealed class ConfigCommandLoader
                     {
                         pushDecisionEntries.AddRange(stepDecisions);
                     }
-                }
 
-                // Fail fast if any step failed and it doesn't have continueOnError
-                var failed = executed
-                    .FirstOrDefault(t => !t.Result.Success && t.Config.ContinueOnError != true);
-
-                if (failed.Result is not null)
-                {
-                    failedResult = new CommandResult(
-                        commandName,
-                        false,
-                        failed.Result.ExitCode,
-                        $"Step '{failed.Result.StepId}' failed with exit code {failed.Result.ExitCode}.",
-                        new Dictionary<string, object?>())
+                    var hardFailure = !stepResult.Success && stepConfig.ContinueOnError != true;
+                    if (!hardFailureSeen && hardFailure)
                     {
-                        Steps = stepResults,
-                        Version = currentContext.Version,
-                        Artifacts = artifactEntries,
-                        PushDecisions = pushDecisionEntries,
-                    };
-                    break;
+                        hardFailureSeen = true;
+                        firstFailureStepId = stepResult.StepId;
+                        firstFailureExitCode = stepResult.ExitCode;
+                    }
                 }
             }
 
-            var commandResult = failedResult ?? new CommandResult(
-                commandName,
-                true,
-                0,
-                $"Command '{commandName}' completed successfully.",
-                new Dictionary<string, object?>())
-            {
-                Steps = stepResults,
-                Version = currentContext.Version,
-                Artifacts = artifactEntries,
-                PushDecisions = pushDecisionEntries,
-            };
+            var commandResult = hardFailureSeen
+                ? new CommandResult(
+                    commandName,
+                    false,
+                    firstFailureExitCode,
+                    $"Step '{firstFailureStepId}' failed with exit code {firstFailureExitCode}.",
+                    new Dictionary<string, object?>())
+                {
+                    Steps = stepResults,
+                    Version = currentContext.Version,
+                    Artifacts = artifactEntries,
+                    PushDecisions = pushDecisionEntries,
+                }
+                : new CommandResult(
+                    commandName,
+                    true,
+                    0,
+                    $"Command '{commandName}' completed successfully.",
+                    new Dictionary<string, object?>())
+                {
+                    Steps = stepResults,
+                    Version = currentContext.Version,
+                    Artifacts = artifactEntries,
+                    PushDecisions = pushDecisionEntries,
+                };
 
             if (emitRuntimeFiles)
             {
@@ -1748,6 +1759,7 @@ public sealed class ConfigCommandLoader
             WhenExists = stepConfig.WhenExists ?? false,
             Parallel = stepConfig.Parallel ?? false,
             ContinueOnError = stepConfig.ContinueOnError ?? false,
+            AlwaysRun = stepConfig.AlwaysRun ?? false,
             OutputPattern = stepConfig.OutputPattern,
             OutputFile = stepConfig.OutputFile,
             StepOutputs = BuildStepOutputs(stepConfig.Outputs),
@@ -1850,7 +1862,7 @@ public sealed class ConfigCommandLoader
         }
 
         var testsResults = ResolveOutputPath(root, config.Outputs?.Tests?.Results, "tests");
-        var testsCoverage = ResolveOutputPath(root, config.Outputs?.Tests?.Coverage, "coverage");
+        var testsCoverage = ResolveOutputPath(root, config.Outputs?.Tests?.Coverage, "tests/coverage");
         var testsReports = ResolveOutputPath(root, config.Outputs?.Tests?.Reports, "tests/reports");
         var analysisReports = ResolveOutputPath(root, config.Outputs?.Analysis?.Reports, "analysis");
         var analysisSarif = ResolveOutputPath(root, config.Outputs?.Analysis?.Sarif, "analysis/sarif");

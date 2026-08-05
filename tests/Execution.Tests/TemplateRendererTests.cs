@@ -680,7 +680,7 @@ public sealed class TemplateRendererTests
         var renderer = new TemplateRenderer();
         var ctx = MakeContext(args: new Dictionary<string, string> { ["dir"] = "artifacts/analysis/sarif/dotnet-build.sarif" });
         Assert.Equal(
-            Path.Combine("C:\\repo", "artifacts", "analysis", "sarif", "dotnet-build.sarif"),
+            Path.GetFullPath(Path.Combine(ctx.RepositoryRoot, "artifacts", "analysis", "sarif", "dotnet-build.sarif")),
             renderer.Render("{{args.dir | abspath}}", ctx));
     }
 
@@ -698,7 +698,7 @@ public sealed class TemplateRendererTests
         var renderer = new TemplateRenderer();
         var ctx = MakeContext(args: new Dictionary<string, string> { ["dir"] = "artifacts/analysis/sarif" });
         Assert.Equal(
-            Path.Combine("/p:ErrorLog=C:\\repo", "artifacts", "analysis", "sarif", "dotnet-build.sarif"),
+            "/p:ErrorLog=" + Path.GetFullPath(Path.Combine(ctx.RepositoryRoot, "artifacts", "analysis", "sarif", "dotnet-build.sarif")),
             renderer.Render("{{args.dir | suffix('/dotnet-build.sarif') | abspath | prefix('/p:ErrorLog=')}}", ctx));
     }
 
@@ -709,7 +709,7 @@ public sealed class TemplateRendererTests
         var ctx = MakeContext(args: new Dictionary<string, string> { ["dir"] = "artifacts/analysis/sarif" });
 
         Assert.Equal(
-            Path.Combine("/p:ErrorLog=C:\\repo", "artifacts", "analysis", "sarif", "dotnet-build.sarif"),
+            "/p:ErrorLog=" + Path.GetFullPath(Path.Combine(ctx.RepositoryRoot, "artifacts", "analysis", "sarif", "dotnet-build.sarif")),
             renderer.Render("{{args.missing | coalesce(args.dir, 'artifacts/analysis') | suffix('/dotnet-build.sarif') | abspath | prefix('/p:ErrorLog=')}}", ctx));
     }
 

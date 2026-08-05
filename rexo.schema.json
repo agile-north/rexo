@@ -2306,7 +2306,7 @@
             "coverage": {
               "type": "string",
               "description": "Directory for coverage data files.",
-              "default": "~/coverage"
+              "default": "~/tests/coverage"
             },
             "reports": {
               "type": "string",

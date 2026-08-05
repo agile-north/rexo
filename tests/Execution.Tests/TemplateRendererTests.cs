@@ -525,7 +525,7 @@ public sealed class TemplateRendererTests
     {
         var renderer = new TemplateRenderer();
         var ctx = MakeOutputsContext();
-        Assert.Equal("artifacts/coverage", renderer.Render("{{outputs.tests.coverage}}", ctx));
+        Assert.Equal("artifacts/tests/coverage", renderer.Render("{{outputs.tests.coverage}}", ctx));
     }
 
     [Fact]

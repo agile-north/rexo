@@ -982,9 +982,9 @@ public sealed class RepoConfigurationLoaderTests
   }
 
     [Fact]
-    public async Task LoadAsyncComposesAppendablePostPushPoliciesInOrder()
+    public async Task LoadAsyncGitTagPolicyAddsPostPushCommand()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-post-push-composition-{Guid.NewGuid():N}");
+        var dir = Path.Combine(Path.GetTempPath(), $"rexo-git-tag-post-push-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         var configPath = Path.Combine(dir, "rexo.json");
@@ -993,12 +993,7 @@ public sealed class RepoConfigurationLoaderTests
         "$schema": "rexo.schema.json",
         "schemaVersion": "1.0",
         "name": "extended-sample",
-        "extends": [
-          "embedded:standard",
-          "embedded:git-tag",
-          "embedded:github-status",
-          "embedded:github-release"
-        ]
+        "extends": ["embedded:git-tag"]
       }
       """);
 
@@ -1014,17 +1009,16 @@ public sealed class RepoConfigurationLoaderTests
         {
             var config = await RepoConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
             var postPush = config.Commands!["post-push"];
+            var before = postPush.Before ?? [];
             var stepIds = postPush.Steps.Select(step => step.Id).ToArray();
 
             Assert.Contains("remote", postPush.Options.Keys);
-            Assert.Contains("mode", postPush.Options.Keys);
-            Assert.Contains("conclusion", postPush.Options.Keys);
-            Assert.Equal(3, stepIds.Count(id => string.Equals(id, "resolve-version", StringComparison.OrdinalIgnoreCase)));
-            Assert.Equal(2, stepIds.Count(id => string.Equals(id, "tag-exists", StringComparison.OrdinalIgnoreCase)));
-            Assert.Equal(2, stepIds.Count(id => string.Equals(id, "create-tag", StringComparison.OrdinalIgnoreCase)));
-            Assert.Equal(1, stepIds.Count(id => string.Equals(id, "publish-check", StringComparison.OrdinalIgnoreCase)));
-            Assert.Equal(1, stepIds.Count(id => string.Equals(id, "publish-status", StringComparison.OrdinalIgnoreCase)));
-            Assert.Equal(1, stepIds.Count(id => string.Equals(id, "release", StringComparison.OrdinalIgnoreCase)));
+            Assert.Contains("force", postPush.Options.Keys);
+            Assert.Single(before);
+            Assert.Equal("resolve-version", before[0].Id);
+            Assert.Equal(1, stepIds.Count(id => string.Equals(id, "tag-exists", StringComparison.OrdinalIgnoreCase)));
+            Assert.Equal(1, stepIds.Count(id => string.Equals(id, "delete-existing-tag", StringComparison.OrdinalIgnoreCase)));
+            Assert.Equal(1, stepIds.Count(id => string.Equals(id, "create-tag", StringComparison.OrdinalIgnoreCase)));
         }
         finally
         {
@@ -1598,44 +1592,49 @@ public sealed class RepoConfigurationLoaderTests
   }
 
   [Fact]
-    public void EmbeddedTemplateNamesIncludesDotnetNodeGitTagBuildStatusGitLabStatusAndGitHubRelease()
+    public void EmbeddedTemplateNamesIncludesCurrentEmbeddedTemplates()
     {
         var names = EmbeddedPolicyTemplates.TemplateNames;
+
+        Assert.Contains("standard", names);
         Assert.Contains("dotnet", names);
-    Assert.Contains("node", names);
         Assert.Contains("git-tag", names);
-        Assert.Contains("github-status", names);
-        Assert.Contains("github-sarif", names);
-        Assert.Contains("gitlab-status", names);
-        Assert.Contains("github-release", names);
+        Assert.Contains("node", names);
+        Assert.Contains("none", names);
+        Assert.DoesNotContain("github-status", names);
+        Assert.DoesNotContain("github-sarif", names);
+        Assert.DoesNotContain("gitlab-status", names);
+        Assert.DoesNotContain("github-release", names);
         Assert.DoesNotContain("dotnet-library", names);
         Assert.DoesNotContain("dotnet-api", names);
-  }
+    }
 
     [Fact]
-    public void EmbeddedGitHubReleaseTemplateProvidesPostPushCommand()
+    public void EmbeddedGitTagTemplateProvidesPostPushCommand()
     {
-        using var document = JsonDocument.Parse(EmbeddedPolicyTemplates.ReadTemplate("github-release"));
+        using var document = JsonDocument.Parse(EmbeddedPolicyTemplates.ReadTemplate("git-tag"));
         var root = document.RootElement;
         var commands = root.GetProperty("commands");
 
         Assert.True(commands.TryGetProperty("post-push", out var command));
-    var before = command.GetProperty("before");
-    Assert.Equal(1, before.GetArrayLength());
-    Assert.Equal("resolve-version", before[0].GetProperty("id").GetString());
+        Assert.Equal("append", command.GetProperty("merge").GetString());
 
-    var steps = command.GetProperty("steps");
-    Assert.Equal(3, steps.GetArrayLength());
+        var before = command.GetProperty("before");
+        Assert.Equal(1, before.GetArrayLength());
+        Assert.Equal("resolve-version", before[0].GetProperty("id").GetString());
 
-    var releaseStep = steps[2];
-    Assert.Equal("release", releaseStep.GetProperty("id").GetString());
-        Assert.Contains("gh release create", releaseStep.GetProperty("run").GetString(), StringComparison.Ordinal);
+        var steps = command.GetProperty("steps");
+        Assert.Equal(3, steps.GetArrayLength());
+        Assert.Equal("tag-exists", steps[0].GetProperty("id").GetString());
+        Assert.Equal("delete-existing-tag", steps[1].GetProperty("id").GetString());
+        Assert.Equal("create-tag", steps[2].GetProperty("id").GetString());
+        Assert.Contains("git tag", steps[2].GetProperty("run").GetString(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void EmbeddedPostPushTemplatesUseAppendMerge()
+    public void EmbeddedGitTagPostPushTemplatesUseAppendMerge()
     {
-        string[] templates = ["git-tag", "github-status", "github-sarif", "gitlab-status", "github-release"];
+        string[] templates = ["git-tag"];
 
         foreach (var templateName in templates)
         {

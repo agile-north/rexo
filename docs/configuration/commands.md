@@ -205,11 +205,15 @@ Each step has one of `run`, `uses`, or `command`:
     "push": "{{options.push}}"
   },
   "continueOnError": true,     // don't fail the command if this step fails
+  "alwaysRun": true,           // still run after an earlier hard failure
   "parallel": true,            // run concurrently with adjacent parallel steps
   "outputPattern": "v(?P<version>[\\d.]+)", // regex: named groups → step outputs
   "outputFile": "build/version.txt"         // write stdout to this file path
 }
 ```
+
+Use `alwaysRun` for post steps that must run even if an earlier step failed hard. It only
+changes scheduling; `when` still decides whether the step is eligible to run at all.
 
 ### Shell Command Steps
 

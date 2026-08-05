@@ -11,6 +11,7 @@ public sealed record StepDefinition(
     public bool WhenExists { get; init; }
     public bool Parallel { get; init; }
     public bool ContinueOnError { get; init; }
+    public bool AlwaysRun { get; init; }
     public string? OutputPattern { get; init; }
     public string? OutputFile { get; init; }
     public StepContainerDefinition? Container { get; init; }

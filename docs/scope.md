@@ -728,11 +728,11 @@ Steps can capture outputs for later steps.
 ```json
 {
   "id": "coverage",
-  "run": "cat artifacts/coverage/summary.json",
+  "run": "cat artifacts/tests/coverage/summary.json",
   "capture": {
     "coverage": {
       "from": "file",
-      "path": "artifacts/coverage/summary.json",
+      "path": "artifacts/tests/coverage/summary.json",
       "format": "json"
     }
   }
@@ -1198,7 +1198,7 @@ Test config:
     "coverage": {
       "enabled": true,
       "format": ["cobertura", "lcov"],
-      "output": "artifacts/coverage",
+      "output": "artifacts/tests/coverage",
       "threshold": {
         "line": 80,
         "branch": 70
@@ -1212,9 +1212,9 @@ Test outputs:
 
 ```text
 artifacts/tests/*.trx
-artifacts/coverage/coverage.cobertura.xml
-artifacts/coverage/lcov.info
-artifacts/coverage/summary.json
+artifacts/tests/coverage/coverage.cobertura.xml
+artifacts/tests/coverage/lcov.info
+artifacts/tests/coverage/summary.json
 ```
 
 ---

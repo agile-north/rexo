@@ -491,6 +491,8 @@ public static class BuiltinCommandRegistration
                         lines.Add($"        dependsOn: {string.Join(", ", step.DependsOn)}");
                     if (step.ContinueOnError == true)
                         lines.Add($"        continueOnError: true");
+                    if (step.AlwaysRun == true)
+                        lines.Add($"        alwaysRun: true");
                     if (step.OutputPattern is not null)
                         lines.Add($"        outputPattern: {step.OutputPattern}");
                     if (step.OutputFile is not null)

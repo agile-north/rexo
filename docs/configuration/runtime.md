@@ -52,7 +52,7 @@ Controls filesystem artifact emission, the root output folder, and per-category 
     "root": "artifacts",
     "tests": {
       "results": "~/tests",
-      "coverage": "~/coverage",
+      "coverage": "~/tests/coverage",
       "reports": "~/tests/reports"
     },
     "analysis": {

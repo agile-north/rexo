@@ -195,45 +195,14 @@ stacked *on top of* `embedded:standard` so both the shared lifecycle commands (`
 ```json
 { "extends": ["embedded:standard", "embedded:dotnet-api"] }
 ```
-If you want GitHub release automation for `release --push`, stack `embedded:github-release`
-alongside `embedded:standard`:
+If you want generic git tag creation on push, stack `embedded:git-tag` alongside `embedded:standard`:
 
 ```json
-{ "extends": ["embedded:standard", "embedded:github-release"] }
+{ "extends": ["embedded:standard", "embedded:git-tag"] }
 ```
 
-For more reusable versioning and release flow composition, stack `embedded:git-tag`
-before `embedded:github-release`:
-
-```json
-{ "extends": ["embedded:standard", "embedded:git-tag", "embedded:github-release"] }
-```
-
-If you also want commit status publishing for the release flow, add `embedded:github-status`:
-
-```json
-{ "extends": ["embedded:standard", "embedded:git-tag", "embedded:github-status", "embedded:github-release"] }
-```
-
-These `post-push` policies compose by shared command name. Each of them uses
-`merge: append`, so the order in `extends` controls the final release-hook sequence
-and any merged option metadata.
-
-For richer GitHub CI metadata and security report uploads, also add `embedded:github-status` and `embedded:github-sarif`:
-
-```json
-{
-  "extends": [
-    "embedded:standard",
-    "embedded:git-tag",
-    "embedded:github-status",
-    "embedded:github-sarif",
-    "embedded:github-release"
-  ]
-}
-```
-
-GitHub auth is standardized using `GITHUB_TOKEN` for containerized `gh` operations. `GITHUB_REPOSITORY` is preferred when available, but an authenticated `gh` session and configured git remote can also infer the repository context.
+The shared embedded policies compose by command name. The order in `extends` controls
+the final command sequence and any merged option metadata.
 
 This is what `rx init` generates automatically when `--with-policy` is used with a
 recognized policy template that is not `standard`.

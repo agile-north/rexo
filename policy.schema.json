@@ -406,6 +406,10 @@
           "type": "boolean",
           "description": "Continue executing later steps when this step fails."
         },
+        "alwaysRun": {
+          "type": "boolean",
+          "description": "Execute this step even after a previous hard failure."
+        },
         "dependsOn": {
           "type": "array",
           "description": "List of step ids that must complete before this step can run.",

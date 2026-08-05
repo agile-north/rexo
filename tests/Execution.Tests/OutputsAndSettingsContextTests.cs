@@ -31,7 +31,7 @@ public sealed class OutputsAndSettingsContextTests
 
         var tests = Assert.IsType<Dictionary<string, object?>>(ctx["tests"]);
         Assert.Equal("artifacts/tests", tests["results"]);
-        Assert.Equal("artifacts/coverage", tests["coverage"]);
+        Assert.Equal("artifacts/tests/coverage", tests["coverage"]);
         Assert.Equal("artifacts/tests/reports", tests["reports"]);
 
         var analysis = Assert.IsType<Dictionary<string, object?>>(ctx["analysis"]);
@@ -59,7 +59,7 @@ public sealed class OutputsAndSettingsContextTests
 
         var tests = Assert.IsType<Dictionary<string, object?>>(ctx["tests"]);
         Assert.Equal("out/tests", tests["results"]);
-        Assert.Equal("out/coverage", tests["coverage"]);
+        Assert.Equal("out/tests/coverage", tests["coverage"]);
     }
 
     [Fact]

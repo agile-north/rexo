@@ -101,6 +101,11 @@ status, version fields, step counts, and push summary fields.
 The `REXO_` prefix is the default. When `outputs.ci.prefix` is configured, run-step
 environment variables use that configured prefix instead.
 
+The run-step variable block uses the same manifest contract as post-command CI emission,
+but with a fixed internal profile: step outputs are included, empty values are kept,
+and sensitive values are not redacted. See [CI Output Emission](ci-output-emission.md)
+for the full contract and defaults.
+
 Examples include:
 
 - `REXO_SUCCESS`

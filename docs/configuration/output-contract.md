@@ -20,6 +20,11 @@ When `outputs.ci.emit` is enabled, Rexo can emit CI-native variables after comma
 `include`, and `exclude` masks. Masks match the canonical field path and can be exact names,
 wildcards, or `regex:...` expressions.
 
+Configured output paths are materialized before command steps run, which keeps commands
+portable while still letting analyzers and test runners write into the resolved paths.
+
+For a defaults-and-provider quick reference, see [CI Output Emission](ci-output-emission.md).
+
 ### CI Key Formatting
 
 `outputs.ci.keyCasing` controls how flattened manifest paths become variable keys.

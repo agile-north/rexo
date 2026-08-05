@@ -73,8 +73,14 @@ Steps:
 
 1. `builtin:validate`
 2. `builtin:resolve-version`
-3. `builtin:build-artifacts`
-4. `builtin:tag-artifacts`
+3. `command:build` (overlay continuation, skipped when no inner layer contributes steps)
+4. `builtin:build-artifacts`
+5. `builtin:tag-artifacts`
+
+Notes:
+
+- Toolchain overlays such as `embedded:dotnet` and `embedded:node` inject their build steps at the continuation point.
+- When no overlay contributes steps, the continuation marker is skipped successfully.
 
 ### tag
 

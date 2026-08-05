@@ -40,6 +40,9 @@ rx release --push
 - If you use `embedded:standard`, `post-push` runs automatically as part of `rx release --push`.
 - If you do not use `embedded:standard`, you can still run `rx post-push` directly or define your own command composition.
 
+When stacked with other `post-push` policies, this template uses `merge: append` so the
+SARIF upload remains part of the composed release-hook chain.
+
 ## Options
 
 - `--sarif-path` — Path to the SARIF file. Defaults to `artifacts/security/security.sarif`.

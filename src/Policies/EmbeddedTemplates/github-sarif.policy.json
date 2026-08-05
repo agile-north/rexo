@@ -16,6 +16,7 @@
           "default": "Rexo Security"
         }
       },
+      "merge": "append",
       "before": [
         {
           "id": "resolve-version",

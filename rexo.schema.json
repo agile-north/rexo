@@ -2429,6 +2429,13 @@
           "description": "Global command execution policy settings.",
           "additionalProperties": false,
           "properties": {
+            "defaultMergeMode": {
+              "$ref": "#/$defs/commandMergeMode",
+              "description": "Fallback command collision behavior when a child command omits merge.mode. Applied before the built-in replace fallback.",
+              "examples": [
+                "append"
+              ]
+            },
             "maxDepth": {
               "type": "integer",
               "description": "Default maximum delegated command call depth.",

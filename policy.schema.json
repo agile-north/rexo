@@ -2,15 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/policy.schema.json",
   "title": "Rexo policy configuration schema",
-  "description": "Schema for policy files that provide shared command and alias baselines.",
+  "description": "Schema for policy files that may contribute shared command and alias baselines.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "$schema",
     "schemaVersion",
-    "name",
-    "commands",
-    "aliases"
+    "name"
   ],
   "properties": {
     "$schema": {
@@ -42,15 +40,14 @@
     },
     "commands": {
       "type": "object",
-      "minProperties": 1,
-      "description": "Policy-defined commands merged into repository command space.",
+      "description": "Policy-defined commands merged into repository command space. Omit this property for empty or capability-only policies.",
       "additionalProperties": {
         "$ref": "#/$defs/repoCommand"
       }
     },
     "aliases": {
       "type": "object",
-      "description": "Policy-defined command aliases. Key is alias name, value is command target.",
+      "description": "Policy-defined command aliases. Omit this property when the policy contributes no aliases.",
       "additionalProperties": {
         "type": "string"
       }

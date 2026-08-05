@@ -418,8 +418,10 @@ public sealed record RepoSecretCacheConfig
     public int? TtlSeconds { get; init; }
 }
 
+/// <summary>Per-command execution policy defaults. Controls delegation depth and collision fallback behavior.</summary>
 public sealed record RepoRuntimeCommandsConfig(
-    int? MaxDepth = null);
+    int? MaxDepth = null,
+    string? DefaultMergeMode = null);
 
 public sealed record RepoPushConfig(
     bool? DryRun = null,

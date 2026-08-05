@@ -139,7 +139,37 @@ public sealed class RepoConfigurationLoaderYamlTests
         }
     }
 
-      [Fact]
+    [Fact]
+    public async Task LoadPolicyAsyncAllowsEmptyPolicy()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"rexo-policy-empty-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        var policyPath = Path.Combine(dir, "policy.yml");
+
+        await File.WriteAllTextAsync(
+            policyPath,
+            """
+        $schema: https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/policy.schema.json
+        schemaVersion: "1.0"
+        name: empty-policy
+        description: Empty policy with no commands or aliases
+        """);
+
+        try
+        {
+            var policy = await RepoConfigurationLoader.LoadPolicyAsync(policyPath, CancellationToken.None);
+
+            Assert.NotNull(policy);
+            Assert.Null(policy.Commands);
+            Assert.Null(policy.Aliases);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
       public async Task LoadPolicyAsyncThrowsWhenRequiredCapabilityIsUnsupported()
       {
         var dir = Path.Combine(Path.GetTempPath(), $"rexo-policy-capability-yaml-{Guid.NewGuid():N}");
@@ -153,7 +183,7 @@ public sealed class RepoConfigurationLoaderYamlTests
               {
                 "$schema": "https://json-schema.org/draft/2020-12/schema",
                 "type": "object",
-                "required": ["$schema", "schemaVersion", "name", "commands", "aliases"],
+                "required": ["$schema", "schemaVersion", "name"],
                 "additionalProperties": false,
                 "properties": {
                   "$schema": { "type": "string" },

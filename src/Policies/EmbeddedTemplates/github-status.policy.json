@@ -43,6 +43,7 @@
           "allowed": ["success", "failure", "neutral", "cancelled", "timed_out", "action_required", "stale"]
         }
       },
+      "merge": "append",
       "before": [
         {
           "id": "resolve-version",

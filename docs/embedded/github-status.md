@@ -46,6 +46,9 @@ rx release --push
 - If you use `embedded:standard`, `post-push` runs automatically as part of `rx release --push`.
 - If you do not use `embedded:standard`, you can still run `rx post-push` directly or define your own command composition.
 
+When stacked with other `post-push` policies, this template uses `merge: append` so its
+options and steps remain part of the composed release-hook chain.
+
 ## Options
 
 - `--mode` — Publish mode. Defaults to `auto`.

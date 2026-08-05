@@ -159,9 +159,17 @@ Precedence rules (highest to lowest):
 1. `merge.steps`
 2. `stepOps` (legacy)
 3. `merge.mode`
-4. default behavior (no explicit merge): child replaces base
+4. `runtime.commands.defaultMergeMode` when configured on the merged repo config
+5. default behavior (no explicit merge): child replaces base
 
 If both `merge.steps` and legacy `stepOps` are provided, `merge.steps` is used.
+
+Notes:
+
+- `runtime.commands.defaultMergeMode` gives you a repo-level fallback for same-name command collisions.
+- Use it when you want additive stacks like `embedded:dotnet` + `embedded:node` to fan out by default.
+- Same-name embedded policy continuation steps still work when present; they remain the most specific composition signal.
+- The runtime default is inherited across `extends`; a child can override the base default without repeating merge metadata on every command.
 
 ---
 

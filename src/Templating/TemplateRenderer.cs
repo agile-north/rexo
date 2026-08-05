@@ -109,6 +109,7 @@ public sealed class TemplateRenderer : ITemplateRenderer
             "dirname" => Path.GetDirectoryName(result) ?? string.Empty,
             "fileext" => Path.GetExtension(result),
             "filestem" => Path.GetFileNameWithoutExtension(result),
+            "abspath" => MakeAbsolutePath(result, context.RepositoryRoot),
             "urlencode" => Uri.EscapeDataString(result),
             "sha256" => ComputeSha256Hex(result),
             "prefix" when filterArgs.Count == 1 => IsEmptyValue(result) ? string.Empty : TrimQuotedString(filterArgs[0]) + result,
@@ -639,6 +640,26 @@ public sealed class TemplateRenderer : ITemplateRenderer
 
     private static string Slug(string value) =>
         SlugCleanPattern.Replace(value.ToLowerInvariant(), "-").Trim('-');
+
+    private static string MakeAbsolutePath(string value, string repositoryRoot)
+    {
+        if (IsEmptyValue(value))
+        {
+            return string.Empty;
+        }
+
+        if (Path.IsPathRooted(value))
+        {
+            return value;
+        }
+
+        if (value.StartsWith("~/", StringComparison.Ordinal) || value.StartsWith("~\\", StringComparison.Ordinal))
+        {
+            value = value[2..];
+        }
+
+        return Path.GetFullPath(Path.Combine(repositoryRoot, value));
+    }
 
     private static string ComputeSha256Hex(string value)
     {

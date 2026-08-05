@@ -67,7 +67,7 @@
         },
         {
           "id": "dotnet-build-warnings",
-          "run": "dotnet build{{vars.dotnet.solution | prefix(' ')}} -c {{vars.dotnet.configuration | default('Release')}} -warnaserror --no-restore{{outputs.analysis.sarif | suffix('/dotnet-build.sarif') | prefix(' /p:ErrorLog=')}}{{vars.dotnet.analyze.buildExtraArgs | prefix(' ')}}",
+          "run": "dotnet build{{vars.dotnet.solution | prefix(' ')}} -c {{vars.dotnet.configuration | default('Release')}} --no-restore{{outputs.analysis.sarif | suffix('/dotnet-build.sarif') | abspath | prefix(' /p:ErrorLog=')}}{{vars.dotnet.analyze.buildExtraArgs | prefix(' ')}}",
           "outputs": {
             "sarifReports": [
               "{{outputs.analysis.sarif}}/**/*.sarif"

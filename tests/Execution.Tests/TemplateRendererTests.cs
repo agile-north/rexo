@@ -667,6 +667,24 @@ public sealed class TemplateRendererTests
     }
 
     [Fact]
+    public void AbspathFilterReturnsEmptyWhenInputIsEmpty()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string> { ["dir"] = "" });
+        Assert.Equal("", renderer.Render("{{args.dir | abspath}}", ctx));
+    }
+
+    [Fact]
+    public void AbspathFilterResolvesRepoRelativePath()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string> { ["dir"] = "artifacts/analysis/sarif/dotnet-build.sarif" });
+        Assert.Equal(
+            Path.GetFullPath(Path.Combine(ctx.RepositoryRoot, "artifacts", "analysis", "sarif", "dotnet-build.sarif")),
+            renderer.Render("{{args.dir | abspath}}", ctx));
+    }
+
+    [Fact]
     public void MultiPipeChainProducesEmptyWhenInputIsMissing()
     {
         var renderer = new TemplateRenderer();
@@ -680,8 +698,8 @@ public sealed class TemplateRendererTests
         var renderer = new TemplateRenderer();
         var ctx = MakeContext(args: new Dictionary<string, string> { ["dir"] = "artifacts/analysis/sarif" });
         Assert.Equal(
-            "/p:ErrorLog=artifacts/analysis/sarif/dotnet-build.sarif",
-            renderer.Render("{{args.dir | suffix('/dotnet-build.sarif') | prefix('/p:ErrorLog=')}}", ctx));
+            "/p:ErrorLog=" + Path.GetFullPath(Path.Combine(ctx.RepositoryRoot, "artifacts", "analysis", "sarif", "dotnet-build.sarif")),
+            renderer.Render("{{args.dir | suffix('/dotnet-build.sarif') | abspath | prefix('/p:ErrorLog=')}}", ctx));
     }
 
     [Fact]
@@ -691,8 +709,8 @@ public sealed class TemplateRendererTests
         var ctx = MakeContext(args: new Dictionary<string, string> { ["dir"] = "artifacts/analysis/sarif" });
 
         Assert.Equal(
-            "/p:ErrorLog=artifacts/analysis/sarif/dotnet-build.sarif",
-            renderer.Render("{{args.missing | coalesce(args.dir, 'artifacts/analysis') | suffix('/dotnet-build.sarif') | prefix('/p:ErrorLog=')}}", ctx));
+            "/p:ErrorLog=" + Path.GetFullPath(Path.Combine(ctx.RepositoryRoot, "artifacts", "analysis", "sarif", "dotnet-build.sarif")),
+            renderer.Render("{{args.missing | coalesce(args.dir, 'artifacts/analysis') | suffix('/dotnet-build.sarif') | abspath | prefix('/p:ErrorLog=')}}", ctx));
     }
 
     [Fact]

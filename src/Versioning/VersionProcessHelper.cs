@@ -2,6 +2,7 @@ namespace Rexo.Versioning;
 
 using System.Diagnostics;
 using Rexo.Core.Models;
+using Rexo.Templating;
 
 /// <summary>
 /// Shared process-execution utilities used by version providers.
@@ -112,12 +113,19 @@ internal static class VersionProcessHelper
 
     /// <summary>
     /// Returns <c>settings["dockerImage"]</c> when set, otherwise
-    /// <paramref name="defaultImage"/>.
+    /// <paramref name="defaultImage"/>. Template expressions are rendered against
+    /// the current execution context before use.
     /// </summary>
-    internal static string GetDockerImage(VersioningConfig config, string defaultImage)
+    internal static string GetDockerImage(VersioningConfig config, ExecutionContext context, string defaultImage)
     {
         var image = config.Settings?.GetValueOrDefault("dockerImage");
-        return !string.IsNullOrWhiteSpace(image) ? image! : defaultImage;
+        if (string.IsNullOrWhiteSpace(image))
+        {
+            return defaultImage;
+        }
+
+        var renderedImage = new TemplateRenderer().Render(image!, context);
+        return string.IsNullOrWhiteSpace(renderedImage) ? defaultImage : renderedImage;
     }
 
     // -------------------------------------------------------------------------

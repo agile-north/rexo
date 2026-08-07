@@ -3,6 +3,7 @@
   "$id": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
   "title": "Rexo repository configuration schema",
   "description": "Schema for repo.json, the main Rexo repository runtime configuration file.",
+  "markdownDescription": "Schema for `repo.json`, the main Rexo repository runtime configuration file.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -14,6 +15,7 @@
     "$schema": {
       "type": "string",
       "description": "Schema URI/path used by editors and validation. Use the canonical remote URL for shared repositories.",
+      "markdownDescription": "Schema URI/path used by editors and validation. Use the canonical remote URL for shared repositories.",
       "enum": [
         "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
         "rexo.schema.json",
@@ -25,24 +27,29 @@
     "schemaVersion": {
       "type": "string",
       "description": "Schema contract version for this config file. Currently only 1.0 is supported.",
+      "markdownDescription": "Schema contract version for this config file. Currently only `1.0` is supported.",
       "const": "1.0"
     },
     "name": {
       "type": "string",
       "description": "Human-friendly repository/runtime name shown in command output.",
+      "markdownDescription": "Human-friendly repository/runtime name shown in command output.",
       "minLength": 1
     },
     "description": {
       "type": "string",
-      "description": "Optional longer description of the repository runtime."
+      "description": "Optional longer description of the repository runtime.",
+      "markdownDescription": "Optional longer description of the repository runtime. Leave it out if you do not need a human-readable summary.",
     },
     "version": {
       "type": "string",
-      "description": "Optional static version string. Most repositories should prefer the versioning section instead."
+      "description": "Optional static version string. Most repositories should prefer the versioning section instead.",
+      "markdownDescription": "Optional static version string. Most repositories should prefer the `versioning` section instead.",
     },
     "extends": {
       "type": "array",
       "description": "List of config sources to merge into this config before applying local values. Supports embedded lifecycle policies via the 'embedded:' URI scheme (e.g. 'embedded:standard', 'embedded:dotnet') and local file paths. Embedded policies provide shared lifecycle commands (build, test, verify, release, plan, push, etc.). Use 'rx policies list' to see available embedded policies.",
+      "markdownDescription": "List of config sources to merge into this config before applying local values. Supports embedded lifecycle policies via the `embedded:` URI scheme (for example `embedded:standard` and `embedded:dotnet`) and local file paths. Embedded policies provide shared lifecycle commands such as build, test, verify, release, plan, and push. Use `rx policies list` to see available embedded policies.",
       "items": {
         "type": "string"
       }
@@ -50,6 +57,7 @@
     "policySources": {
       "type": "array",
       "description": "Policy-only sources loaded and merged into the effective config before the local policy.json and REXO_POLICY_SOURCES env-var sources. Each entry supports the same source types as REXO_POLICY_SOURCES: HTTPS URL (optionally with #sha256=<hex> pin), git+ reference (git+<repo>@<ref>#<path>), nuget: reference (nuget:<id>@<version>#<path>), or a local file path. REXO_POLICY_SOURCES always wins over config-declared sources. Use this for opt-in team policies that should be version-controlled alongside the repo.",
+      "markdownDescription": "Policy-only sources loaded and merged into the effective config before the local `policy.json` and `REXO_POLICY_SOURCES` env-var sources. Each entry supports the same source types as `REXO_POLICY_SOURCES`: HTTPS URLs (optionally with a `#sha256=<hex>` pin), `git+` references, `nuget:` references, or local file paths. `REXO_POLICY_SOURCES` always wins over config-declared sources. Use this for opt-in team policies that should be version-controlled alongside the repo.",
       "items": {
         "type": "string"
       }
@@ -57,6 +65,7 @@
     "commands": {
       "type": "object",
       "description": "Command map exposed by rx. Keys are command names and values define arguments, options, and steps.",
+      "markdownDescription": "Command map exposed by `rx`. See [Commands, Options, and Steps](docs/configuration/commands.md) for hooks, merge behavior, option typing, and step composition.",
       "additionalProperties": {
         "$ref": "#/$defs/repoCommand"
       }
@@ -64,43 +73,52 @@
     "aliases": {
       "type": "object",
       "description": "Simple command aliases. Key is alias name, value is the target command string.",
+      "markdownDescription": "Simple command aliases. The key is the alias name and the value is the target command string. Aliases resolve before command execution and can target hidden commands.",
       "additionalProperties": {
         "type": "string"
       }
     },
     "versioning": {
       "description": "Version provider configuration used by builtin:resolve-version.",
+      "markdownDescription": "Version provider configuration used by `builtin:resolve-version`. See [Versioning Configuration](docs/configuration/versioning.md). When omitted, `auto` will choose `nbgv`, `gitversion`, `minver`, `git`, or `fixed` from repository evidence and fall back to `0.1.0-local`.",
       "$ref": "#/$defs/versioning"
     },
     "artifacts": {
       "type": "array",
       "description": "Artifact definitions used by builtin:build-artifacts, builtin:tag-artifacts, and builtin:push-artifacts.",
+      "markdownDescription": "Artifact definitions used by `builtin:build-artifacts`, `builtin:tag-artifacts`, and `builtin:push-artifacts`. See [Artifact Providers](docs/artifacts/README.md) for the provider index and provider-specific settings.",
       "items": {
         "$ref": "#/$defs/artifact"
       }
     },
     "runtime": {
       "description": "Cross-cutting runtime policy configuration for output and push behavior.",
+      "markdownDescription": "Cross-cutting runtime policy configuration for output, push, and command delegation. See [Runtime Configuration](docs/configuration/runtime.md). This is where global defaults such as dry-run, push gating, and same-name command collision behavior live.",
       "$ref": "#/$defs/runtime"
     },
     "outputs": {
       "description": "Output path contract. Resolved paths are available as {{outputs.*}} in policy command templates.",
+      "markdownDescription": "Output path contract for manifests, CI emission, logs, test output, and package folders. See [Output Contract](docs/configuration/output-contract.md) and [CI Output Emission](docs/configuration/ci-output-emission.md). Omitted values resolve under `outputs.root`, which defaults to `artifacts`.",
       "$ref": "#/$defs/outputsConfig"
     },
     "settings": {
       "description": "Toolchain-specific settings available as {{settings.*}} in policy command templates.",
+      "markdownDescription": "Toolchain-specific settings available as `{{settings.*}}` in policy command templates. Use this for repository- or policy-specific knobs that do not belong in the core schema.",
       "$ref": "#/$defs/settings"
     },
     "vars": {
       "description": "Free-form template variable bag. All values are accessible as {{vars.*}} in step run strings and support arbitrary nesting (e.g. {{vars.dotnet.solution}}).",
+      "markdownDescription": "Free-form template variable bag available as `{{vars.*}}` in step `run` strings. See [Template Variables](docs/configuration/templates.md) for rendering rules and filter support.",
       "$ref": "#/$defs/vars"
     },
     "secrets": {
       "description": "First-class secret configuration for runtime resolution and template access under {{secrets.*}}.",
+      "markdownDescription": "First-class secret resolution configuration. See [Secrets](docs/configuration/secrets.md). Use `defaults` for shared provider behavior, `providers` for reusable provider definitions, and `items` for named secrets exposed as `{{secrets.<name>}}`.",
       "$ref": "#/$defs/secretsConfig"
     },
     "capabilities": {
       "description": "Runtime capability requirements and compatibility contract expectations.",
+      "markdownDescription": "Runtime capability requirements and compatibility expectations. Use this to declare which features the active runtime must support before the config is considered compatible.",
       "$ref": "#/$defs/capabilityContract"
     }
   },
@@ -108,16 +126,19 @@
     "settings": {
       "type": "object",
       "description": "Free-form toolchain settings bag available as {{settings.*}} in templates.",
+      "markdownDescription": "Free-form toolchain settings bag available as `{{settings.*}}` in templates. Omit it to keep an empty settings map; runtime behavior stays unchanged.",
       "additionalProperties": true
     },
     "vars": {
       "type": "object",
       "description": "Free-form template variable bag. Accessible as {{vars.*}} in step run strings. Values can be strings, numbers, booleans, or arbitrarily nested objects.",
+      "markdownDescription": "Free-form template variable bag available as `{{vars.*}}` in step `run` strings. Values can be strings, numbers, booleans, or arbitrarily nested objects, and missing entries simply render empty.",
       "additionalProperties": true
     },
     "secretCacheConfig": {
       "type": "object",
       "additionalProperties": false,
+      "markdownDescription": "Per-command in-memory cache for secret resolution. `enabled` toggles the cache and `ttlSeconds` sets the cache TTL in seconds.",
       "properties": {
         "enabled": {
           "type": "boolean",
@@ -133,6 +154,7 @@
     "secretDefaultsConfig": {
       "type": "object",
       "additionalProperties": false,
+      "markdownDescription": "Shared defaults for named secrets. See [Secrets](docs/configuration/secrets.md).\n\n- `provider`: default provider type when a secret item does not specify one.\n- `providerChain`: ordered provider candidates evaluated before the default provider.\n- `fallbackToEnvironment`: default `true`; fall back to environment lookup after providers fail.\n- `stopOnFirstError`: stop on the first provider failure instead of trying the next candidate.\n- `cache`: per-command in-memory cache settings.\n- `required`: default required/optional behavior for secret items.",
       "properties": {
         "provider": {
           "type": "string",
@@ -165,6 +187,7 @@
     "secretProviderConfig": {
       "type": "object",
       "additionalProperties": false,
+      "markdownDescription": "Reusable secret provider definition. `type` selects the implementation; `auth` and `settings` are provider-specific; `cache` can override the default cache behavior for that provider.",
       "properties": {
         "type": {
           "type": "string",
@@ -190,6 +213,7 @@
     "secretProviderRouteConfig": {
       "type": "object",
       "additionalProperties": false,
+      "markdownDescription": "One candidate in a secret provider chain. `runtime` can be `local`, `ci`, or a CI provider name; `selector` and `env` can be overridden per route.",
       "properties": {
         "providerRef": {
           "type": "string",
@@ -216,6 +240,7 @@
     "secretItemConfig": {
       "type": "object",
       "additionalProperties": false,
+      "markdownDescription": "Named secret item exposed as `{{secrets.<name>}}`. Item-level values override `secrets.defaults`; `fallbackToEnvironment` and `stopOnFirstError` control resolution fallback; `required` secrets fail preflight when unresolved; `exposeInTemplates` controls template visibility; `mapToEnv` and `mapToEnvs` inject runtime environment variables.",
       "properties": {
         "providerRef": {
           "type": "string",
@@ -280,6 +305,7 @@
     "secretsConfig": {
       "type": "object",
       "additionalProperties": false,
+      "markdownDescription": "Secret configuration root. See [Secrets](docs/configuration/secrets.md). Use `defaults` for shared secret resolution behavior, `providers` for reusable providers, and `items` for named secrets exposed as `{{secrets.<name>}}`. Omit the section entirely when the repo only needs ambient environment-based secret lookup.",
       "properties": {
         "defaults": {
           "$ref": "#/$defs/secretDefaultsConfig"
@@ -303,14 +329,17 @@
       "type": "object",
       "additionalProperties": false,
       "description": "Declares compatibility against runtime capability contract and required features.",
+      "markdownDescription": "Declares compatibility against the runtime capability contract and required features. This is a lightweight declaration of what the config expects the active runtime to support.",
       "properties": {
         "contractVersion": {
           "type": "string",
-          "description": "Capability contract version expected by this config. Current runtime contract is 1.0."
+          "description": "Capability contract version expected by this config. Current runtime contract is 1.0.",
+          "markdownDescription": "Capability contract version expected by this config. Current runtime contract is `1.0`.",
         },
         "required": {
           "type": "array",
           "description": "Capabilities that must be supported by the active runtime.",
+          "markdownDescription": "Capabilities that must be supported by the active runtime.",
           "items": {
             "type": "string",
             "minLength": 1
@@ -321,6 +350,7 @@
     "repoCommand": {
       "type": "object",
       "description": "Reusable command definition for both repository and policy commands.",
+      "markdownDescription": "Reusable command definition for both repository and policy commands. See [Commands, Options, and Steps](docs/configuration/commands.md). Use this shape for both repo-local commands and policy-provided commands. `steps` is required; `hidden` only affects discovery; `before` and `after` wrap the main pipeline; `merge` and `stepOps` control composition across `extends`; `maxDepth` falls back to the runtime default when omitted.",
       "additionalProperties": false,
       "required": [
         "steps"
@@ -385,6 +415,7 @@
     },
     "commandMerge": {
       "description": "Command merge configuration. Can be a legacy scalar mode or envelope object.",
+      "markdownDescription": "Command merge configuration used when commands are combined through `extends` or policy overlays. See [Commands, Options, and Steps](docs/configuration/commands.md). Legacy scalar modes remain supported, but the merge envelope is preferred when you need both composition mode and explicit step operations.",
       "oneOf": [
         {
           "$ref": "#/$defs/commandMergeMode"
@@ -396,6 +427,7 @@
     },
     "commandHook": {
       "description": "Command hook input. Accepts either a command name string or a list of explicit steps.",
+      "markdownDescription": "Command hook input for `before` and `after`. Accepts either a command name string or an explicit step array.",
       "oneOf": [
         {
           "type": "string",
@@ -412,6 +444,7 @@
     "commandMergeMode": {
       "type": "string",
       "description": "Layered command composition mode for this command.",
+      "markdownDescription": "Layered command composition mode for a command. `append` and `prepend` are additive; `replace` swaps the base command; `wrap` surrounds it; `layer` keeps the base command as the primary behavior.",
       "enum": [
         "layer",
         "replace",
@@ -424,6 +457,7 @@
       "type": "object",
       "additionalProperties": false,
       "description": "Unified merge envelope containing mode and optional step operations.",
+      "markdownDescription": "Unified merge envelope containing `mode` and optional `steps` operations.",
       "properties": {
         "mode": {
           "$ref": "#/$defs/commandMergeMode"
@@ -436,6 +470,7 @@
     "commandStepOps": {
       "type": "object",
       "additionalProperties": false,
+      "markdownDescription": "Legacy explicit step-level extension operations. Prefer `merge.steps` when authoring new configs; this block remains for compatibility with older overlays.",
       "properties": {
         "remove": {
           "type": "array",
@@ -486,6 +521,7 @@
     "argConfig": {
       "type": "object",
       "description": "Configuration for a positional command argument.",
+      "markdownDescription": "Configuration for a positional command argument. Set `required` to `true` when callers must provide the positional value.",
       "additionalProperties": false,
       "required": [
         "required"
@@ -504,6 +540,7 @@
     "optionConfig": {
       "type": "object",
       "description": "Configuration for a named command option.",
+      "markdownDescription": "Configuration for a named command option. `type` defaults to `string`; `default` is used only when the caller does not supply the option; `allowed` constrains runtime values.",
       "additionalProperties": false,
       "required": [
         "type"
@@ -543,6 +580,7 @@
     "step": {
       "type": "object",
       "description": "Single executable unit in a command pipeline. Exactly one of run, uses, or command must be set.",
+      "markdownDescription": "Single executable unit in a command pipeline. Exactly one of `run`, `uses`, or `command` must be set. See [Commands, Options, and Steps](docs/configuration/commands.md) and [Containerized Run Steps](docs/configuration/containerized-run.md). `run` steps render templates first; `command` steps forward into another config command; `uses` steps invoke built-ins.",
       "additionalProperties": false,
       "properties": {
         "id": {
@@ -568,6 +606,7 @@
         "container": {
           "type": "object",
           "description": "Optional run-step container wrapper. When set, the rendered run command executes inside the specified container image.",
+          "markdownDescription": "Optional Docker wrapper for `run` steps. See [Containerized Run Steps](docs/configuration/containerized-run.md). `image` is required; `workingDirectory` defaults to `/work`; `dockerfile` and `context` let Rexo build the image when needed.",
           "additionalProperties": false,
           "required": [
             "image"
@@ -665,15 +704,18 @@
         },
         "outputPattern": {
           "type": "string",
-          "description": "Regex pattern used by compatible steps to capture structured output values."
+          "description": "Regex pattern used by compatible steps to capture structured output values.",
+          "markdownDescription": "Regex pattern used by compatible steps to capture structured output values. Named capture groups become step outputs."
         },
         "outputFile": {
           "type": "string",
-          "description": "Path to an output file consumed by compatible steps for captured outputs."
+          "description": "Path to an output file consumed by compatible steps for captured outputs.",
+          "markdownDescription": "Path to an output file consumed by compatible steps for captured outputs. The path is template-rendered before use, so it can reference step, version, args, options, and outputs values."
         },
         "outputs": {
           "type": "object",
           "description": "Step output declarations. Each key names an output category; values are arrays of glob patterns relative to the repository root that identify produced files.",
+          "markdownDescription": "Step output declarations. Each key names an output category; values are arrays of glob patterns relative to the repository root that identify produced files. Use this when a step produces files instead of inline text outputs.",
           "additionalProperties": {
             "type": "array",
             "items": {
@@ -702,10 +744,12 @@
       "required": [
         "provider"
       ],
+      "markdownDescription": "Version provider configuration used by `builtin:resolve-version`. See [Versioning Configuration](docs/configuration/versioning.md).\n\n- `provider`: chooses how Rexo resolves the version. Omit it to use `auto`.\n- `fallback`: version string used when resolution fails or is unavailable.\n- `settings`: provider-specific knobs such as `variable`, `tagPrefix`, or `minimumMajorMinor`.\n\nFor `gitversion`, `nbgv`, and `minver`, Docker fallback is enabled by default and `dockerImage` is template-rendered before use.",
       "properties": {
         "provider": {
           "type": "string",
           "description": "Version provider to use. 'auto' (default) detects the right provider from config file evidence: version.json/nbgv.json → nbgv; GitVersion.yml → gitversion; .minverrc → minver; .git present → git; otherwise → fixed.",
+          "markdownDescription": "Version provider to use. `auto` is the default and scans for `version.json`/`nbgv.json`, `GitVersion.yml`, `.minverrc`, or `.git` before falling back to `fixed`.",
           "enum": [
             "auto",
             "fixed",
@@ -720,11 +764,13 @@
         "fallback": {
           "type": "string",
           "description": "Version string used when the provider cannot resolve a version (e.g. no tags yet).",
+          "markdownDescription": "Version string used when the provider cannot resolve a version. Default: `0.1.0-local`.",
           "default": "0.1.0-local"
         },
         "settings": {
           "type": "object",
           "description": "Provider-specific settings. Common keys: variable (env), tagPrefix/minimumMajorMinor (minver). Docker fallback keys (all providers except fixed/env/git): useDocker (default true — set false to disable), dockerImage (override the default Docker image).",
+          "markdownDescription": "Provider-specific settings. Common keys include `variable` for `env`, `tagPrefix` and `minimumMajorMinor` for `minver`, and Docker fallback settings for `gitversion`/`nbgv`/`minver`. `useDocker` defaults to `true` for those providers, and `dockerImage` overrides the fallback container image.",
           "additionalProperties": {
             "$ref": "#/$defs/settingValue"
           }
@@ -733,6 +779,7 @@
     },
     "artifact": {
       "description": "Artifact declaration. Choose docker, nuget, helm-oci, npm, pypi, maven, gradle, rubygems, terraform, helm, docker-compose, or a custom provider type.",
+      "markdownDescription": "Artifact declaration. See [Artifact Providers](docs/artifacts/README.md). Choose one provider-specific shape per entry; omit the array entirely when the repo does not build or publish artifacts.",
       "anyOf": [
         {
           "$ref": "#/$defs/dockerArtifact"
@@ -775,6 +822,7 @@
     "dockerArtifact": {
       "type": "object",
       "description": "Docker image artifact configuration.",
+      "markdownDescription": "Docker image artifact configuration. See [docker.md](docs/artifacts/docker.md). Use this when the repository builds or ships a container image; omit `settings` to keep provider defaults.",
       "additionalProperties": false,
       "required": [
         "type"
@@ -797,6 +845,7 @@
     "nugetArtifact": {
       "type": "object",
       "description": "NuGet package artifact configuration.",
+      "markdownDescription": "NuGet package artifact configuration. See [nuget.md](docs/artifacts/nuget.md). Use this when the repository packs and optionally publishes NuGet packages.",
       "additionalProperties": false,
       "required": [
         "type"
@@ -819,6 +868,7 @@
     "genericArtifact": {
       "type": "object",
       "description": "Fallback artifact shape for custom providers not explicitly modeled in this schema.",
+      "markdownDescription": "Fallback artifact shape for custom providers not explicitly modeled in this schema. See [generic.md](docs/artifacts/generic.md). Use this when you need arbitrary provider settings or a custom artifact type.",
       "additionalProperties": false,
       "required": [
         "type"
@@ -859,6 +909,7 @@
     "helmOciArtifact": {
       "type": "object",
       "description": "Helm chart artifact pushed to OCI registry.",
+      "markdownDescription": "Helm chart artifact pushed to OCI registry. See [helm-oci.md](docs/artifacts/helm-oci.md). Use this when chart packaging should target an OCI destination.",
       "additionalProperties": false,
       "required": [
         "type"
@@ -881,6 +932,7 @@
     "npmArtifact": {
       "type": "object",
       "description": "npm package artifact configuration.",
+      "markdownDescription": "npm package artifact configuration. See [npm.md](docs/artifacts/npm.md). Use this when the repository packs and publishes npm packages.",
       "additionalProperties": false,
       "required": [
         "type"
@@ -957,6 +1009,7 @@
     "pypiArtifact": {
       "type": "object",
       "description": "Python/PyPI package artifact configuration.",
+      "markdownDescription": "Python/PyPI package artifact configuration. See [pypi.md](docs/artifacts/pypi.md). Use this when the repository builds and publishes Python distributions.",
       "additionalProperties": false,
       "required": [
         "type"
@@ -1033,6 +1086,7 @@
     "mavenArtifact": {
       "type": "object",
       "description": "Maven package/deploy artifact configuration.",
+      "markdownDescription": "Maven package/deploy artifact configuration. See [maven.md](docs/artifacts/maven.md). Use this when the repository packages or deploys Maven artifacts.",
       "additionalProperties": false,
       "required": [
         "type"
@@ -1097,6 +1151,7 @@
     "gradleArtifact": {
       "type": "object",
       "description": "Gradle build/publish artifact configuration.",
+      "markdownDescription": "Gradle build/publish artifact configuration. See [gradle.md](docs/artifacts/gradle.md). Use this when the repository builds or publishes through Gradle.",
       "additionalProperties": false,
       "required": [
         "type"
@@ -1173,6 +1228,7 @@
     "rubygemsArtifact": {
       "type": "object",
       "description": "RubyGems gem build/push artifact configuration.",
+      "markdownDescription": "RubyGems gem build/push artifact configuration. See [rubygems.md](docs/artifacts/rubygems.md). Use this when the repository builds and publishes Ruby gems.",
       "additionalProperties": false,
       "required": [
         "type"
@@ -1245,6 +1301,7 @@
     "terraformArtifact": {
       "type": "object",
       "description": "Terraform plan/apply artifact configuration.",
+      "markdownDescription": "Terraform plan/apply artifact configuration. See [terraform.md](docs/artifacts/terraform.md). Use this when the repository packages and applies Terraform modules or plans.",
       "additionalProperties": false,
       "required": [
         "type"
@@ -1313,6 +1370,7 @@
     "helmArtifact": {
       "type": "object",
       "description": "Helm chart package/push artifact configuration (non-OCI).",
+      "markdownDescription": "Helm chart package/push artifact configuration (non-OCI). See [helm.md](docs/artifacts/helm.md). Use this when you package charts for a ChartMuseum-style repository or filesystem copy.",
       "additionalProperties": false,
       "required": [
         "type"
@@ -1389,6 +1447,7 @@
     "dockerComposeArtifact": {
       "type": "object",
       "description": "Docker Compose build/push artifact configuration.",
+      "markdownDescription": "Docker Compose build/push artifact configuration. See [docker-compose.md](docs/artifacts/docker-compose.md). Use this when the repository builds or pushes compose-defined services.",
       "additionalProperties": false,
       "required": [
         "type"
@@ -2134,16 +2193,19 @@
       "type": "object",
       "additionalProperties": false,
       "description": "Output path contract. Paths default to subdirectories under the root output folder unless a plain relative path is provided, in which case the path is treated as repo-relative.",
+      "markdownDescription": "Output path contract. See [Output Contract](docs/configuration/output-contract.md) and [CI Output Emission](docs/configuration/ci-output-emission.md).\n\n- `emit`: master switch for runtime file emission.\n- `root`: base folder for all generated outputs, defaulting to `artifacts`.\n- `tests` / `analysis` / `security`: category-specific output trees whose values default under `outputs.root`.\n- `packages`, `manifests`, `logs`, `temp`: common output locations that inherit from `outputs.root` unless you provide a plain relative path.",
       "properties": {
         "emit": {
           "type": "boolean",
           "description": "When false, Rexo does not collect or write any output files (manifests, step file outputs). Well-known overlay commands also skip passing output path arguments to toolchain CLIs.",
+          "markdownDescription": "When `false`, Rexo does not collect or write runtime files such as manifests or step outputs. Default: `true`.",
           "default": true
         },
         "command": {
           "type": "object",
           "additionalProperties": false,
           "description": "Defaults for command stdout and JSON output. CLI flags override these values.",
+          "markdownDescription": "Defaults for command stdout and JSON output. CLI flags still override these values. `stdout` defaults to `true`, `json` defaults to `false`, and `jsonFile` is optional.",
           "properties": {
             "stdout": {
               "type": "boolean",
@@ -2168,6 +2230,7 @@
           "type": "object",
           "additionalProperties": false,
           "description": "CI-native manifest emission settings.",
+          "markdownDescription": "CI-native manifest emission settings. See [CI Output Emission](docs/configuration/ci-output-emission.md). `provider` defaults to `auto`, `github-actions.scope` defaults to `env`, `prefix` defaults to `REXO_`, `keyCasing` defaults to `upperSnake`, and `redact` defaults to `true`.",
           "properties": {
             "emit": {
               "type": "boolean",
@@ -2298,12 +2361,14 @@
         "root": {
           "type": "string",
           "description": "Root folder for all generated outputs.",
+          "markdownDescription": "Root folder for all generated outputs. Default: `artifacts`.",
           "default": "artifacts"
         },
         "tests": {
           "type": "object",
           "additionalProperties": false,
           "description": "Paths for test-related outputs.",
+          "markdownDescription": "Paths for test-related outputs. Omitted values resolve beneath `outputs.root`.",
           "properties": {
             "results": {
               "type": "string",
@@ -2326,6 +2391,7 @@
           "type": "object",
           "additionalProperties": false,
           "description": "Paths for analysis-related outputs.",
+          "markdownDescription": "Paths for analysis-related outputs. Omitted values resolve beneath `outputs.root`.",
           "properties": {
             "reports": {
               "type": "string",
@@ -2343,6 +2409,7 @@
           "type": "object",
           "additionalProperties": false,
           "description": "Paths for security audit outputs.",
+          "markdownDescription": "Paths for security audit outputs. Omitted values resolve beneath `outputs.root`.",
           "properties": {
             "audit": {
               "type": "string",
@@ -2364,21 +2431,25 @@
         "packages": {
           "type": "string",
           "description": "Directory for built artifact packages (NuGet, npm, Helm charts, etc.).",
+          "markdownDescription": "Directory for built artifact packages. Default: `~/packages` under `outputs.root`.",
           "default": "~/packages"
         },
         "manifests": {
           "type": "object",
           "additionalProperties": false,
           "description": "Manifest output settings.",
+          "markdownDescription": "Manifest output settings. Default path is `~/manifests`; `commandMode` defaults to `aggregate` (`single` is an alias); `commandDetail` defaults to `summary`.",
           "properties": {
             "path": {
               "type": "string",
               "description": "Directory for command/runtime manifest files. Use ~/... to resolve relative to outputs.root; plain relative paths are repo-relative.",
+              "markdownDescription": "Directory for command/runtime manifest files. `~/...` resolves under `outputs.root`; plain relative paths are repo-relative. Default: `~/manifests`.",
               "default": "~/manifests"
             },
             "commandMode": {
               "type": "string",
               "description": "Command manifest file strategy. Use aggregate for one file containing all commands, perCommand for one file per command, or single as an alias for aggregate.",
+              "markdownDescription": "Command manifest file strategy. `aggregate` is the default; `single` is an alias for `aggregate`; `perCommand` writes one file per command.",
               "default": "aggregate",
               "enum": [
                 "single",
@@ -2389,6 +2460,7 @@
             "commandDetail": {
               "type": "string",
               "description": "Command manifest detail level. Use summary for concise output or verbose for full command result payload.",
+              "markdownDescription": "Command manifest detail level. `summary` is the default; `verbose` includes the full `CommandResult` payload.",
               "default": "summary",
               "enum": [
                 "summary",
@@ -2400,11 +2472,13 @@
         "logs": {
           "type": "string",
           "description": "Directory for CI log files.",
+          "markdownDescription": "Directory for CI log files. Default: `~/logs`.",
           "default": "~/logs"
         },
         "temp": {
           "type": "string",
           "description": "Scratch directory for intermediate build artifacts.",
+          "markdownDescription": "Scratch directory for intermediate build artifacts. Default: `~/tmp`.",
           "default": "~/tmp"
         }
       }
@@ -2421,24 +2495,29 @@
           }
         }
       ],
+      "markdownDescription": "Cross-cutting runtime policy configuration for output, push, and command delegation. See [Runtime Configuration](docs/configuration/runtime.md).\n\n- `dryRun`: simulate actions instead of mutating external systems.\n- `push`: global push gate merged with per-artifact push rules.\n- `commands`: global command execution policy such as default merge mode and max depth.",
       "properties": {
         "dryRun": {
           "type": "boolean",
           "description": "Enables dry-run mode for the runtime. When true, external mutations are simulated instead of executed.",
+          "markdownDescription": "Enables dry-run mode for the runtime. When `true`, Rexo simulates actions instead of performing side effects where supported. Default: `false`.",
           "default": false
         },
         "push": {
           "description": "Global push policy merged with per-artifact push overrides.",
+          "markdownDescription": "Global push policy merged with per-artifact push overrides. See [Runtime Configuration](docs/configuration/runtime.md). `runtime.push.dryRun` can force push-related commands into simulation mode even when the global runtime flag is off.",
           "$ref": "#/$defs/pushRules"
         },
         "commands": {
           "type": "object",
           "description": "Global command execution policy settings.",
+          "markdownDescription": "Global command execution policy settings. `defaultMergeMode` is the fallback when a child command does not specify merge mode; `maxDepth` defaults to `5`.",
           "additionalProperties": false,
           "properties": {
             "defaultMergeMode": {
               "$ref": "#/$defs/commandMergeMode",
               "description": "Fallback command collision behavior when a child command omits merge.mode. Applied before the built-in replace fallback.",
+              "markdownDescription": "Fallback command collision behavior when a child command omits `merge.mode` or legacy `merge`. Accepts the same values as command-level merge modes.",
               "examples": [
                 "append"
               ]
@@ -2446,6 +2525,7 @@
             "maxDepth": {
               "type": "integer",
               "description": "Default maximum delegated command call depth.",
+              "markdownDescription": "Default maximum delegated command call depth. Default: `5`.",
               "default": 5,
               "minimum": 1
             }
@@ -2464,30 +2544,36 @@
           "branches": ["main", "release/*"]
         }
       ],
+      "markdownDescription": "Global push policy merged with per-artifact push overrides. See [Runtime Configuration](docs/configuration/runtime.md).\n\n- `enabled`: global on/off switch for push operations.\n- `noPushInPullRequest`: blocks pushes in pull-request CI contexts.\n- `requireCleanWorkingTree`: blocks pushes when the git tree is dirty.\n- `branches`: allowed branch patterns; empty means no branch restriction.\n- `dryRun`: forces push into simulation mode without provider calls.",
       "properties": {
         "dryRun": {
           "type": "boolean",
           "description": "Enables dry-run mode for push operations. This can be used to simulate pushes while leaving the global runtime mode unchanged.",
+          "markdownDescription": "Enables dry-run mode for push operations. When `true`, push-related commands simulate success without calling artifact providers. Default: `false`.",
           "default": false
         },
         "enabled": {
           "type": "boolean",
           "description": "Enables or disables push globally.",
+          "markdownDescription": "Enables or disables push globally. Default: `true`.",
           "default": true
         },
         "noPushInPullRequest": {
           "type": "boolean",
           "description": "Rejects push when CI context indicates a pull request build.",
+          "markdownDescription": "Rejects push when CI context indicates a pull request build. Default: `false`.",
           "default": false
         },
         "requireCleanWorkingTree": {
           "type": "boolean",
           "description": "Rejects push when the git working tree has uncommitted changes.",
+          "markdownDescription": "Rejects push when the git working tree has uncommitted changes. Default: `false`.",
           "default": false
         },
         "branches": {
           "type": "array",
           "description": "Allowed branch patterns for push. Empty means no branch restriction.",
+          "markdownDescription": "Allowed branch patterns for push. Empty means no branch restriction and the default is an empty allow-list.",
           "examples": [
             ["main", "release/*", "hotfix/*"]
           ],

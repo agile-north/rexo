@@ -231,6 +231,65 @@ public sealed class HelmOciArtifactProviderTests
     }
 
     [Fact]
+    public async Task PushAsyncDoesNotDuplicateGitHubActionsRepositoryLeafWhenChartNameMatches()
+    {
+        using var _ = CiEnvironmentVariableScope.CreateIsolatedCiScope();
+
+        var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-helm-ghcr-dedup-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(repoRoot, "artifacts", "charts"));
+        await File.WriteAllTextAsync(
+            Path.Combine(repoRoot, "artifacts", "charts", "rexo-1.2.3.tgz"),
+            "stub");
+        Directory.CreateDirectory(Path.Combine(repoRoot, ".rexo"));
+        await File.WriteAllTextAsync(
+            Path.Combine(repoRoot, ".rexo", ".env"),
+            "GITHUB_ACTIONS=true\nGITHUB_REPOSITORY=agile-north/rexo\nGITHUB_ACTOR=copilot\nGITHUB_TOKEN=gh-token\n");
+
+        try
+        {
+            var invocations = new List<HelmInvocation>();
+            var provider = new HelmOciArtifactProvider(
+                runHelmAsync: (artifact, args, workingDirectory, envOverrides, standardInput, cancellationToken) =>
+                {
+                    invocations.Add(new HelmInvocation(args.ToArray(), envOverrides, standardInput));
+                    return Task.FromResult((0, string.Empty));
+                });
+
+            var artifact = new ArtifactConfig(
+                "helm-oci",
+                "manifest",
+                JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                    """
+                    {
+                      "chart": "rexo",
+                      "chartPath": "deploy/charts/rexo",
+                      "output": "artifacts/charts"
+                    }
+                    """)!);
+
+            var context = ExecutionContext.Empty(repoRoot) with
+            {
+                Version = new VersionResult("1.2.3", 1, 2, 3, null, "abcdef123456", "abcdef", false, true),
+            };
+
+            var result = await provider.PushAsync(artifact, context, CancellationToken.None);
+
+            Assert.True(result.Success);
+            Assert.Equal(2, invocations.Count);
+            Assert.Equal("push", invocations[1].Arguments[0]);
+            Assert.Equal("oci://ghcr.io/agile-north", invocations[1].Arguments[2]);
+            Assert.Equal("oci://ghcr.io/agile-north/rexo:1.2.3", result.PublishedReferences.Single());
+        }
+        finally
+        {
+            if (Directory.Exists(repoRoot))
+            {
+                Directory.Delete(repoRoot, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task PushAsyncDoesNotInferCiDestinationWhenCiInferenceDisabled()
     {
         var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-helm-ghcr-disabled-{Guid.NewGuid():N}");

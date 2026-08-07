@@ -37,7 +37,7 @@ public sealed class GitVersionVersionProvider : IVersionProvider
         // 2. Try Docker fallback
         if (VersionProcessHelper.UseDockerFallback(config))
         {
-            var image = VersionProcessHelper.GetDockerImage(config, DefaultDockerImage);
+            var image = VersionProcessHelper.GetDockerImage(config, context, DefaultDockerImage);
             result = await TryRunDockerAsync(image, workingDir, context, cancellationToken);
             if (result is not null)
                 return result;

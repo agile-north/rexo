@@ -90,6 +90,52 @@ public sealed class DockerArtifactProviderTests
     }
 
     [Fact]
+    public async Task BuildAsyncRendersTemplatedBuildArgs()
+    {
+        var invocations = new List<DockerInvocation>();
+        var provider = new DockerArtifactProvider(
+            runDockerAsync: (args, workingDirectory, envOverrides, standardInput, cancellationToken) =>
+            {
+                invocations.Add(new DockerInvocation(args.ToArray(), envOverrides, standardInput));
+                return Task.FromResult((0, string.Empty));
+            },
+            isBuildxAvailableAsync: (_, _, _) => Task.FromResult(true));
+
+        var artifact = new ArtifactConfig(
+            "docker",
+            "sample",
+            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                """
+                {
+                  "image": "ghcr.io/acme/widget",
+                  "runner": "buildx",
+                  "buildArgs": {
+                    "APP_VERSION": "{{version.semver}}"
+                  }
+                }
+                """)!);
+
+        var context = new ExecutionContext(
+            RepositoryRoot: Path.GetTempPath(),
+            Branch: "main",
+            CommitSha: "abcdef123456",
+            Values: new Dictionary<string, object?>())
+        {
+            Version = new VersionResult("1.2.3", 1, 2, 3, null, "abcdef123456", "abcdef", false, true)
+            {
+                DockerVersion = "1.2.3",
+            },
+        };
+
+        var result = await provider.BuildAsync(artifact, context, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Single(invocations);
+        Assert.Contains("--build-arg", invocations[0].Arguments);
+        Assert.Contains("APP_VERSION=1.2.3", invocations[0].Arguments);
+    }
+
+    [Fact]
     public async Task BuildAsyncUsesDockerSecretEnvOverride()
     {
         const string secretEnvName = "DOCKER_SECRET_API";
@@ -569,6 +615,109 @@ public sealed class DockerArtifactProviderTests
     }
 
     [Fact]
+    public async Task BuildAsyncInfersGhcrRepositoryWithoutLeafWhenArtifactNameIsEmpty()
+    {
+        using var _ = CiEnvironmentVariableScope.CreateIsolatedCiScope();
+
+        var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-docker-ghcr-empty-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(repoRoot, ".rexo"));
+        await File.WriteAllTextAsync(
+            Path.Combine(repoRoot, ".rexo", ".env"),
+            "DOCKER_TARGET_REGISTRY=ghcr.io\nGITHUB_ACTIONS=true\nGITHUB_REPOSITORY=agile-north/rexo\nGITHUB_ACTOR=copilot\nGITHUB_TOKEN=gh-token\n");
+
+        try
+        {
+            var invocations = new List<DockerInvocation>();
+            var provider = new DockerArtifactProvider(
+                runDockerAsync: (args, workingDirectory, envOverrides, standardInput, cancellationToken) =>
+                {
+                    invocations.Add(new DockerInvocation(args.ToArray(), envOverrides, standardInput));
+                    return Task.FromResult((0, string.Empty));
+                },
+                isBuildxAvailableAsync: (_, _, _) => Task.FromResult(true));
+
+            var artifact = new ArtifactConfig(
+                "docker",
+                string.Empty,
+                JsonSerializer.Deserialize<Dictionary<string, JsonElement>>("{}")!);
+
+            var context = ExecutionContext.Empty(repoRoot) with
+            {
+                Version = new VersionResult("1.2.3", 1, 2, 3, null, "abcdef123456", "abcdef", false, true)
+                {
+                    DockerVersion = "1.2.3",
+                },
+            };
+
+            var result = await provider.BuildAsync(artifact, context, CancellationToken.None);
+
+            Assert.True(result.Success);
+            Assert.Equal(2, invocations.Count);
+            Assert.Contains("ghcr.io/agile-north/rexo:1.2.3", invocations[1].Arguments);
+            Assert.DoesNotContain("ghcr.io/agile-north/rexo/:1.2.3", invocations[1].Arguments);
+            Assert.DoesNotContain("ghcr.io/agile-north/rexo//", invocations[1].Arguments);
+        }
+        finally
+        {
+            if (Directory.Exists(repoRoot))
+            {
+                Directory.Delete(repoRoot, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task BuildAsyncDoesNotDuplicateGithubRepositoryLeafWhenArtifactNameMatches()
+    {
+        using var _ = CiEnvironmentVariableScope.CreateIsolatedCiScope();
+
+        var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-docker-ghcr-dedup-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(repoRoot, ".rexo"));
+        await File.WriteAllTextAsync(
+            Path.Combine(repoRoot, ".rexo", ".env"),
+            "DOCKER_TARGET_REGISTRY=ghcr.io\nGITHUB_ACTIONS=true\nGITHUB_REPOSITORY=agile-north/rexo\nGITHUB_ACTOR=copilot\nGITHUB_TOKEN=gh-token\n");
+
+        try
+        {
+            var invocations = new List<DockerInvocation>();
+            var provider = new DockerArtifactProvider(
+                runDockerAsync: (args, workingDirectory, envOverrides, standardInput, cancellationToken) =>
+                {
+                    invocations.Add(new DockerInvocation(args.ToArray(), envOverrides, standardInput));
+                    return Task.FromResult((0, string.Empty));
+                },
+                isBuildxAvailableAsync: (_, _, _) => Task.FromResult(true));
+
+            var artifact = new ArtifactConfig(
+                "docker",
+                "rexo",
+                JsonSerializer.Deserialize<Dictionary<string, JsonElement>>("{}")!);
+
+            var context = ExecutionContext.Empty(repoRoot) with
+            {
+                Version = new VersionResult("1.2.3", 1, 2, 3, null, "abcdef123456", "abcdef", false, true)
+                {
+                    DockerVersion = "1.2.3",
+                },
+            };
+
+            var result = await provider.BuildAsync(artifact, context, CancellationToken.None);
+
+            Assert.True(result.Success);
+            Assert.Equal(2, invocations.Count);
+            Assert.Contains("ghcr.io/agile-north/rexo:1.2.3", invocations[1].Arguments);
+            Assert.DoesNotContain("ghcr.io/agile-north/rexo/rexo:1.2.3", invocations[1].Arguments);
+        }
+        finally
+        {
+            if (Directory.Exists(repoRoot))
+            {
+                Directory.Delete(repoRoot, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task PushAsyncUsesGitLabCiRegistryDefaultsWhenImageIsImplicit()
     {
         using var _ = CiEnvironmentVariableScope.CreateIsolatedCiScope();
@@ -611,6 +760,57 @@ public sealed class DockerArtifactProviderTests
             Assert.Equal("gl-token" + Environment.NewLine, invocations[0].StandardInput);
             Assert.Contains(invocations, invocation => invocation.Arguments.SequenceEqual(["push", "registry.gitlab.example.com:5050/team/rexo/cli:1.2.3"]));
             Assert.Contains("registry.gitlab.example.com:5050/team/rexo/cli:1.2.3", result.PublishedReferences);
+        }
+        finally
+        {
+            if (Directory.Exists(repoRoot))
+            {
+                Directory.Delete(repoRoot, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task PushAsyncDoesNotDuplicateGitLabProjectLeafWhenArtifactNameMatches()
+    {
+        using var _ = CiEnvironmentVariableScope.CreateIsolatedCiScope();
+
+        var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-docker-gitlab-dedup-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(repoRoot, ".rexo"));
+        await File.WriteAllTextAsync(
+            Path.Combine(repoRoot, ".rexo", ".env"),
+            "GITLAB_CI=true\nCI_REGISTRY=registry.gitlab.example.com:5050\nCI_PROJECT_PATH=team/rexo\nCI_REGISTRY_USER=gitlab-ci-token\nCI_JOB_TOKEN=gl-token\n");
+
+        try
+        {
+            var invocations = new List<DockerInvocation>();
+            var provider = new DockerArtifactProvider(
+                runDockerAsync: (args, workingDirectory, envOverrides, standardInput, cancellationToken) =>
+                {
+                    invocations.Add(new DockerInvocation(args.ToArray(), envOverrides, standardInput));
+                    return Task.FromResult((0, string.Empty));
+                },
+                isBuildxAvailableAsync: (_, _, _) => Task.FromResult(true));
+
+            var artifact = new ArtifactConfig(
+                "docker",
+                "rexo",
+                JsonSerializer.Deserialize<Dictionary<string, JsonElement>>("{}")!);
+
+            var context = ExecutionContext.Empty(repoRoot) with
+            {
+                Branch = "main",
+                Version = new VersionResult("1.2.3", 1, 2, 3, null, "abcdef123456", "abcdef", false, true)
+                {
+                    DockerVersion = "1.2.3",
+                },
+            };
+
+            var result = await provider.PushAsync(artifact, context, CancellationToken.None);
+
+            Assert.True(result.Success);
+            Assert.Contains("registry.gitlab.example.com:5050/team/rexo:1.2.3", result.PublishedReferences);
+            Assert.DoesNotContain("registry.gitlab.example.com:5050/team/rexo/rexo:1.2.3", result.PublishedReferences);
         }
         finally
         {

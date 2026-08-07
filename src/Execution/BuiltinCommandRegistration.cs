@@ -542,13 +542,19 @@ public static class BuiltinCommandRegistration
         RepoConfig? config,
         CancellationToken cancellationToken)
     {
-        if (config?.Secrets?.Items is not { Count: > 0 } items)
+        if (config is null)
+        {
+            return CommandResult.Ok("secrets doctor", "Secrets doctor:\n  No configured secrets found.");
+        }
+
+        var items = config.Secrets?.Items;
+        if (items is not { Count: > 0 })
         {
             return CommandResult.Ok("secrets doctor", "Secrets doctor:\n  No configured secrets found.");
         }
 
         var fileEnvironment = RepositoryEnvironmentFiles.Load(invocation.WorkingDirectory);
-        var resolver = new ConfigSecretResolver(config, fileEnvironment, SecretProviderRegistry.CreateDefault());
+        var resolver = new ConfigSecretResolver(config!, fileEnvironment, SecretProviderRegistry.CreateDefault());
         var preflight = await resolver.PreflightRequiredAsync(cancellationToken);
 
         var lines = new List<string> { "Secrets doctor:" };

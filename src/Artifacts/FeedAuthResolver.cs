@@ -220,15 +220,9 @@ public static class FeedAuthResolver
         bool ciInferenceEnabled)
     {
         var context = new FeedAuthProviderContext(endpoint, fileEnv, ciInferenceEnabled);
-        foreach (var provider in ContainerRegistryAuthProviders)
-        {
-            if (provider.TryResolve(context, out var resolution))
-            {
-                return resolution;
-            }
-        }
-
-        return null;
+        return ContainerRegistryAuthProviders
+            .Select(provider => provider.TryResolve(context, out var resolution) ? resolution : null)
+            .FirstOrDefault(resolution => resolution is not null);
     }
 
     public static string? ResolveImplicitContainerRegistry(
@@ -239,15 +233,11 @@ public static class FeedAuthResolver
     private static FeedAuthResolution ResolveFromProvider<TProvider>(FeedAuthProviderContext context)
         where TProvider : IFeedAuthProvider
     {
-        foreach (var provider in PackageTokenProviders)
-        {
-            if (provider is TProvider && provider.TryResolve(context, out var resolution))
-            {
-                return resolution;
-            }
-        }
-
-        return new FeedAuthResolution(false, null, null, context.Endpoint, null, "none");
+        return PackageTokenProviders
+            .OfType<TProvider>()
+            .Select(provider => provider.TryResolve(context, out var resolution) ? resolution : null)
+            .FirstOrDefault(resolution => resolution is not null)
+            ?? new FeedAuthResolution(false, null, null, context.Endpoint, null, "none");
     }
 
     public static bool IsArtifactCiInferenceEnabled(IReadOnlyDictionary<string, JsonElement> settings)

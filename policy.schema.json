@@ -2,15 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/policy.schema.json",
   "title": "Rexo policy configuration schema",
-  "description": "Schema for policy files that provide shared command and alias baselines.",
+  "description": "Schema for policy files that may contribute shared command and alias baselines.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "$schema",
     "schemaVersion",
-    "name",
-    "commands",
-    "aliases"
+    "name"
   ],
   "properties": {
     "$schema": {
@@ -42,15 +40,14 @@
     },
     "commands": {
       "type": "object",
-      "minProperties": 1,
-      "description": "Policy-defined commands merged into repository command space.",
+      "description": "Policy-defined commands merged into repository command space. Omit this property for empty or capability-only policies.",
       "additionalProperties": {
         "$ref": "#/$defs/repoCommand"
       }
     },
     "aliases": {
       "type": "object",
-      "description": "Policy-defined command aliases. Key is alias name, value is command target.",
+      "description": "Policy-defined command aliases. Omit this property when the policy contributes no aliases.",
       "additionalProperties": {
         "type": "string"
       }
@@ -113,6 +110,23 @@
             "$ref": "#/$defs/step"
           }
         },
+        "hidden": {
+          "type": "boolean",
+          "description": "When true, omit this command from default discovery surfaces like list/help while keeping it callable by name."
+        },
+        "before": {
+          "$ref": "#/$defs/commandHook",
+          "description": "Optional hook executed before this command's steps. Supports a command name string or an explicit step array."
+        },
+        "after": {
+          "$ref": "#/$defs/commandHook",
+          "description": "Optional hook executed after this command's steps. Supports a command name string or an explicit step array."
+        },
+        "maxDepth": {
+          "type": "integer",
+          "description": "Maximum delegated command call depth for this command chain.",
+          "minimum": 1
+        },
         "merge": {
           "description": "Layered command composition behavior. Accepts legacy string mode or merge envelope object.",
           "$ref": "#/$defs/commandMerge"
@@ -131,6 +145,21 @@
         },
         {
           "$ref": "#/$defs/commandMergeEnvelope"
+        }
+      ]
+    },
+    "commandHook": {
+      "description": "Command hook input. Accepts either a command name string or a list of explicit steps.",
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/step"
+          }
         }
       ]
     },
@@ -290,6 +319,61 @@
             "npm test"
           ]
         },
+        "container": {
+          "type": "object",
+          "description": "Optional run-step container wrapper. When set, the rendered run command executes inside the specified container image.",
+          "additionalProperties": false,
+          "required": [
+            "image"
+          ],
+          "properties": {
+            "image": {
+              "type": "string",
+              "description": "Container image used to execute the run command."
+            },
+            "env": {
+              "type": "object",
+              "description": "Additional environment variables injected into the container process.",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "workingDirectory": {
+              "type": "string",
+              "description": "Working directory inside the container. Defaults to /work."
+            },
+            "entrypoint": {
+              "type": "string",
+              "description": "Optional container entrypoint override passed to docker run --entrypoint."
+            },
+            "dockerfile": {
+              "type": "string",
+              "description": "Optional Dockerfile path used to build container.image when missing or stale. Relative paths are resolved from repository root."
+            },
+            "context": {
+              "type": "string",
+              "description": "Optional docker build context directory used with container.dockerfile. Defaults to repository root."
+            },
+            "build": {
+              "type": "object",
+              "description": "Optional docker build options used when container.dockerfile is configured.",
+              "additionalProperties": false,
+              "properties": {
+                "target": {
+                  "type": "string",
+                  "description": "Optional docker build target stage passed as --target."
+                },
+                "args": {
+                  "type": "object",
+                  "description": "Optional docker build arguments passed as --build-arg key=value.",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
         "when": {
           "type": "string",
           "description": "Conditional expression that controls whether the step executes."
@@ -322,6 +406,10 @@
           "type": "boolean",
           "description": "Continue executing later steps when this step fails."
         },
+        "alwaysRun": {
+          "type": "boolean",
+          "description": "Execute this step even after a previous hard failure."
+        },
         "dependsOn": {
           "type": "array",
           "description": "List of step ids that must complete before this step can run.",
@@ -334,6 +422,24 @@
         { "required": ["run"] },
         { "required": ["uses"] },
         { "required": ["command"] }
+      ],
+      "allOf": [
+        {
+          "anyOf": [
+            {
+              "not": {
+                "required": [
+                  "container"
+                ]
+              }
+            },
+            {
+              "required": [
+                "run"
+              ]
+            }
+          ]
+        }
       ]
     }
   }

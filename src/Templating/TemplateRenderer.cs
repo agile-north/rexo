@@ -43,6 +43,12 @@ public sealed class TemplateRenderer : ITemplateRenderer
 
     private static string ResolveOperand(string expr, Dictionary<string, object?> root, ExecutionContext context)
     {
+        var coalescingSegments = SplitCoalesceChain(expr);
+        if (coalescingSegments.Count > 1)
+        {
+            return ResolveCoalescedValue(coalescingSegments, root, context);
+        }
+
         var segments = SplitFilterChain(expr);
         var path = segments[0].Trim();
 
@@ -56,7 +62,7 @@ public sealed class TemplateRenderer : ITemplateRenderer
 
         for (var i = 1; i < segments.Count; i++)
         {
-            result = ApplyFilter(segments[i].Trim(), result);
+            result = ApplyFilter(segments[i].Trim(), result, root, context);
         }
 
         return result;
@@ -83,29 +89,18 @@ public sealed class TemplateRenderer : ITemplateRenderer
         return segments;
     }
 
-    private static string ApplyFilter(string filterExpr, string result)
+    private static string ApplyFilter(string filterExpr, string result, Dictionary<string, object?> root, ExecutionContext context)
     {
-        var parenIndex = filterExpr.IndexOf('(', StringComparison.Ordinal);
-        string filterName;
-        string? filterArg;
-
-        if (parenIndex >= 0)
-        {
-            filterName = filterExpr[..parenIndex].Trim();
-            var closeIndex = filterExpr.LastIndexOf(')');
-            filterArg = closeIndex > parenIndex
-                ? filterExpr[(parenIndex + 1)..closeIndex].Trim().Trim('\'', '"')
-                : string.Empty;
-        }
-        else
-        {
-            filterName = filterExpr.Trim();
-            filterArg = null;
-        }
+        ParseFilterExpression(filterExpr, out var filterName, out var filterArgs);
 
         return filterName switch
         {
-            "default" => string.IsNullOrEmpty(result) ? (filterArg ?? string.Empty) : result,
+            "default" => IsEmptyValue(result)
+                ? ResolveCoalescedValue(filterArgs, root, context)
+                : result,
+            "coalesce" => IsEmptyValue(result)
+                ? ResolveCoalescedValue(filterArgs, root, context)
+                : result,
             "slug" => Slug(result),
             "upper" => result.ToUpperInvariant(),
             "lower" => result.ToLowerInvariant(),
@@ -114,18 +109,343 @@ public sealed class TemplateRenderer : ITemplateRenderer
             "dirname" => Path.GetDirectoryName(result) ?? string.Empty,
             "fileext" => Path.GetExtension(result),
             "filestem" => Path.GetFileNameWithoutExtension(result),
+            "abspath" => MakeAbsolutePath(result, context.RepositoryRoot),
             "urlencode" => Uri.EscapeDataString(result),
             "sha256" => ComputeSha256Hex(result),
-            "prefix" when filterArg is not null => string.IsNullOrEmpty(result) ? string.Empty : filterArg + result,
-            "suffix" when filterArg is not null => string.IsNullOrEmpty(result) ? string.Empty : result + filterArg,
-            "replace" when filterArg is not null => ApplyReplace(result, filterArg),
-            "truncate" when filterArg is not null && int.TryParse(filterArg, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var len)
+            "prefix" when filterArgs.Count == 1 => IsEmptyValue(result) ? string.Empty : TrimQuotedString(filterArgs[0]) + result,
+            "suffix" when filterArgs.Count == 1 => IsEmptyValue(result) ? string.Empty : result + TrimQuotedString(filterArgs[0]),
+            "replace" when filterArgs.Count == 2 => ApplyLiteralReplace(result, filterArgs[0], filterArgs[1]),
+            "replacePattern" when filterArgs.Count == 2 => ApplyRegexReplace(result, filterArgs[0], filterArgs[1]),
+            "truncate" when filterArgs.Count == 1 && int.TryParse(TrimQuotedString(filterArgs[0]), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var len)
                 => result.Length > len ? result[..len] : result,
-            "first" when filterArg is not null && int.TryParse(filterArg, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var n)
+            "first" when filterArgs.Count == 1 && int.TryParse(TrimQuotedString(filterArgs[0]), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var n)
                 => result.Length > n ? result[..n] : result,
             _ => result,
         };
     }
+
+    private static void ParseFilterExpression(string filterExpr, out string filterName, out IReadOnlyList<string> filterArgs)
+    {
+        var parenIndex = filterExpr.IndexOf('(', StringComparison.Ordinal);
+        if (parenIndex < 0)
+        {
+            filterName = filterExpr.Trim();
+            filterArgs = [];
+            return;
+        }
+
+        filterName = filterExpr[..parenIndex].Trim();
+        var closeIndex = filterExpr.LastIndexOf(')');
+        if (closeIndex <= parenIndex)
+        {
+            filterArgs = [string.Empty];
+            return;
+        }
+
+        filterArgs = SplitFilterArguments(filterExpr[(parenIndex + 1)..closeIndex]);
+    }
+
+    private static IReadOnlyList<string> SplitFilterArguments(string expr)
+    {
+        if (string.IsNullOrWhiteSpace(expr))
+        {
+            return [];
+        }
+
+        var args = new List<string>();
+        var depth = 0;
+        var start = 0;
+        var inSingleQuote = false;
+        var inDoubleQuote = false;
+        var inRegexLiteral = false;
+        var escaped = false;
+        var atArgumentStart = true;
+
+        for (var i = 0; i < expr.Length; i++)
+        {
+            var c = expr[i];
+
+            if (inRegexLiteral)
+            {
+                if (escaped)
+                {
+                    escaped = false;
+                    continue;
+                }
+
+                if (c == '\\')
+                {
+                    escaped = true;
+                    continue;
+                }
+
+                if (c == '/')
+                {
+                    inRegexLiteral = false;
+                }
+
+                continue;
+            }
+
+            if (escaped)
+            {
+                escaped = false;
+                atArgumentStart = false;
+                continue;
+            }
+
+            if (c == '\\')
+            {
+                escaped = true;
+                atArgumentStart = false;
+                continue;
+            }
+
+            if (inSingleQuote)
+            {
+                if (c == '\'')
+                {
+                    inSingleQuote = false;
+                }
+
+                continue;
+            }
+
+            if (inDoubleQuote)
+            {
+                if (c == '"')
+                {
+                    inDoubleQuote = false;
+                }
+
+                continue;
+            }
+
+            if (c == '\'')
+            {
+                inSingleQuote = true;
+                atArgumentStart = false;
+                continue;
+            }
+
+            if (c == '"')
+            {
+                inDoubleQuote = true;
+                atArgumentStart = false;
+                continue;
+            }
+
+            if (c == '/' && atArgumentStart && HasClosingRegexDelimiter(expr, i))
+            {
+                inRegexLiteral = true;
+                atArgumentStart = false;
+                continue;
+            }
+
+            if (c == '(')
+            {
+                depth++;
+                atArgumentStart = false;
+                continue;
+            }
+
+            if (c == ')')
+            {
+                depth--;
+                atArgumentStart = false;
+                continue;
+            }
+
+            if (c == ',' && depth == 0)
+            {
+                args.Add(expr[start..i].Trim());
+                start = i + 1;
+                atArgumentStart = true;
+                continue;
+            }
+
+            if (!char.IsWhiteSpace(c))
+            {
+                atArgumentStart = false;
+            }
+        }
+
+        args.Add(expr[start..].Trim());
+        return args;
+    }
+
+    private static IReadOnlyList<string> SplitCoalesceChain(string expr)
+    {
+        var segments = new List<string>();
+        var depth = 0;
+        var start = 0;
+        var inSingleQuote = false;
+        var inDoubleQuote = false;
+        var inRegexLiteral = false;
+        var escaped = false;
+        var atSegmentStart = true;
+
+        for (var i = 0; i < expr.Length; i++)
+        {
+            var c = expr[i];
+
+            if (inRegexLiteral)
+            {
+                if (escaped)
+                {
+                    escaped = false;
+                    continue;
+                }
+
+                if (c == '\\')
+                {
+                    escaped = true;
+                    continue;
+                }
+
+                if (c == '/')
+                {
+                    inRegexLiteral = false;
+                }
+
+                continue;
+            }
+
+            if (escaped)
+            {
+                escaped = false;
+                atSegmentStart = false;
+                continue;
+            }
+
+            if (c == '\\')
+            {
+                escaped = true;
+                atSegmentStart = false;
+                continue;
+            }
+
+            if (inSingleQuote)
+            {
+                if (c == '\'')
+                {
+                    inSingleQuote = false;
+                }
+
+                continue;
+            }
+
+            if (inDoubleQuote)
+            {
+                if (c == '"')
+                {
+                    inDoubleQuote = false;
+                }
+
+                continue;
+            }
+
+            if (c == '\'')
+            {
+                inSingleQuote = true;
+                atSegmentStart = false;
+                continue;
+            }
+
+            if (c == '"')
+            {
+                inDoubleQuote = true;
+                atSegmentStart = false;
+                continue;
+            }
+
+            if (c == '/' && atSegmentStart && HasClosingRegexDelimiter(expr, i))
+            {
+                inRegexLiteral = true;
+                atSegmentStart = false;
+                continue;
+            }
+
+            if (c == '(')
+            {
+                depth++;
+                atSegmentStart = false;
+                continue;
+            }
+
+            if (c == ')')
+            {
+                depth--;
+                atSegmentStart = false;
+                continue;
+            }
+
+            if (c == '?' && i + 1 < expr.Length && expr[i + 1] == '?' && depth == 0)
+            {
+                segments.Add(expr[start..i].Trim());
+                start = i + 2;
+                i++;
+                atSegmentStart = true;
+                continue;
+            }
+
+            if (!char.IsWhiteSpace(c))
+            {
+                atSegmentStart = false;
+            }
+        }
+
+        if (segments.Count == 0)
+        {
+            return [expr];
+        }
+
+        segments.Add(expr[start..].Trim());
+        return segments;
+    }
+
+    private static bool HasClosingRegexDelimiter(string expr, int startIndex)
+    {
+        var escaped = false;
+        for (var i = startIndex + 1; i < expr.Length; i++)
+        {
+            var c = expr[i];
+            if (escaped)
+            {
+                escaped = false;
+                continue;
+            }
+
+            if (c == '\\')
+            {
+                escaped = true;
+                continue;
+            }
+
+            if (c == '/')
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string ResolveCoalescedValue(IReadOnlyList<string> filterArgs, Dictionary<string, object?> root, ExecutionContext context)
+    {
+        for (var i = 0; i < filterArgs.Count; i++)
+        {
+            var value = ResolveOperand(filterArgs[i], root, context);
+            if (!IsEmptyValue(value))
+            {
+                return value;
+            }
+        }
+
+        return string.Empty;
+    }
+
+    private static bool IsEmptyValue(string value) => string.IsNullOrWhiteSpace(value);
 
     private static object? ResolvePath(string path, Dictionary<string, object?> root, ExecutionContext context)
     {
@@ -143,6 +463,8 @@ public sealed class TemplateRenderer : ITemplateRenderer
             {
                 Dictionary<string, object?> d when d.TryGetValue(part, out var v) => v,
                 IReadOnlyDictionary<string, object?> rd when rd.TryGetValue(part, out var v) => v,
+                Dictionary<string, string> d when d.TryGetValue(part, out var v) => v,
+                IReadOnlyDictionary<string, string> rd when rd.TryGetValue(part, out var v) => v,
                 _ => null,
             };
 
@@ -200,6 +522,15 @@ public sealed class TemplateRenderer : ITemplateRenderer
             ["remoteUrl"] = context.RemoteUrl,
         };
 
+        var git = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["branch"] = context.Branch,
+            ["commitSha"] = context.CommitSha,
+            ["shortSha"] = context.ShortSha,
+            ["remoteUrl"] = context.RemoteUrl,
+            ["isCleanWorkingTree"] = context.IsCleanWorkingTree.ToString().ToLowerInvariant(),
+        };
+
         var ci = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
             ["isCi"] = context.IsCi.ToString().ToLowerInvariant(),
@@ -231,11 +562,14 @@ public sealed class TemplateRenderer : ITemplateRenderer
             ["args"] = args,
             ["options"] = options,
             ["repo"] = repo,
+            ["git"] = git,
             ["ci"] = ci,
             ["steps"] = steps,
             ["outputs"] = context.ResolvedOutputs,
             ["settings"] = context.ResolvedSettings,
             ["vars"] = context.ResolvedVars,
+            ["secrets"] = context.ResolvedSecrets,
+            ["push"] = BuildPushContext(context),
         };
 
         if (context.Version is not null)
@@ -247,6 +581,11 @@ public sealed class TemplateRenderer : ITemplateRenderer
                 ["minor"] = context.Version.Minor.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["patch"] = context.Version.Patch.ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ["prerelease"] = context.Version.PreRelease,
+                ["preReleaseTag"] = context.Version.PreReleaseTag,
+                ["preReleaseLabel"] = context.Version.PreReleaseLabel,
+                ["preReleaseNumber"] = context.Version.PreReleaseNumber?.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["preReleaseLabelWithDash"] = context.Version.PreReleaseLabelWithDash,
+                ["preReleaseTagWithDash"] = context.Version.PreReleaseTagWithDash,
                 ["commitSha"] = context.Version.CommitSha,
                 ["shortSha"] = context.Version.ShortSha,
                 ["isPrerelease"] = context.Version.IsPreRelease.ToString().ToLowerInvariant(),
@@ -257,8 +596,70 @@ public sealed class TemplateRenderer : ITemplateRenderer
         return root;
     }
 
+    private static IReadOnlyDictionary<string, object?> BuildPushContext(ExecutionContext context)
+    {
+        var artifacts = new List<ArtifactManifestEntry>();
+        var decisions = new List<PushDecision>();
+
+        foreach (var step in context.CompletedSteps.Values)
+        {
+            if (step.Outputs.TryGetValue("__artifacts", out var artifactsObj)
+                && artifactsObj is IEnumerable<ArtifactManifestEntry> artifactEntries)
+            {
+                artifacts.AddRange(artifactEntries);
+            }
+
+            if (step.Outputs.TryGetValue("__pushDecisions", out var decisionsObj)
+                && decisionsObj is IEnumerable<PushDecision> pushEntries)
+            {
+                decisions.AddRange(pushEntries);
+            }
+        }
+
+        var pushedCount = artifacts.Count(a => a.Pushed);
+        var deniedDecisions = decisions.Where(d => !d.Allowed).ToList();
+        var blockReasons = deniedDecisions
+            .Select(d => d.Reason)
+            .Where(reason => !string.IsNullOrWhiteSpace(reason))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        return new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["hasData"] = (artifacts.Count > 0 || decisions.Count > 0).ToString().ToLowerInvariant(),
+            ["anyPushed"] = (pushedCount > 0).ToString().ToLowerInvariant(),
+            ["pushedCount"] = pushedCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["artifactCount"] = artifacts.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["decisionCount"] = decisions.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["allowedCount"] = decisions.Count(d => d.Allowed).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["deniedCount"] = deniedDecisions.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["anyBlocked"] = (deniedDecisions.Count > 0).ToString().ToLowerInvariant(),
+            ["blockReasons"] = string.Join(" | ", blockReasons),
+        };
+    }
+
     private static string Slug(string value) =>
         SlugCleanPattern.Replace(value.ToLowerInvariant(), "-").Trim('-');
+
+    private static string MakeAbsolutePath(string value, string repositoryRoot)
+    {
+        if (IsEmptyValue(value))
+        {
+            return string.Empty;
+        }
+
+        if (Path.IsPathRooted(value))
+        {
+            return value;
+        }
+
+        if (value.StartsWith("~/", StringComparison.Ordinal) || value.StartsWith("~\\", StringComparison.Ordinal))
+        {
+            value = value[2..];
+        }
+
+        return Path.GetFullPath(Path.Combine(repositoryRoot, value));
+    }
 
     private static string ComputeSha256Hex(string value)
     {
@@ -267,15 +668,95 @@ public sealed class TemplateRenderer : ITemplateRenderer
         return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
-    /// <summary>
-    /// Apply a replace filter with argument format <c>old,new</c> (comma-separated).
-    /// </summary>
-    private static string ApplyReplace(string value, string filterArg)
+    private static string ApplyLiteralReplace(string value, string oldValue, string newValue)
     {
-        var commaIndex = filterArg.IndexOf(',', StringComparison.Ordinal);
-        if (commaIndex < 0) return value;
-        var oldValue = filterArg[..commaIndex];
-        var newValue = filterArg[(commaIndex + 1)..];
+        oldValue = TrimQuotedString(oldValue);
+        newValue = TrimQuotedString(newValue);
         return value.Replace(oldValue, newValue, StringComparison.Ordinal);
+    }
+
+    private static string ApplyRegexReplace(string value, string oldValue, string newValue)
+    {
+        oldValue = TrimQuotedString(oldValue);
+        newValue = TrimQuotedString(newValue);
+
+        if (!TryParseRegexLiteral(oldValue, out var pattern, out var options))
+        {
+            return value;
+        }
+
+        return Regex.Replace(value, pattern, newValue, options);
+    }
+
+    private static string TrimQuotedString(string value)
+    {
+        value = value.Trim();
+
+        if (value.Length >= 2 && value[0] == value[^1] && (value[0] == '\'' || value[0] == '"'))
+        {
+            return value[1..^1];
+        }
+
+        if (value.Length >= 1 && (value[0] == '\'' || value[0] == '"'))
+        {
+            return value[1..];
+        }
+
+        if (value.Length >= 1 && (value[^1] == '\'' || value[^1] == '"'))
+        {
+            return value[..^1];
+        }
+
+        return value;
+    }
+    private static bool TryParseRegexLiteral(string input, out string pattern, out RegexOptions options)
+    {
+        pattern = string.Empty;
+        options = RegexOptions.None;
+
+        if (input.Length < 2 || input[0] != '/')
+        {
+            return false;
+        }
+
+        var escaped = false;
+        var end = -1;
+        for (var i = 1; i < input.Length; i++)
+        {
+            if (escaped)
+            {
+                escaped = false;
+                continue;
+            }
+
+            if (input[i] == '\\')
+            {
+                escaped = true;
+                continue;
+            }
+
+            if (input[i] == '/')
+            {
+                end = i;
+                break;
+            }
+        }
+
+        if (end < 1)
+        {
+            return false;
+        }
+
+        pattern = input[1..end];
+        var flags = end < input.Length - 1 ? input[(end + 1)..] : string.Empty;
+        foreach (var flag in flags)
+        {
+            if (flag == 'i')
+            {
+                options |= RegexOptions.IgnoreCase;
+            }
+        }
+
+        return true;
     }
 }

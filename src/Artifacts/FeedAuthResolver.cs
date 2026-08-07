@@ -1,5 +1,8 @@
 namespace Rexo.Artifacts;
 
+using System.Text.Json;
+using Rexo.Artifacts.Auth;
+
 /// <summary>
 /// Resolved credentials from env vars, file env, or CI-native token sources.
 /// </summary>
@@ -12,13 +15,25 @@ public sealed record FeedAuthResolution(
     string Source);
 
 /// <summary>
-/// Shared auth infrastructure.  Only cross-provider concerns live here:
-/// Docker login (used by both the Docker and DockerCompose providers) and
-/// the <see cref="GetEnv"/> utility that providers use in their own resolver logic.
-/// Provider-specific auth knowledge lives inside each provider.
+/// Shared auth infrastructure for cross-provider credential resolution.
+/// Includes container registry auth, package feed CI-native fallback helpers,
+/// and the <see cref="GetEnv"/> utility used by provider-specific resolvers.
 /// </summary>
 public static class FeedAuthResolver
 {
+    private static readonly IFeedAuthProvider[] ContainerRegistryAuthProviders =
+    [
+        new GitHubContainerRegistryAuthProvider(),
+        new GitLabContainerRegistryAuthProvider(),
+    ];
+
+    private static readonly IFeedAuthProvider[] PackageTokenProviders =
+    [
+        new GitHubPackagesTokenAuthProvider(),
+        new GitLabPackageTokenAuthProvider(),
+        new AzureArtifactsTokenAuthProvider(),
+    ];
+
     /// <summary>
     /// Resolves a target value using environment and settings indirection.
     /// Order: configured env-name (or default env-name) -> configured value.
@@ -74,7 +89,8 @@ public static class FeedAuthResolver
         IReadOnlyDictionary<string, string> fileEnv,
         string? configuredUsernameEnv = null,
         string? configuredPasswordEnv = null,
-        string? configuredRegistryEnv = null)
+        string? configuredRegistryEnv = null,
+        bool ciInferenceEnabled = true)
     {
         var username = ResolveSecret(
             defaultEnvName: "DOCKER_LOGIN_USERNAME",
@@ -94,17 +110,31 @@ public static class FeedAuthResolver
                        ?? GetEnv("DOCKER_AUTH_REGISTRY", fileEnv)
                        ?? inferredRegistry;
 
+        return FinalizeContainerRegistryAuth(
+            username,
+            secret,
+            endpoint,
+            fileEnv,
+            "DOCKER_LOGIN_USERNAME and DOCKER_LOGIN_PASSWORD must both be set.",
+            "Docker login registry could not be determined. Set settings.loginRegistry or DOCKER_LOGIN_REGISTRY.",
+            ciInferenceEnabled);
+    }
+
+    public static FeedAuthResolution FinalizeContainerRegistryAuth(
+        string? username,
+        string? secret,
+        string? endpoint,
+        IReadOnlyDictionary<string, string> fileEnv,
+        string missingCredentialsError,
+        string missingEndpointError,
+        bool ciInferenceEnabled = true)
+    {
         if (string.IsNullOrWhiteSpace(username) && string.IsNullOrWhiteSpace(secret))
         {
-            // CI-native fallback for GHCR.
-            if (!string.IsNullOrWhiteSpace(endpoint) && endpoint.Contains("ghcr.io", StringComparison.OrdinalIgnoreCase))
+            var ciResolution = TryResolveCiContainerRegistryAuth(endpoint, fileEnv, ciInferenceEnabled);
+            if (ciResolution is not null)
             {
-                var actor = Environment.GetEnvironmentVariable("GITHUB_ACTOR");
-                var token = Environment.GetEnvironmentVariable("GITHUB_TOKEN");
-                if (!string.IsNullOrWhiteSpace(actor) && !string.IsNullOrWhiteSpace(token))
-                {
-                    return new FeedAuthResolution(true, actor, token, endpoint, null, "github-token");
-                }
+                return ciResolution;
             }
 
             return new FeedAuthResolution(false, null, null, endpoint, null, "none");
@@ -112,15 +142,201 @@ public static class FeedAuthResolver
 
         if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(secret))
         {
-            return new FeedAuthResolution(false, null, null, endpoint, "DOCKER_LOGIN_USERNAME and DOCKER_LOGIN_PASSWORD must both be set.", "env");
+            return new FeedAuthResolution(false, null, null, endpoint, missingCredentialsError, "env");
         }
 
         if (string.IsNullOrWhiteSpace(endpoint))
         {
-            return new FeedAuthResolution(false, null, null, null, "Docker login registry could not be determined. Set settings.loginRegistry or DOCKER_LOGIN_REGISTRY.", "env");
+            return new FeedAuthResolution(false, null, null, null, missingEndpointError, "env");
         }
 
         return new FeedAuthResolution(true, username, secret, endpoint, null, "env");
+    }
+
+    public static bool ShouldWarnOnMissingContainerRegistryCredentials(
+        string? endpoint,
+        IReadOnlyDictionary<string, string> fileEnv)
+        => FeedAuthConventions.ShouldWarnOnMissingContainerRegistryCredentials(endpoint, fileEnv);
+
+    public static string? ExtractRegistryHost(string? endpoint)
+        => FeedAuthConventions.ExtractRegistryHost(endpoint);
+
+    public static bool IsAzureArtifactsEndpoint(string? endpoint)
+        => FeedAuthConventions.IsAzureArtifactsEndpoint(endpoint);
+
+    public static FeedAuthResolution ResolveGitHubPackagesTokenAuth(
+        string? endpoint,
+        IReadOnlyDictionary<string, string> fileEnv,
+        string packageHostFragment,
+        bool ciInferenceEnabled = true)
+    {
+        var context = new FeedAuthProviderContext(
+            Endpoint: endpoint,
+            FileEnv: fileEnv,
+            CiInferenceEnabled: ciInferenceEnabled,
+            PackageHostFragment: packageHostFragment);
+
+        return ResolveFromProvider<GitHubPackagesTokenAuthProvider>(context);
+    }
+
+    public static FeedAuthResolution ResolveAzureArtifactsTokenAuth(
+        string? endpoint,
+        IReadOnlyDictionary<string, string> fileEnv,
+        string? username,
+        bool allowWhenEndpointUnknown = false,
+        bool ciInferenceEnabled = true)
+    {
+        var context = new FeedAuthProviderContext(
+            Endpoint: endpoint,
+            FileEnv: fileEnv,
+            CiInferenceEnabled: ciInferenceEnabled,
+            UsernameHint: username,
+            AllowWhenEndpointUnknown: allowWhenEndpointUnknown);
+
+        return ResolveFromProvider<AzureArtifactsTokenAuthProvider>(context);
+    }
+
+    public static bool IsGitLabPackageEndpoint(string? endpoint)
+        => FeedAuthConventions.IsGitLabPackageEndpoint(endpoint);
+
+    public static FeedAuthResolution ResolveGitLabPackageTokenAuth(
+        string? endpoint,
+        IReadOnlyDictionary<string, string> fileEnv,
+        string? username = null,
+        bool ciInferenceEnabled = true)
+    {
+        var context = new FeedAuthProviderContext(
+            Endpoint: endpoint,
+            FileEnv: fileEnv,
+            CiInferenceEnabled: ciInferenceEnabled,
+            UsernameHint: username);
+
+        return ResolveFromProvider<GitLabPackageTokenAuthProvider>(context);
+    }
+
+    private static FeedAuthResolution? TryResolveCiContainerRegistryAuth(
+        string? endpoint,
+        IReadOnlyDictionary<string, string> fileEnv,
+        bool ciInferenceEnabled)
+    {
+        var context = new FeedAuthProviderContext(endpoint, fileEnv, ciInferenceEnabled);
+        foreach (var provider in ContainerRegistryAuthProviders)
+        {
+            if (provider.TryResolve(context, out var resolution))
+            {
+                return resolution;
+            }
+        }
+
+        return null;
+    }
+
+    public static string? ResolveImplicitContainerRegistry(
+        IReadOnlyDictionary<string, string> fileEnv,
+        bool ciInferenceEnabled = true)
+        => FeedAuthConventions.ResolveImplicitContainerRegistry(fileEnv, ciInferenceEnabled);
+
+    private static FeedAuthResolution ResolveFromProvider<TProvider>(FeedAuthProviderContext context)
+        where TProvider : IFeedAuthProvider
+    {
+        foreach (var provider in PackageTokenProviders)
+        {
+            if (provider is TProvider && provider.TryResolve(context, out var resolution))
+            {
+                return resolution;
+            }
+        }
+
+        return new FeedAuthResolution(false, null, null, context.Endpoint, null, "none");
+    }
+
+    public static bool IsArtifactCiInferenceEnabled(IReadOnlyDictionary<string, JsonElement> settings)
+    {
+        if (TryGetBooleanSetting(settings, "ciInference", out var ciInference))
+        {
+            return ciInference;
+        }
+
+        if (TryGetBooleanSetting(settings, "target.ciInference", out ciInference))
+        {
+            return ciInference;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Overlays runtime-mapped secret environment values on top of file environment values.
+    /// Process environment still takes precedence via <see cref="GetEnv"/>.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> OverlayMappedEnvironment(
+        IReadOnlyDictionary<string, string> fileEnv,
+        IReadOnlyDictionary<string, string> mappedEnvironment)
+    {
+        if (mappedEnvironment.Count == 0)
+        {
+            return fileEnv;
+        }
+
+        var merged = new Dictionary<string, string>(fileEnv, StringComparer.Ordinal);
+        foreach (var (key, value) in mappedEnvironment)
+        {
+            if (!string.IsNullOrWhiteSpace(key) && !string.IsNullOrWhiteSpace(value))
+            {
+                merged[key] = value;
+            }
+        }
+
+        return merged;
+    }
+
+    private static bool TryGetBooleanSetting(
+        IReadOnlyDictionary<string, JsonElement> settings,
+        string path,
+        out bool value)
+    {
+        value = default;
+        if (!TryGetSettingValue(settings, out var setting, path))
+        {
+            return false;
+        }
+
+        switch (setting.ValueKind)
+        {
+            case JsonValueKind.True:
+                value = true;
+                return true;
+            case JsonValueKind.False:
+                value = false;
+                return true;
+            case JsonValueKind.String:
+                return bool.TryParse(setting.GetString(), out value);
+            default:
+                return false;
+        }
+    }
+
+    private static bool TryGetSettingValue(
+        IReadOnlyDictionary<string, JsonElement> settings,
+        out JsonElement value,
+        string path)
+    {
+        value = default;
+        var segments = path.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (segments.Length == 0 || !settings.TryGetValue(segments[0], out value))
+        {
+            return false;
+        }
+
+        for (var i = 1; i < segments.Length; i++)
+        {
+            if (value.ValueKind != JsonValueKind.Object || !value.TryGetProperty(segments[i], out value))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>

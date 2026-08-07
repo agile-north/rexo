@@ -95,6 +95,10 @@
       "description": "Free-form template variable bag. All values are accessible as {{vars.*}} in step run strings and support arbitrary nesting (e.g. {{vars.dotnet.solution}}).",
       "$ref": "#/$defs/vars"
     },
+    "secrets": {
+      "description": "First-class secret configuration for runtime resolution and template access under {{secrets.*}}.",
+      "$ref": "#/$defs/secretsConfig"
+    },
     "capabilities": {
       "description": "Runtime capability requirements and compatibility contract expectations.",
       "$ref": "#/$defs/capabilityContract"
@@ -110,6 +114,190 @@
       "type": "object",
       "description": "Free-form template variable bag. Accessible as {{vars.*}} in step run strings. Values can be strings, numbers, booleans, or arbitrarily nested objects.",
       "additionalProperties": true
+    },
+    "secretCacheConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable per-command in-memory cache for the secret or provider."
+        },
+        "ttlSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optional cache TTL in seconds."
+        }
+      }
+    },
+    "secretDefaultsConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "Default secret provider type (for example env, 1password, exec)."
+        },
+        "providerChain": {
+          "type": "array",
+          "description": "Ordered provider candidates evaluated at runtime until one resolves the secret.",
+          "items": {
+            "$ref": "#/$defs/secretProviderRouteConfig"
+          }
+        },
+        "fallbackToEnvironment": {
+          "type": "boolean",
+          "description": "When true (default), fall back to environment lookup after configured providers fail."
+        },
+        "stopOnFirstError": {
+          "type": "boolean",
+          "description": "When true, stop the chain on the first provider error instead of falling back to the next candidate."
+        },
+        "cache": {
+          "$ref": "#/$defs/secretCacheConfig"
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Default required behavior for secret entries."
+        }
+      }
+    },
+    "secretProviderConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Provider type implementation key."
+        },
+        "auth": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Provider auth values or references interpreted by the provider implementation."
+        },
+        "settings": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Provider-specific settings."
+        },
+        "cache": {
+          "$ref": "#/$defs/secretCacheConfig"
+        }
+      }
+    },
+    "secretProviderRouteConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "providerRef": {
+          "type": "string",
+          "description": "Reference to a named provider declared under secrets.providers."
+        },
+        "provider": {
+          "type": "string",
+          "description": "Inline provider type override."
+        },
+        "selector": {
+          "type": "string",
+          "description": "Selector override for this route."
+        },
+        "env": {
+          "type": "string",
+          "description": "Environment variable override for this route."
+        },
+        "runtime": {
+          "type": "string",
+          "description": "Runtime filter for the candidate. Use local, ci, or a CI provider name such as github-actions."
+        }
+      }
+    },
+    "secretItemConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "providerRef": {
+          "type": "string",
+          "description": "Reference to a named provider declared under secrets.providers."
+        },
+        "provider": {
+          "type": "string",
+          "description": "Inline provider type override."
+        },
+        "providerChain": {
+          "type": "array",
+          "description": "Ordered provider candidates evaluated at runtime until one resolves the secret.",
+          "items": {
+            "$ref": "#/$defs/secretProviderRouteConfig"
+          }
+        },
+        "fallbackToEnvironment": {
+          "type": "boolean",
+          "description": "When true (default), fall back to environment lookup after configured providers fail."
+        },
+        "stopOnFirstError": {
+          "type": "boolean",
+          "description": "When true, stop the chain on the first provider error instead of falling back to the next candidate."
+        },
+        "selector": {
+          "type": "string",
+          "description": "Provider selector/key/path used to resolve the secret."
+        },
+        "env": {
+          "type": "string",
+          "description": "Environment variable name used by env provider."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "When true (default), missing secret fails command execution."
+        },
+        "exposeInTemplates": {
+          "type": "boolean",
+          "description": "When true (default), expose resolved value in templates under secrets.*."
+        },
+        "mapToEnv": {
+          "type": "string",
+          "description": "Optional environment variable name to inject the resolved secret into at runtime."
+        },
+        "mapToEnvs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional additional environment variable names to inject the resolved secret into at runtime."
+        },
+        "cache": {
+          "$ref": "#/$defs/secretCacheConfig"
+        },
+        "settings": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Per-secret provider settings."
+        }
+      }
+    },
+    "secretsConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "defaults": {
+          "$ref": "#/$defs/secretDefaultsConfig"
+        },
+        "providers": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/secretProviderConfig"
+          }
+        },
+        "items": {
+          "type": "object",
+          "description": "Named secret entries exposed as {{secrets.<name>}}.",
+          "additionalProperties": {
+            "$ref": "#/$defs/secretItemConfig"
+          }
+        }
+      }
     },
     "capabilityContract": {
       "type": "object",
@@ -163,9 +351,26 @@
             "$ref": "#/$defs/step"
           }
         },
+        "hidden": {
+          "type": "boolean",
+          "description": "When true, omit this command from default discovery surfaces like list/help while keeping it callable by name."
+        },
+        "before": {
+          "$ref": "#/$defs/commandHook",
+          "description": "Optional hook executed before this command's steps. Supports a command name string or an explicit step array."
+        },
+        "after": {
+          "$ref": "#/$defs/commandHook",
+          "description": "Optional hook executed after this command's steps. Supports a command name string or an explicit step array."
+        },
         "maxParallel": {
           "type": "integer",
           "description": "Maximum concurrent step execution when parallel groups are used.",
+          "minimum": 1
+        },
+        "maxDepth": {
+          "type": "integer",
+          "description": "Maximum delegated command call depth for this command chain.",
           "minimum": 1
         },
         "merge": {
@@ -186,6 +391,21 @@
         },
         {
           "$ref": "#/$defs/commandMergeEnvelope"
+        }
+      ]
+    },
+    "commandHook": {
+      "description": "Command hook input. Accepts either a command name string or a list of explicit steps.",
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/step"
+          }
         }
       ]
     },
@@ -345,6 +565,61 @@
             "docker build -f Dockerfile -t my-app:local ."
           ]
         },
+        "container": {
+          "type": "object",
+          "description": "Optional run-step container wrapper. When set, the rendered run command executes inside the specified container image.",
+          "additionalProperties": false,
+          "required": [
+            "image"
+          ],
+          "properties": {
+            "image": {
+              "type": "string",
+              "description": "Container image used to execute the run command."
+            },
+            "env": {
+              "type": "object",
+              "description": "Additional environment variables injected into the container process.",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "workingDirectory": {
+              "type": "string",
+              "description": "Working directory inside the container. Defaults to /work."
+            },
+            "entrypoint": {
+              "type": "string",
+              "description": "Optional container entrypoint override passed to docker run --entrypoint."
+            },
+            "dockerfile": {
+              "type": "string",
+              "description": "Optional Dockerfile path used to build container.image when missing or stale. Relative paths are resolved from repository root."
+            },
+            "context": {
+              "type": "string",
+              "description": "Optional docker build context directory used with container.dockerfile. Defaults to repository root."
+            },
+            "build": {
+              "type": "object",
+              "description": "Optional docker build options used when container.dockerfile is configured.",
+              "additionalProperties": false,
+              "properties": {
+                "target": {
+                  "type": "string",
+                  "description": "Optional docker build target stage passed as --target."
+                },
+                "args": {
+                  "type": "object",
+                  "description": "Optional docker build arguments passed as --build-arg key=value.",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
         "when": {
           "type": "string",
           "description": "Conditional expression that controls whether the step runs."
@@ -411,6 +686,14 @@
         { "required": ["run"] },
         { "required": ["uses"] },
         { "required": ["command"] }
+      ],
+      "allOf": [
+        {
+          "anyOf": [
+            { "not": { "required": ["container"] } },
+            { "required": ["run"] }
+          ]
+        }
       ]
     },
     "versioning": {
@@ -1850,12 +2133,167 @@
     "outputsConfig": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Output path contract. All paths default to subdirectories under the root output folder.",
+      "description": "Output path contract. Paths default to subdirectories under the root output folder unless a plain relative path is provided, in which case the path is treated as repo-relative.",
       "properties": {
         "emit": {
           "type": "boolean",
           "description": "When false, Rexo does not collect or write any output files (manifests, step file outputs). Well-known overlay commands also skip passing output path arguments to toolchain CLIs.",
           "default": true
+        },
+        "command": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Defaults for command stdout and JSON output. CLI flags override these values.",
+          "properties": {
+            "stdout": {
+              "type": "boolean",
+              "description": "When true, command results are written to stdout by default.",
+              "default": true
+            },
+            "json": {
+              "type": "boolean",
+              "description": "When true, command results are rendered as JSON by default.",
+              "default": false
+            },
+            "jsonFile": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Optional default file path for machine-readable command results."
+            }
+          }
+        },
+        "ci": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "CI-native manifest emission settings.",
+          "properties": {
+            "emit": {
+              "type": "boolean",
+              "description": "When true, emit CI-native variables after command execution.",
+              "default": true
+            },
+            "provider": {
+              "type": "string",
+              "description": "CI provider selection. Use auto to detect from the runtime environment.",
+              "default": "auto",
+              "enum": [
+                "auto",
+                "github-actions",
+                "azure-devops",
+                "teamcity",
+                "generic"
+              ]
+            },
+            "github-actions": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Provider-specific GitHub Actions settings.",
+              "properties": {
+                "scope": {
+                  "type": "string",
+                  "description": "GitHub Actions file target. Use env for $GITHUB_ENV, output for $GITHUB_OUTPUT, or state for $GITHUB_STATE.",
+                  "default": "env",
+                  "enum": [
+                    "env",
+                    "output",
+                    "state"
+                  ]
+                }
+              }
+            },
+            "prefix": {
+              "type": "string",
+              "description": "Prefix applied to emitted variable names.",
+              "default": "REXO_"
+            },
+            "keyCasing": {
+              "type": "string",
+              "description": "Key casing format for emitted variables.",
+              "default": "upperSnake",
+              "enum": [
+                "upperSnake",
+                "lowerSnake",
+                "kebab",
+                "camel",
+                "pascal"
+              ]
+            },
+            "scope": {
+              "description": "Emission scope controls which manifest fields are exported. Use a preset or a structured selector with include/exclude masks.",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "default": "safe",
+                  "enum": [
+                    "safe",
+                    "full"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "mode": {
+                      "type": "string",
+                      "enum": [
+                        "safe",
+                        "full"
+                      ],
+                      "description": "Baseline scope to filter from. Defaults to safe unless include masks are present."
+                    },
+                    "include": {
+                      "type": "array",
+                      "description": "Masks that must match for a field to be emitted. Supports exact names, wildcard globs, and regex:... patterns.",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "exclude": {
+                      "type": "array",
+                      "description": "Masks that remove matching fields after include filtering.",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            "includeStepOutputs": {
+              "type": "boolean",
+              "description": "When true, emit raw step outputs in addition to the safe summary payload.",
+              "default": false
+            },
+            "emitEmptyValues": {
+              "type": "boolean",
+              "description": "When true, emit variables even when values are empty or null.",
+              "default": false
+            },
+            "redact": {
+              "type": "boolean",
+              "description": "When true, redact sensitive values before emission.",
+              "default": true
+            },
+            "failOnError": {
+              "type": "boolean",
+              "description": "When true, CI emission errors fail the command.",
+              "default": false
+            },
+            "maxValueLength": {
+              "type": "integer",
+              "description": "Maximum emitted value length.",
+              "minimum": 1,
+              "default": 8192
+            },
+            "maxVariables": {
+              "type": "integer",
+              "description": "Maximum number of emitted variables.",
+              "minimum": 1,
+              "default": 1000
+            }
+          }
         },
         "root": {
           "type": "string",
@@ -1870,17 +2308,17 @@
             "results": {
               "type": "string",
               "description": "Directory for test result files (e.g. TRX, JUnit XML).",
-              "default": "artifacts/tests"
+              "default": "~/tests"
             },
             "coverage": {
               "type": "string",
               "description": "Directory for coverage data files.",
-              "default": "artifacts/coverage"
+              "default": "~/tests/coverage"
             },
             "reports": {
               "type": "string",
               "description": "Directory for generated coverage reports (HTML, etc.).",
-              "default": "artifacts/coverage/reports"
+              "default": "~/tests/reports"
             }
           }
         },
@@ -1892,12 +2330,12 @@
             "reports": {
               "type": "string",
               "description": "Directory for analysis report files.",
-              "default": "artifacts/analysis"
+              "default": "~/analysis"
             },
             "sarif": {
               "type": "string",
               "description": "SARIF output directory.",
-              "default": "artifacts/analysis/sarif"
+              "default": "~/analysis/sarif"
             }
           }
         },
@@ -1909,39 +2347,65 @@
             "audit": {
               "type": "string",
               "description": "Full file path for the npm/security audit JSON output.",
-              "default": "artifacts/security/audit.json"
+              "default": "~/security/audit.json"
             },
             "reports": {
               "type": "string",
               "description": "Security report output directory.",
-              "default": "artifacts/security"
+              "default": "~/security"
             },
             "sarif": {
               "type": "string",
               "description": "SARIF output directory for security findings.",
-              "default": "artifacts/security/sarif"
+              "default": "~/security/sarif"
             }
           }
         },
         "packages": {
           "type": "string",
           "description": "Directory for built artifact packages (NuGet, npm, Helm charts, etc.).",
-          "default": "artifacts/packages"
+          "default": "~/packages"
         },
         "manifests": {
-          "type": "string",
-          "description": "Directory for runtime manifest JSON files.",
-          "default": "artifacts/manifests"
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Manifest output settings.",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Directory for command/runtime manifest files. Use ~/... to resolve relative to outputs.root; plain relative paths are repo-relative.",
+              "default": "~/manifests"
+            },
+            "commandMode": {
+              "type": "string",
+              "description": "Command manifest file strategy. Use aggregate for one file containing all commands, perCommand for one file per command, or single as an alias for aggregate.",
+              "default": "aggregate",
+              "enum": [
+                "single",
+                "perCommand",
+                "aggregate"
+              ]
+            },
+            "commandDetail": {
+              "type": "string",
+              "description": "Command manifest detail level. Use summary for concise output or verbose for full command result payload.",
+              "default": "summary",
+              "enum": [
+                "summary",
+                "verbose"
+              ]
+            }
+          }
         },
         "logs": {
           "type": "string",
           "description": "Directory for CI log files.",
-          "default": "artifacts/logs"
+          "default": "~/logs"
         },
         "temp": {
           "type": "string",
           "description": "Scratch directory for intermediate build artifacts.",
-          "default": "artifacts/tmp"
+          "default": "~/tmp"
         }
       }
     },
@@ -1950,6 +2414,7 @@
       "additionalProperties": false,
       "examples": [
         {
+          "dryRun": true,
           "push": {
             "enabled": true,
             "branches": ["main", "release/*"]
@@ -1957,9 +2422,34 @@
         }
       ],
       "properties": {
+        "dryRun": {
+          "type": "boolean",
+          "description": "Enables dry-run mode for the runtime. When true, external mutations are simulated instead of executed.",
+          "default": false
+        },
         "push": {
           "description": "Global push policy merged with per-artifact push overrides.",
           "$ref": "#/$defs/pushRules"
+        },
+        "commands": {
+          "type": "object",
+          "description": "Global command execution policy settings.",
+          "additionalProperties": false,
+          "properties": {
+            "defaultMergeMode": {
+              "$ref": "#/$defs/commandMergeMode",
+              "description": "Fallback command collision behavior when a child command omits merge.mode. Applied before the built-in replace fallback.",
+              "examples": [
+                "append"
+              ]
+            },
+            "maxDepth": {
+              "type": "integer",
+              "description": "Default maximum delegated command call depth.",
+              "default": 5,
+              "minimum": 1
+            }
+          }
         }
       }
     },
@@ -1975,6 +2465,11 @@
         }
       ],
       "properties": {
+        "dryRun": {
+          "type": "boolean",
+          "description": "Enables dry-run mode for push operations. This can be used to simulate pushes while leaving the global runtime mode unchanged.",
+          "default": false
+        },
         "enabled": {
           "type": "boolean",
           "description": "Enables or disables push globally.",

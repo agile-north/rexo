@@ -40,6 +40,28 @@ public static class SecretMasker
     }
 
     /// <summary>
+    /// Scans the current process environment and includes additional runtime-resolved secret values.
+    /// </summary>
+    public static IReadOnlySet<string> CollectSecretValues(IEnumerable<string>? additionalSecrets)
+    {
+        var secrets = new HashSet<string>(CollectSecretValues(), StringComparer.Ordinal);
+        if (additionalSecrets is null)
+        {
+            return secrets;
+        }
+
+        foreach (var value in additionalSecrets)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                secrets.Add(value);
+            }
+        }
+
+        return secrets;
+    }
+
+    /// <summary>
     /// Replaces each secret value that appears in <paramref name="text"/> with
     /// <c>***</c>. Returns the original string if the secret set is empty.
     /// </summary>

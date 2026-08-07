@@ -1,13 +1,20 @@
 # Configuration Reference
 
 For embedded templates, built-in lifecycle defaults, options, and usage examples,
-see [Embedded Policies Reference](../../embedded/README.md).
+see [Embedded Policies Reference](../embedded/README.md).
 
 For runtime builtin contracts (inputs, calls, outputs, exit behavior),
-see [Builtins Reference](../../builtins/README.md).
+see [Builtins Reference](../builtins/README.md).
 
 For machine-readable CLI output and sidecar run-manifest fields,
 see [Output Contract](./output-contract.md).
+
+For a focused CI output emission quick reference, see [CI Output Emission](./ci-output-emission.md).
+
+For detailed run-step container wrapping behavior (scope, defaults, env precedence,
+fallback, and validation), see [Containerized Run Steps](./containerized-run.md).
+
+For CLI config overrides, see [CLI Overrides](./overrides.md).
 
 Default repository configuration file: **`rexo.json`**
 
@@ -36,6 +43,11 @@ Every config file (`rexo.json`/`rexo.yml`) must begin with:
 
 The loader validates against the embedded schema (or a local `rexo.schema.json`) via NJsonSchema before
 deserializing. Missing/unsupported metadata or schema violations cause a hard failure.
+
+To temporarily bypass rexo schema validation during local experimentation, set
+`REXO_DISABLE_SCHEMA_VALIDATION=true` before running Rexo. When enabled, metadata
+checks (`$schema`, `schemaVersion`) and NJsonSchema validation are skipped for rexo
+configuration loading.
 
 Policy files (`policy.json`/`policy.yml`) follow the same contract, using:
 
@@ -70,6 +82,7 @@ When `rx init --schema-source local --with-policy` is used, both schema files ar
   "aliases": { ... },
   "versioning": { ... },
   "artifacts": [ ... ],
+  "secrets": { ... },
   "runtime": { ... },
   "tests": { ... },
   "analysis": { ... }
@@ -182,6 +195,14 @@ stacked *on top of* `embedded:standard` so both the shared lifecycle commands (`
 ```json
 { "extends": ["embedded:standard", "embedded:dotnet-api"] }
 ```
+If you want generic git tag creation on push, stack `embedded:git-tag` alongside `embedded:standard`:
+
+```json
+{ "extends": ["embedded:standard", "embedded:git-tag"] }
+```
+
+The shared embedded policies compose by command name. The order in `extends` controls
+the final command sequence and any merged option metadata.
 
 This is what `rx init` generates automatically when `--with-policy` is used with a
 recognized policy template that is not `standard`.
@@ -239,7 +260,8 @@ Detailed reference for each config section:
 
 - [Commands](commands.md) — Define command workflows with options, args, and steps
 - [Versioning](versioning.md) — Configure version providers and auto-detection
-- [Artifacts](../../artifacts/README.md) — Configure artifact build/tag/push workflows
+- [Artifacts](../artifacts/README.md) — Configure artifact build/tag/push workflows
+- [Secrets](secrets.md) — Configure first-class secret providers and named secret items
 - [Runtime](runtime.md) — Configure output, push policy, tests, and analysis settings
 - [Template Variables](templates.md) — Use dynamic variables in step commands
 

@@ -89,7 +89,7 @@ Each step uses exactly one of:
 | `{{version.semVer}}` | Resolved semantic version |
 | `{{steps.<id>.output.<key>}}` | Output from a completed step |
 
-Filters: `| slug`, `| upper`, `| lower`, `| default(fallback)`
+Filters: `| slug`, `| upper`, `| lower`, `| default(fallback)`, `| coalesce(a, b, 'fallback')`; coalescing operator: `??`
 
 ### Versioning
 
@@ -126,6 +126,7 @@ rx explain <command>         # show description, args, options, and steps
 rx config sources            # show which config files were loaded
 rx config resolved           # show the final merged config as JSON
 rx doctor                    # check tool and provider availability
+rx secrets doctor            # validate configured secret resolution safely
 ```
 
 

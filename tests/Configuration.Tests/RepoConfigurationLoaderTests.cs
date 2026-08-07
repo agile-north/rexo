@@ -141,7 +141,61 @@ public sealed class RepoConfigurationLoaderTests
     }
   }
 
-  [Fact]
+    [Fact]
+    public async Task LoadAsyncParsesStructuredCiScopeSelectors()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"rexo-ci-scope-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+
+        var configPath = Path.Combine(dir, "rexo.json");
+        await File.WriteAllTextAsync(configPath, """
+          {
+            "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+            "schemaVersion": "1.0",
+            "name": "sample",
+            "commands": {
+              "build": {
+                "description": "Build",
+                "options": {},
+                "steps": [
+                  { "run": "echo hello" }
+                ]
+              }
+            },
+            "aliases": {},
+            "outputs": {
+              "ci": {
+                "emit": true,
+                "github-actions": {
+                  "scope": "output"
+                },
+                "emitEmptyValues": true,
+                "scope": {
+                  "mode": "full",
+                  "include": ["repoName", "version.*"],
+                  "exclude": ["regex:^version\\.secret.*"]
+                }
+              }
+            }
+          }
+          """);
+
+        try
+        {
+            var config = await RepoConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
+
+            Assert.True(config.Outputs?.Ci?.Emit);
+            Assert.Equal("output", config.Outputs?.Ci?.GitHubActions?.Scope);
+            Assert.True(config.Outputs?.Ci?.EmitEmptyValues);
+            Assert.Equal(JsonValueKind.Object, config.Outputs?.Ci?.Scope?.ValueKind);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
   public async Task LoadAsyncParsesStructuredPushRules()
   {
     var dir = Path.Combine(Path.GetTempPath(), $"rexo-push-rules-{Guid.NewGuid():N}");
@@ -330,6 +384,46 @@ public sealed class RepoConfigurationLoaderTests
         finally
         {
             File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task LoadAsyncSkipsSchemaValidationWhenEnvVarEnabled()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"repo-{Guid.NewGuid():N}.json");
+        var previous = Environment.GetEnvironmentVariable(RepoConfigurationLoader.DisableSchemaValidationEnvVar);
+        await File.WriteAllTextAsync(path, """
+        {
+          "$schema": "https://example.com/repo.schema.json",
+          "schemaVersion": "2.0",
+          "name": "sample",
+          "commands": {
+            "release": {
+              "options": {},
+              "steps": [
+                { "run": "echo hi" }
+              ]
+            }
+          },
+          "aliases": {}
+        }
+        """);
+
+        try
+        {
+            Environment.SetEnvironmentVariable(RepoConfigurationLoader.DisableSchemaValidationEnvVar, "true");
+            var config = await RepoConfigurationLoader.LoadAsync(path, CancellationToken.None);
+
+            Assert.Equal("sample", config.Name);
+            Assert.True(config.Commands!.ContainsKey("release"));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(RepoConfigurationLoader.DisableSchemaValidationEnvVar, previous);
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
         }
     }
 
@@ -887,16 +981,61 @@ public sealed class RepoConfigurationLoaderTests
     }
   }
 
-  [Fact]
-  public async Task LoadAsyncEmbeddedStandardThenDotnetSuppressesDotnetBuildLayer()
-  {
-    // standard.build has no same-name continuation step, so the layer default means
-    // dotnet.build steps are NOT merged into the resolved build command.
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-embedded-standard-dotnet-{Guid.NewGuid():N}");
-    Directory.CreateDirectory(dir);
+    [Fact]
+    public async Task LoadAsyncGitTagPolicyAddsPostPushCommand()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"rexo-git-tag-post-push-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
 
-    var configPath = Path.Combine(dir, "rexo.json");
-    await File.WriteAllTextAsync(configPath, """
+        var configPath = Path.Combine(dir, "rexo.json");
+        await File.WriteAllTextAsync(configPath, """
+      {
+        "$schema": "rexo.schema.json",
+        "schemaVersion": "1.0",
+        "name": "extended-sample",
+        "extends": ["embedded:git-tag"]
+      }
+      """);
+
+        await File.WriteAllTextAsync(Path.Combine(dir, "rexo.schema.json"), """
+      {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": ["$schema", "schemaVersion", "name"]
+      }
+      """);
+
+        try
+        {
+            var config = await RepoConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
+            var postPush = config.Commands!["post-push"];
+            var before = postPush.Before ?? [];
+            var stepIds = postPush.Steps.Select(step => step.Id).ToArray();
+
+            Assert.Contains("remote", postPush.Options.Keys);
+            Assert.Contains("force", postPush.Options.Keys);
+            Assert.Single(before);
+            Assert.Equal("resolve-version", before[0].Id);
+            Assert.Equal(1, stepIds.Count(id => string.Equals(id, "tag-exists", StringComparison.OrdinalIgnoreCase)));
+            Assert.Equal(1, stepIds.Count(id => string.Equals(id, "delete-existing-tag", StringComparison.OrdinalIgnoreCase)));
+            Assert.Equal(1, stepIds.Count(id => string.Equals(id, "create-tag", StringComparison.OrdinalIgnoreCase)));
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task LoadAsyncEmbeddedStandardThenDotnetComposesBuildViaStandardContinuation()
+    {
+        // standard.build includes a same-name continuation step, so dotnet.build is
+        // inlined between version resolution and artifact tagging.
+        var dir = Path.Combine(Path.GetTempPath(), $"rexo-embedded-standard-dotnet-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+
+        var configPath = Path.Combine(dir, "rexo.json");
+        await File.WriteAllTextAsync(configPath, """
       {
         "$schema": "rexo.schema.json",
         "schemaVersion": "1.0",
@@ -918,22 +1057,18 @@ public sealed class RepoConfigurationLoaderTests
       var config = await RepoConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
       var build = config.Commands!["build"];
 
-      // dotnet-build must NOT appear — standard.build has no continuation for build
-      Assert.False(
-          build.Steps.Exists(s => string.Equals(s.Id, "dotnet-build", StringComparison.OrdinalIgnoreCase)),
-          "dotnet-build should NOT be included: standard.build has no same-name continuation step (layer default)");
-
-      // standard lifecycle steps must still be present
-      Assert.True(
-          build.Steps.Exists(s => string.Equals(s.Id, "build-artifacts", StringComparison.OrdinalIgnoreCase)),
-          "build-artifacts step from standard should be present");
-      Assert.True(
-          build.Steps.Exists(s => string.Equals(s.Id, "tag-artifacts", StringComparison.OrdinalIgnoreCase)),
-          "tag-artifacts step from standard should be present");
-    }
-    finally
-    {
-      Directory.Delete(dir, true);
+            Assert.Equal(7, build.Steps.Count);
+            Assert.Equal("validate", build.Steps[0].Id);
+            Assert.Equal("version", build.Steps[1].Id);
+            Assert.Equal("dotnet-build", build.Steps[2].Id);
+            Assert.Equal("pre-build", build.Steps[3].Id);
+            Assert.Equal("build-artifacts", build.Steps[4].Id);
+            Assert.Equal("tag-artifacts", build.Steps[5].Id);
+            Assert.Equal("post-build", build.Steps[6].Id);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
     }
   }
 
@@ -981,13 +1116,13 @@ public sealed class RepoConfigurationLoaderTests
   [Fact]
   public async Task LoadAsyncEmbeddedStandardThenDotnetReleaseCallsBuildNotDotnetBuild()
   {
-    // When release -> build (cross-command call), it should execute standard.build, not dotnet.build
-    // This tests that different-name command calls start from the first layer, not continue current layer
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-embedded-standard-dotnet-release-{Guid.NewGuid():N}");
-    Directory.CreateDirectory(dir);
+        // When release -> build (cross-command call), it should execute the resolved build command,
+        // including the dotnet overlay inserted into the standard continuation point.
+        var dir = Path.Combine(Path.GetTempPath(), $"rexo-embedded-standard-dotnet-release-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
 
-    var configPath = Path.Combine(dir, "rexo.json");
-    await File.WriteAllTextAsync(configPath, """
+        var configPath = Path.Combine(dir, "rexo.json");
+        await File.WriteAllTextAsync(configPath, """
       {
         "$schema": "rexo.schema.json",
         "schemaVersion": "1.0",
@@ -1010,13 +1145,12 @@ public sealed class RepoConfigurationLoaderTests
       var build = config.Commands!["build"];
       var release = config.Commands!["release"];
 
-      // verify build is standard-only (no dotnet-build)
-      Assert.False(
-          build.Steps.Exists(s => string.Equals(s.Id, "dotnet-build", StringComparison.OrdinalIgnoreCase)),
-          "build should not include dotnet-build with layer mode");
+            Assert.True(
+              build.Steps.Exists(s => string.Equals(s.Id, "dotnet-build", StringComparison.OrdinalIgnoreCase)),
+              "build should include dotnet-build when standard exposes a continuation step");
 
-      // verify release exists with build step
-      Assert.True(
+            // verify release exists with build step
+            Assert.True(
           release.Steps.Exists(s => string.Equals(s.Id, "build", StringComparison.OrdinalIgnoreCase) && s.Command == "build"),
           "release should have a build command step");
 
@@ -1177,6 +1311,236 @@ public sealed class RepoConfigurationLoaderTests
   }
 
   [Fact]
+  public async Task LoadAsyncParsesCommandHooksAndMaxDepth()
+  {
+    var dir = Path.Combine(Path.GetTempPath(), $"rexo-hooks-depth-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(dir);
+
+    var configPath = Path.Combine(dir, "rexo.json");
+    await File.WriteAllTextAsync(configPath, """
+      {
+        "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+        "schemaVersion": "1.0",
+        "name": "sample",
+        "runtime": {
+          "commands": {
+            "maxDepth": 7
+          }
+        },
+        "commands": {
+          "release": {
+            "hidden": true,
+            "maxDepth": 3,
+            "before": "gh",
+            "after": [
+              { "id": "post-release", "command": "notify" }
+            ],
+            "steps": [
+              { "id": "main", "uses": "builtin:resolve-version" }
+            ]
+          }
+        },
+        "aliases": {}
+      }
+      """);
+
+    try
+    {
+      var config = await RepoConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
+      var release = config.Commands!["release"];
+
+      Assert.Equal(7, config.Runtime?.Commands?.MaxDepth);
+      Assert.True(release.Hidden);
+      Assert.Equal(3, release.MaxDepth);
+
+      var before = Assert.Single(release.Before ?? []);
+      Assert.Equal("gh", before.Command);
+
+      var after = Assert.Single(release.After ?? []);
+      Assert.Equal("post-release", after.Id);
+      Assert.Equal("notify", after.Command);
+    }
+    finally
+    {
+      Directory.Delete(dir, true);
+    }
+  }
+
+    [Fact]
+    public async Task LoadAsyncAppliesRuntimeCommandDefaultMergeModeAppend()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"rexo-default-merge-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+
+        await File.WriteAllTextAsync(Path.Combine(dir, "rexo.schema.json"), """
+      {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": ["$schema", "schemaVersion", "name"]
+      }
+      """);
+
+        await File.WriteAllTextAsync(Path.Combine(dir, "base.json"), """
+      {
+        "$schema": "rexo.schema.json",
+        "schemaVersion": "1.0",
+        "name": "base",
+        "commands": {
+          "build": {
+            "steps": [
+              { "id": "base-build", "run": "echo base" }
+            ]
+          }
+        }
+      }
+      """);
+
+        var childPath = Path.Combine(dir, "repo.json");
+        await File.WriteAllTextAsync(childPath, """
+      {
+        "$schema": "rexo.schema.json",
+        "schemaVersion": "1.0",
+        "name": "child",
+        "extends": ["base.json"],
+        "runtime": {
+          "commands": {
+            "defaultMergeMode": "append"
+          }
+        },
+        "commands": {
+          "build": {
+            "steps": [
+              { "id": "child-build", "run": "echo child" }
+            ]
+          }
+        }
+      }
+      """);
+
+        try
+        {
+            var config = await RepoConfigurationLoader.LoadAsync(childPath, CancellationToken.None);
+
+            Assert.Equal("append", config.Runtime?.Commands?.DefaultMergeMode);
+            Assert.True(config.Commands!.ContainsKey("build"));
+
+            var build = config.Commands["build"];
+            Assert.Equal(2, build.Steps.Count);
+            Assert.Equal("base-build", build.Steps[0].Id);
+            Assert.Equal("child-build", build.Steps[1].Id);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task LoadAsyncParsesRunStepContainer()
+    {
+    var dir = Path.Combine(Path.GetTempPath(), $"rexo-step-container-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(dir);
+
+    var configPath = Path.Combine(dir, "rexo.json");
+    await File.WriteAllTextAsync(configPath, """
+      {
+        "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+        "schemaVersion": "1.0",
+        "name": "sample",
+        "commands": {
+          "build": {
+            "steps": [
+              {
+                "id": "container-step",
+                "run": "dotnet --info",
+                "container": {
+                  "image": "mcr.microsoft.com/dotnet/sdk:10.0",
+                  "workingDirectory": "/work",
+                  "entrypoint": "dotnet",
+                  "dockerfile": "Dockerfile",
+                  "context": ".",
+                  "build": {
+                    "target": "publish",
+                    "args": {
+                      "APP_VERSION": "1.2.3"
+                    }
+                  },
+                  "env": {
+                    "DOTNET_CLI_TELEMETRY_OPTOUT": "1"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "aliases": {}
+      }
+      """);
+
+    try
+    {
+      var config = await RepoConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
+      var step = Assert.Single(config.Commands!["build"].Steps);
+
+      Assert.NotNull(step.Container);
+      Assert.Equal("mcr.microsoft.com/dotnet/sdk:10.0", step.Container?.Image);
+      Assert.Equal("/work", step.Container?.WorkingDirectory);
+      Assert.Equal("dotnet", step.Container?.Entrypoint);
+      Assert.Equal("Dockerfile", step.Container?.Dockerfile);
+      Assert.Equal(".", step.Container?.Context);
+      Assert.Equal("publish", step.Container?.Build?.Target);
+      Assert.Equal("1.2.3", step.Container?.Build?.Args?["APP_VERSION"]);
+      Assert.Equal("1", step.Container?.Env?["DOTNET_CLI_TELEMETRY_OPTOUT"]);
+    }
+    finally
+    {
+      Directory.Delete(dir, true);
+    }
+  }
+
+  [Fact]
+  public async Task LoadAsyncRejectsContainerOnUsesStep()
+  {
+    var dir = Path.Combine(Path.GetTempPath(), $"rexo-step-container-invalid-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(dir);
+
+    var configPath = Path.Combine(dir, "rexo.json");
+    await File.WriteAllTextAsync(configPath, """
+      {
+        "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+        "schemaVersion": "1.0",
+        "name": "sample",
+        "commands": {
+          "release": {
+            "steps": [
+              {
+                "id": "invalid-container-uses",
+                "uses": "builtin:resolve-version",
+                "container": {
+                  "image": "mcr.microsoft.com/dotnet/sdk:10.0"
+                }
+              }
+            ]
+          }
+        },
+        "aliases": {}
+      }
+      """);
+
+    try
+    {
+      var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+          RepoConfigurationLoader.LoadAsync(configPath, CancellationToken.None));
+
+      Assert.Contains("does not match", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+    finally
+    {
+      Directory.Delete(dir, true);
+    }
+  }
+
+  [Fact]
   public async Task LoadAsyncRejectsInvalidCommandMergeValue()
   {
     var dir = Path.Combine(Path.GetTempPath(), $"rexo-invalid-merge-{Guid.NewGuid():N}");
@@ -1228,18 +1592,62 @@ public sealed class RepoConfigurationLoaderTests
   }
 
   [Fact]
-  public void EmbeddedTemplateNamesIncludesDotnetAndNode()
-  {
-    var names = EmbeddedPolicyTemplates.TemplateNames;
-    Assert.Contains("dotnet", names);
-    Assert.Contains("node", names);
-    Assert.DoesNotContain("dotnet-library", names);
-    Assert.DoesNotContain("dotnet-api", names);
-  }
+    public void EmbeddedTemplateNamesIncludesCurrentEmbeddedTemplates()
+    {
+        var names = EmbeddedPolicyTemplates.TemplateNames;
 
-  [Fact]
-  public void EmbeddedNodeTemplateHasExpectedCommands()
-  {
+        Assert.Contains("standard", names);
+        Assert.Contains("dotnet", names);
+        Assert.Contains("git-tag", names);
+        Assert.Contains("node", names);
+        Assert.Contains("none", names);
+        Assert.DoesNotContain("github-status", names);
+        Assert.DoesNotContain("github-sarif", names);
+        Assert.DoesNotContain("gitlab-status", names);
+        Assert.DoesNotContain("github-release", names);
+        Assert.DoesNotContain("dotnet-library", names);
+        Assert.DoesNotContain("dotnet-api", names);
+    }
+
+    [Fact]
+    public void EmbeddedGitTagTemplateProvidesPostPushCommand()
+    {
+        using var document = JsonDocument.Parse(EmbeddedPolicyTemplates.ReadTemplate("git-tag"));
+        var root = document.RootElement;
+        var commands = root.GetProperty("commands");
+
+        Assert.True(commands.TryGetProperty("post-push", out var command));
+        Assert.Equal("append", command.GetProperty("merge").GetString());
+
+        var before = command.GetProperty("before");
+        Assert.Equal(1, before.GetArrayLength());
+        Assert.Equal("resolve-version", before[0].GetProperty("id").GetString());
+
+        var steps = command.GetProperty("steps");
+        Assert.Equal(3, steps.GetArrayLength());
+        Assert.Equal("tag-exists", steps[0].GetProperty("id").GetString());
+        Assert.Equal("delete-existing-tag", steps[1].GetProperty("id").GetString());
+        Assert.Equal("create-tag", steps[2].GetProperty("id").GetString());
+        Assert.Contains("git tag", steps[2].GetProperty("run").GetString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EmbeddedGitTagPostPushTemplatesUseAppendMerge()
+    {
+        string[] templates = ["git-tag"];
+
+        foreach (var templateName in templates)
+        {
+            using var document = JsonDocument.Parse(EmbeddedPolicyTemplates.ReadTemplate(templateName));
+            var command = document.RootElement.GetProperty("commands").GetProperty("post-push");
+
+            Assert.Equal("append", command.GetProperty("merge").GetString());
+        }
+    }
+
+    [Fact]
+    public void EmbeddedNodeTemplateHasExpectedCommands()
+    {
     using var document = JsonDocument.Parse(EmbeddedPolicyTemplates.ReadTemplate("node"));
     var root = document.RootElement;
     var commands = root.GetProperty("commands");

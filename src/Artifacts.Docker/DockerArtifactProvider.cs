@@ -37,7 +37,7 @@ public sealed class DockerArtifactProvider : IArtifactProvider
     {
         try
         {
-            var dotEnv = RepositoryEnvironmentFiles.Load(context.RepositoryRoot);
+            var dotEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
             var settings = ResolveBuildSettings(artifact, dotEnv, context);
             var tags = BuildTags(settings.Image, artifact, context);
             var primaryTag = context.Version is not null
@@ -49,7 +49,8 @@ public sealed class DockerArtifactProvider : IArtifactProvider
 
             try
             {
-                var auth = await PrepareDockerAuthAsync(settings, context.RepositoryRoot, dotEnv, cancellationToken);
+                var ciInferenceEnabled = FeedAuthResolver.IsArtifactCiInferenceEnabled(artifact.Settings);
+                var auth = await PrepareDockerAuthAsync(settings, context.RepositoryRoot, dotEnv, ciInferenceEnabled, cancellationToken);
                 if (!auth.Success)
                 {
                     return new ArtifactBuildResult(artifact.Name, false, null);
@@ -70,7 +71,10 @@ public sealed class DockerArtifactProvider : IArtifactProvider
 
                 if (settings.CleanupLocal && tags.Count > 0)
                 {
-                    await CleanupLocalImagesAsync(tags, context.RepositoryRoot, envOverrides, cancellationToken);
+                    if (!ShouldPush(settings, context, out _))
+                    {
+                        await CleanupLocalImagesAsync(tags, context.RepositoryRoot, envOverrides, cancellationToken);
+                    }
                 }
 
                 return new ArtifactBuildResult(
@@ -95,7 +99,7 @@ public sealed class DockerArtifactProvider : IArtifactProvider
         ExecutionContext context,
         CancellationToken cancellationToken)
     {
-        var dotEnv = RepositoryEnvironmentFiles.Load(context.RepositoryRoot);
+        var dotEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
         var settings = ResolveBuildSettings(artifact, dotEnv, context);
         var image = settings.Image;
         var tags = BuildTags(image, artifact, context);
@@ -122,7 +126,7 @@ public sealed class DockerArtifactProvider : IArtifactProvider
 
     public IReadOnlyList<string> GetPlannedTags(ArtifactConfig artifact, ExecutionContext context)
     {
-        var dotEnv = RepositoryEnvironmentFiles.Load(context.RepositoryRoot);
+        var dotEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
         var settings = ResolveBuildSettings(artifact, dotEnv, context);
         return BuildTags(settings.Image, artifact, context);
     }
@@ -134,7 +138,7 @@ public sealed class DockerArtifactProvider : IArtifactProvider
     {
         try
         {
-            var dotEnv = RepositoryEnvironmentFiles.Load(context.RepositoryRoot);
+            var dotEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
             var settings = ResolveBuildSettings(artifact, dotEnv, context);
             var image = settings.Image;
             var tags = BuildTags(image, artifact, context);
@@ -145,14 +149,24 @@ public sealed class DockerArtifactProvider : IArtifactProvider
             if (!ShouldPush(settings, context, out var skipReason))
             {
                 Console.WriteLine($"  Skipping docker push for '{artifact.Name}': {skipReason}");
+                if (settings.CleanupLocal && tags.Count > 0)
+                {
+                    await CleanupLocalImagesAsync(tags, context.RepositoryRoot, envOverrides, cancellationToken);
+                }
                 return new ArtifactPushResult(artifact.Name, true, Array.Empty<string>());
             }
 
             try
             {
-                var auth = await PrepareDockerAuthAsync(settings, context.RepositoryRoot, dotEnv, cancellationToken);
+                var ciInferenceEnabled = FeedAuthResolver.IsArtifactCiInferenceEnabled(artifact.Settings);
+                var auth = await PrepareDockerAuthAsync(settings, context.RepositoryRoot, dotEnv, ciInferenceEnabled, cancellationToken);
                 if (!auth.Success)
                 {
+                    if (settings.CleanupLocal && tags.Count > 0)
+                    {
+                        await CleanupLocalImagesAsync(tags, context.RepositoryRoot, envOverrides, cancellationToken);
+                    }
+
                     return new ArtifactPushResult(artifact.Name, false, Array.Empty<string>());
                 }
 
@@ -170,6 +184,10 @@ public sealed class DockerArtifactProvider : IArtifactProvider
             finally
             {
                 CleanupDockerConfigDirectory(tempDockerConfig);
+                if (settings.CleanupLocal && tags.Count > 0)
+                {
+                    await CleanupLocalImagesAsync(tags, context.RepositoryRoot, envOverrides, cancellationToken);
+                }
             }
 
             return new ArtifactPushResult(artifact.Name, pushed.Count > 0, pushed);
@@ -256,13 +274,15 @@ public sealed class DockerArtifactProvider : IArtifactProvider
         DockerBuildSettings settings,
         string workingDirectory,
         IReadOnlyDictionary<string, string> dotEnv,
+        bool ciInferenceEnabled,
         CancellationToken cancellationToken)
     {
         var envOverrides = BuildEnvironmentOverrides(dotEnv);
         var auth = FeedAuthResolver.ResolveDocker(
             configuredRegistry: settings.LoginRegistry,
             inferredRegistry: InferRegistryFromImage(settings.Image),
-            fileEnv: dotEnv);
+            fileEnv: dotEnv,
+            ciInferenceEnabled: ciInferenceEnabled);
 
         if (!string.IsNullOrWhiteSpace(auth.Error))
         {
@@ -272,6 +292,11 @@ public sealed class DockerArtifactProvider : IArtifactProvider
 
         if (!auth.HasCredentials)
         {
+            if (FeedAuthResolver.ShouldWarnOnMissingContainerRegistryCredentials(auth.Endpoint, dotEnv))
+            {
+                Console.WriteLine($"  Warning: no Docker login credentials resolved for '{auth.Endpoint}'. Push may fail unless the registry allows anonymous access.");
+            }
+
             return (true, envOverrides.Count > 0 ? envOverrides : null, null);
         }
 
@@ -598,6 +623,7 @@ public sealed class DockerArtifactProvider : IArtifactProvider
 
     private static string ResolveImage(ArtifactConfig artifact, IReadOnlyDictionary<string, string> dotEnv)
     {
+        var ciInferenceEnabled = FeedAuthResolver.IsArtifactCiInferenceEnabled(artifact.Settings);
         var explicitImage = GetStringSetting(artifact.Settings, "image");
         if (!string.IsNullOrWhiteSpace(explicitImage))
         {
@@ -609,14 +635,101 @@ public sealed class DockerArtifactProvider : IArtifactProvider
         var repository = GetEnvironmentValue("DOCKER_TARGET_REPOSITORY", dotEnv)
             ?? GetStringSetting(artifact.Settings, "target.repository", "repository");
 
-        if (!string.IsNullOrWhiteSpace(registry) && !string.IsNullOrWhiteSpace(repository))
+        var normalizedRegistry = !string.IsNullOrWhiteSpace(registry)
+            ? NormalizeRegistry(registry)
+            : null;
+
+        if (ciInferenceEnabled
+            && !string.IsNullOrWhiteSpace(normalizedRegistry)
+            && string.IsNullOrWhiteSpace(repository))
         {
-            var normalizedRegistry = NormalizeRegistry(registry);
+            repository = TryResolveImplicitRepository(normalizedRegistry, artifact.Name, dotEnv);
+        }
+
+        if (!string.IsNullOrWhiteSpace(normalizedRegistry) && !string.IsNullOrWhiteSpace(repository))
+        {
             var normalizedRepository = NormalizeRepository(repository);
             return $"{normalizedRegistry}/{normalizedRepository}";
         }
 
+        if (ciInferenceEnabled)
+        {
+            var gitHubCiImage = TryResolveGitHubActionsImage(artifact.Name, dotEnv);
+            if (!string.IsNullOrWhiteSpace(gitHubCiImage))
+            {
+                return gitHubCiImage;
+            }
+
+            var gitLabCiImage = TryResolveGitLabCiImage(artifact.Name, dotEnv);
+            if (!string.IsNullOrWhiteSpace(gitLabCiImage))
+            {
+                return gitLabCiImage;
+            }
+        }
+
         return artifact.Name;
+    }
+
+    private static string? TryResolveImplicitRepository(
+        string normalizedRegistry,
+        string artifactName,
+        IReadOnlyDictionary<string, string> dotEnv)
+    {
+        if (string.Equals(normalizedRegistry, "ghcr.io", StringComparison.OrdinalIgnoreCase))
+        {
+            var githubActions = FeedAuthResolver.GetEnv("GITHUB_ACTIONS", dotEnv);
+            var githubRepository = FeedAuthResolver.GetEnv("GITHUB_REPOSITORY", dotEnv);
+            if (string.Equals(githubActions, "true", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(githubRepository))
+            {
+                return NormalizeRepository($"{githubRepository}/{artifactName}");
+            }
+        }
+
+        var gitLabRegistry = FeedAuthResolver.ExtractRegistryHost(FeedAuthResolver.GetEnv("CI_REGISTRY", dotEnv));
+        var gitLabProjectPath = FeedAuthResolver.GetEnv("CI_PROJECT_PATH", dotEnv);
+        if (!string.IsNullOrWhiteSpace(gitLabRegistry)
+            && string.Equals(normalizedRegistry, gitLabRegistry, StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(gitLabProjectPath))
+        {
+            return NormalizeRepository($"{gitLabProjectPath}/{artifactName}");
+        }
+
+        return null;
+    }
+
+    private static string? TryResolveGitLabCiImage(
+        string artifactName,
+        IReadOnlyDictionary<string, string> dotEnv)
+    {
+        var gitLabCi = FeedAuthResolver.GetEnv("GITLAB_CI", dotEnv);
+        var gitLabRegistry = FeedAuthResolver.GetEnv("CI_REGISTRY", dotEnv);
+        var gitLabProjectPath = FeedAuthResolver.GetEnv("CI_PROJECT_PATH", dotEnv);
+
+        if (!string.Equals(gitLabCi, "true", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(gitLabRegistry)
+            || string.IsNullOrWhiteSpace(gitLabProjectPath))
+        {
+            return null;
+        }
+
+        return $"{NormalizeRegistry(gitLabRegistry)}/{NormalizeRepository($"{gitLabProjectPath}/{artifactName}")}";
+    }
+
+    private static string? TryResolveGitHubActionsImage(
+        string artifactName,
+        IReadOnlyDictionary<string, string> dotEnv)
+    {
+        var githubActions = FeedAuthResolver.GetEnv("GITHUB_ACTIONS", dotEnv);
+        var githubRepository = FeedAuthResolver.GetEnv("GITHUB_REPOSITORY", dotEnv);
+
+        if (!string.Equals(githubActions, "true", StringComparison.OrdinalIgnoreCase)
+            || string.IsNullOrWhiteSpace(githubRepository))
+        {
+            return null;
+        }
+
+        return $"ghcr.io/{NormalizeRepository($"{githubRepository}/{artifactName}")}";
     }
 
     private static string NormalizeRegistry(string value)
@@ -962,19 +1075,19 @@ public sealed class DockerArtifactProvider : IArtifactProvider
     private static string FormatMajorMinorTag(VersionResult version, BuildClassification classification)
     {
         var value = $"{version.Major}.{version.Minor}";
-        if (!string.IsNullOrWhiteSpace(version.PreRelease))
+        if (!string.IsNullOrWhiteSpace(version.PreReleaseLabel))
         {
-            return value + "-" + version.PreRelease;
+            return value + "-" + version.PreReleaseLabel;
         }
 
-        return classification == BuildClassification.NonPublic && string.IsNullOrWhiteSpace(version.PreRelease)
+        return classification == BuildClassification.NonPublic && string.IsNullOrWhiteSpace(version.PreReleaseLabel)
             ? value + "-pre"
             : value;
     }
 
     private static string FormatMajorTag(VersionResult version) =>
-        !string.IsNullOrWhiteSpace(version.PreRelease)
-            ? $"{version.Major}-{version.PreRelease}"
+        !string.IsNullOrWhiteSpace(version.PreReleaseLabel)
+            ? $"{version.Major}-{version.PreReleaseLabel}"
             : version.Major.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     private static bool BranchMatches(string pattern, string branch)
@@ -1318,16 +1431,42 @@ public sealed class DockerArtifactProvider : IArtifactProvider
             process.StandardInput.Close();
         }
 
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
-        await process.WaitForExitAsync(cancellationToken);
-        var stdout = await stdoutTask;
-        var stderr = await stderrTask;
+        var stdoutBuffer = new StringBuilder();
+        var stderrBuffer = new StringBuilder();
 
-        if (!string.IsNullOrWhiteSpace(stdout)) Console.WriteLine(stdout);
-        if (!string.IsNullOrWhiteSpace(stderr)) Console.Error.WriteLine(stderr);
+        var stdoutTask = ReadStreamAsync(
+            process.StandardOutput,
+            stdoutBuffer,
+            line => Console.WriteLine(line),
+            cancellationToken);
+        var stderrTask = ReadStreamAsync(
+            process.StandardError,
+            stderrBuffer,
+            line => Console.Error.WriteLine(line),
+            cancellationToken);
+
+        await process.WaitForExitAsync(cancellationToken);
+        await stdoutTask;
+        await stderrTask;
+
+        var stdout = stdoutBuffer.ToString();
+        var stderr = stderrBuffer.ToString();
 
         return (process.ExitCode, stdout + stderr);
+    }
+
+    private static async Task ReadStreamAsync(
+        TextReader reader,
+        StringBuilder buffer,
+        Action<string> onLine,
+        CancellationToken cancellationToken)
+    {
+        string? line;
+        while ((line = await reader.ReadLineAsync(cancellationToken)) is not null)
+        {
+            buffer.AppendLine(line);
+            onLine(line);
+        }
     }
 
     private static string? GetSetting(ArtifactConfig artifact, string key) =>

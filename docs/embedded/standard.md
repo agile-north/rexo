@@ -59,11 +59,13 @@ Steps:
 3. `command:test` (when present)
 4. `command:analyze` (when present)
 5. `command:security` (when present)
+6. `command:post-verify` (when present; always runs after hard failures)
 
 Notes:
 
 - User-facing `verify` always includes `builtin:validate` first.
 - There is no dedicated core verify builtin; quality-gate behavior is policy-composed.
+- Reporting hooks that must run after verification failures belong in `post-verify`.
 
 ### build
 
@@ -73,8 +75,15 @@ Steps:
 
 1. `builtin:validate`
 2. `builtin:resolve-version`
-3. `builtin:build-artifacts`
-4. `builtin:tag-artifacts`
+3. `command:build` (overlay continuation, skipped when no inner layer contributes steps)
+4. `builtin:build-artifacts`
+5. `builtin:tag-artifacts`
+6. `command:post-build` (when present; always runs after hard failures)
+
+Notes:
+
+- Toolchain overlays such as `embedded:dotnet` and `embedded:node` inject their build steps at the continuation point.
+- When no overlay contributes steps, the continuation marker is skipped successfully.
 
 ### tag
 
@@ -113,6 +122,7 @@ Steps:
 4. `builtin:build-artifacts`
 5. `builtin:tag-artifacts`
 6. `builtin:push-artifacts` when `{{options.push}}`, with `with.confirm = {{options.push}}`
+7. `command:post-release` (when present; always runs after hard failures)
 
 ### clean
 

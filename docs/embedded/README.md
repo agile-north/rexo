@@ -20,7 +20,13 @@ Rexo ships lifecycle policies as embedded resources in the CLI assembly
 Current embedded policies:
 
 - [standard](standard.md) — General lifecycle commands (`build`, `test`, `verify`, `release`, `push`, etc.)
-- [dotnet](dotnet.md) — Dotnet-focused command surface with `restore`, `format`, `ci` helpers
+- [dotnet](dotnet.md) — Dotnet-focused command surface with `restore`, `build`, `test`, `analyze`, `format`, `release` helpers
+- [git-tag](git-tag.md) — Generic git tag creation for versioned repositories
+
+The `post-push` template in this family is intentionally composable by name. It uses
+`merge: append`, so the `extends` order determines the final step sequence and merged
+options. Keep `embedded:standard` first, then add `embedded:git-tag` when you want
+version tagging as part of the composed flow.
 
 Embedded policies are never applied implicitly.
 
@@ -52,6 +58,7 @@ Design intent:
 - Repo config says what this repo emits (artifacts, versioning, outputs, vars).
 - Embedded policy says how this repo behaves (lifecycle command shape).
 - `embedded:standard` is the recommended lifecycle baseline when you want policy-provided commands.
+- `embedded:standard`'s `build` command includes a continuation point so toolchain overlays can slot their build step between version resolution and artifact packaging.
 
 ## Policy Selection Guidance
 
@@ -71,6 +78,7 @@ Choose `embedded:dotnet` when:
 
 - [standard](standard.md) — lifecycle commands, plan/verify/build/release/push
 - [dotnet](dotnet.md) — dotnet-specific commands, restore/format/ci/pack with optional var-driven customization
+- [git-tag](git-tag.md) — generic git tag creation for versioned repositories
 
 ## Builtins Used By Embedded Templates
 

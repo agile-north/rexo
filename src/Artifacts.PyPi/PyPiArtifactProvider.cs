@@ -61,7 +61,7 @@ public sealed class PyPiArtifactProvider : IArtifactProvider
         var distDir = GetSetting(artifact, "dist-dir") ?? "dist/*";
         var dockerImage = ResolveDockerImage(artifact);
 
-        var fileEnv = RepositoryEnvironmentFiles.Load(context.RepositoryRoot);
+        var fileEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
         var repositoryUrl = ResolveRepositoryUrl(artifact, fileEnv);
         var auth = ResolveAuth(artifact, repositoryUrl, fileEnv);
         IReadOnlyDictionary<string, string?>? envOverrides = auth.HasCredentials
@@ -147,6 +147,7 @@ public sealed class PyPiArtifactProvider : IArtifactProvider
         string? repositoryUrl,
         IReadOnlyDictionary<string, string> fileEnv)
     {
+        var ciInferenceEnabled = FeedAuthResolver.IsArtifactCiInferenceEnabled(artifact.Settings);
         var apiToken = FeedAuthResolver.ResolveSecret(
             defaultEnvName: "TWINE_API_TOKEN",
             configuredEnvName: GetSetting(artifact, "target.apiTokenEnv"),
@@ -170,16 +171,14 @@ public sealed class PyPiArtifactProvider : IArtifactProvider
             return new FeedAuthResolution(true, username, password, repositoryUrl, null, "env");
         }
 
-        // Azure Artifacts CI-native fallback.
-        if (!string.IsNullOrWhiteSpace(repositoryUrl) &&
-            (repositoryUrl.Contains(".pkgs.visualstudio.com", StringComparison.OrdinalIgnoreCase) ||
-             repositoryUrl.Contains("pkgs.dev.azure.com", StringComparison.OrdinalIgnoreCase)))
+        var azureFallback = FeedAuthResolver.ResolveAzureArtifactsTokenAuth(
+            endpoint: repositoryUrl,
+            fileEnv: fileEnv,
+            username: "VssSessionToken",
+            ciInferenceEnabled: ciInferenceEnabled);
+        if (azureFallback.HasCredentials)
         {
-            var accessToken = Environment.GetEnvironmentVariable("SYSTEM_ACCESSTOKEN");
-            if (!string.IsNullOrWhiteSpace(accessToken))
-            {
-                return new FeedAuthResolution(true, "VssSessionToken", accessToken, repositoryUrl, null, "ci-token");
-            }
+            return azureFallback;
         }
 
         return new FeedAuthResolution(false, null, null, repositoryUrl, null, "none");

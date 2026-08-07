@@ -77,6 +77,57 @@ public sealed class NuGetArtifactProviderTests
     }
 
     [Fact]
+    public async Task PushAsyncUsesMappedSecretEnvironmentForApiKey()
+    {
+        const string mappedKeyName = "MY_FEED_API_KEY";
+        var originalMapped = Environment.GetEnvironmentVariable(mappedKeyName);
+        Environment.SetEnvironmentVariable(mappedKeyName, null);
+
+        try
+        {
+            var invocations = new List<string>();
+            var provider = new NuGetArtifactProvider(
+                runDotnetAsync: (arguments, workingDirectory, cancellationToken) =>
+                {
+                    invocations.Add(arguments);
+                    return Task.FromResult((0, string.Empty));
+                });
+
+            var artifact = new ArtifactConfig(
+                "nuget",
+                "Rexo.Core",
+                JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                    """
+                    {
+                      "output": "artifacts/packages",
+                      "target": {
+                        "source": "https://api.nuget.org/v3/index.json",
+                        "apiKeyEnv": "MY_FEED_API_KEY"
+                      }
+                    }
+                    """)!);
+
+            var context = ExecutionContext.Empty(Path.GetTempPath()) with
+            {
+                MappedSecretEnvironment = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    [mappedKeyName] = "mapped-secret-value",
+                },
+            };
+
+            var result = await provider.PushAsync(artifact, context, CancellationToken.None);
+
+            Assert.True(result.Success);
+            Assert.Single(invocations);
+            Assert.Contains("--api-key mapped-secret-value", invocations[0], StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(mappedKeyName, originalMapped);
+        }
+    }
+
+    [Fact]
     public async Task PushAsyncUsesTargetSourceWhenEnvironmentSourceIsNotSet()
     {
         const string sourceEnvName = "NUGET_TARGET_SOURCE";
@@ -522,6 +573,150 @@ public sealed class NuGetArtifactProviderTests
             {
                 Directory.Delete(repositoryRoot, recursive: true);
             }
+        }
+    }
+
+    [Fact]
+    public async Task PushAsyncUsesGithubTokenForGitHubPackagesWhenApiKeyMissing()
+    {
+        const string sourceEnvName = "NUGET_TARGET_SOURCE";
+        const string keyEnvName = "NUGET_API_KEY";
+        const string githubTokenVar = "GITHUB_TOKEN";
+        var originalSource = Environment.GetEnvironmentVariable(sourceEnvName);
+        var originalApiKey = Environment.GetEnvironmentVariable(keyEnvName);
+        var originalGitHubToken = Environment.GetEnvironmentVariable(githubTokenVar);
+
+        Environment.SetEnvironmentVariable(sourceEnvName, "https://nuget.pkg.github.com/acme/index.json");
+        Environment.SetEnvironmentVariable(keyEnvName, null);
+        Environment.SetEnvironmentVariable(githubTokenVar, "gh-token");
+
+        try
+        {
+            var invocations = new List<string>();
+            var provider = new NuGetArtifactProvider(
+                runDotnetAsync: (arguments, workingDirectory, cancellationToken) =>
+                {
+                    invocations.Add(arguments);
+                    return Task.FromResult((0, string.Empty));
+                });
+
+            var artifact = new ArtifactConfig(
+                "nuget",
+                "Rexo.Core",
+                JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                    """
+                    {
+                      "output": "artifacts/packages"
+                    }
+                    """)!);
+
+            var result = await provider.PushAsync(artifact, ExecutionContext.Empty(Path.GetTempPath()), CancellationToken.None);
+
+            Assert.True(result.Success);
+            Assert.Single(invocations);
+            Assert.Contains("--api-key gh-token", invocations[0], StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(sourceEnvName, originalSource);
+            Environment.SetEnvironmentVariable(keyEnvName, originalApiKey);
+            Environment.SetEnvironmentVariable(githubTokenVar, originalGitHubToken);
+        }
+    }
+
+    [Fact]
+    public async Task PushAsyncUsesSystemAccessTokenForAzureArtifactsWhenApiKeyMissing()
+    {
+        const string sourceEnvName = "NUGET_TARGET_SOURCE";
+        const string keyEnvName = "NUGET_API_KEY";
+        const string systemAccessTokenVar = "SYSTEM_ACCESSTOKEN";
+        var originalSource = Environment.GetEnvironmentVariable(sourceEnvName);
+        var originalApiKey = Environment.GetEnvironmentVariable(keyEnvName);
+        var originalSystemAccessToken = Environment.GetEnvironmentVariable(systemAccessTokenVar);
+
+        Environment.SetEnvironmentVariable(sourceEnvName, "https://pkgs.dev.azure.com/acme/_packaging/shared/nuget/v3/index.json");
+        Environment.SetEnvironmentVariable(keyEnvName, null);
+        Environment.SetEnvironmentVariable(systemAccessTokenVar, "az-token");
+
+        try
+        {
+            var invocations = new List<string>();
+            var provider = new NuGetArtifactProvider(
+                runDotnetAsync: (arguments, workingDirectory, cancellationToken) =>
+                {
+                    invocations.Add(arguments);
+                    return Task.FromResult((0, string.Empty));
+                });
+
+            var artifact = new ArtifactConfig(
+                "nuget",
+                "Rexo.Core",
+                JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                    """
+                    {
+                      "output": "artifacts/packages"
+                    }
+                    """)!);
+
+            var result = await provider.PushAsync(artifact, ExecutionContext.Empty(Path.GetTempPath()), CancellationToken.None);
+
+            Assert.True(result.Success);
+            Assert.Single(invocations);
+            Assert.Contains("--api-key az-token", invocations[0], StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(sourceEnvName, originalSource);
+            Environment.SetEnvironmentVariable(keyEnvName, originalApiKey);
+            Environment.SetEnvironmentVariable(systemAccessTokenVar, originalSystemAccessToken);
+        }
+    }
+
+    [Fact]
+    public async Task PushAsyncUsesGitLabCiJobTokenForGitLabNuGetEndpointWhenApiKeyMissing()
+    {
+        const string sourceEnvName = "NUGET_TARGET_SOURCE";
+        const string keyEnvName = "NUGET_API_KEY";
+        const string ciJobTokenVar = "CI_JOB_TOKEN";
+        var originalSource = Environment.GetEnvironmentVariable(sourceEnvName);
+        var originalApiKey = Environment.GetEnvironmentVariable(keyEnvName);
+        var originalCiJobToken = Environment.GetEnvironmentVariable(ciJobTokenVar);
+
+        Environment.SetEnvironmentVariable(sourceEnvName, "https://gitlab.com/api/v4/projects/123/packages/nuget/index.json");
+        Environment.SetEnvironmentVariable(keyEnvName, null);
+        Environment.SetEnvironmentVariable(ciJobTokenVar, "gl-token");
+
+        try
+        {
+            var invocations = new List<string>();
+            var provider = new NuGetArtifactProvider(
+                runDotnetAsync: (arguments, workingDirectory, cancellationToken) =>
+                {
+                    invocations.Add(arguments);
+                    return Task.FromResult((0, string.Empty));
+                });
+
+            var artifact = new ArtifactConfig(
+                "nuget",
+                "Rexo.Core",
+                JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                    """
+                    {
+                      "output": "artifacts/packages"
+                    }
+                    """)!);
+
+            var result = await provider.PushAsync(artifact, ExecutionContext.Empty(Path.GetTempPath()), CancellationToken.None);
+
+            Assert.True(result.Success);
+            Assert.Single(invocations);
+            Assert.Contains("--api-key gl-token", invocations[0], StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(sourceEnvName, originalSource);
+            Environment.SetEnvironmentVariable(keyEnvName, originalApiKey);
+            Environment.SetEnvironmentVariable(ciJobTokenVar, originalCiJobToken);
         }
     }
 }

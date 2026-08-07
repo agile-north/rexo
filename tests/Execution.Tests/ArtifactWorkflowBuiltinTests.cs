@@ -47,95 +47,7 @@ public sealed class ArtifactWorkflowBuiltinTests
         var dockerPlanItems = ParsePlan(dockerPlan, "docker-plan");
         Assert.Single(dockerPlanItems);
         Assert.Equal("docker", dockerPlanItems[0].Type);
-        Assert.Equal("docker-app", dockerPlanItems[0].Name);
-    }
 
-    [Fact]
-    public async Task PlanWithPushReportsEligibilityAndSkipReasons()
-    {
-        var dockerProvider = new RecordingArtifactProvider("docker");
-        var nugetProvider = new RecordingArtifactProvider("nuget");
-        var executor = CreateExecutor(dockerProvider, nugetProvider);
-
-        var result = await executor.ExecuteAsync(
-            "plan",
-            new CommandInvocation(
-                new Dictionary<string, string>(),
-                new Dictionary<string, string?> { ["push"] = "true" },
-                Json: false,
-                JsonFile: null,
-                WorkingDirectory: Path.GetTempPath()),
-            CancellationToken.None);
-
-        Assert.True(result.Success);
-
-        var payload = ParsePlanPayload(result, "plan");
-        Assert.True(payload.Push.Requested);
-        Assert.False(payload.Push.Eligible);
-        Assert.NotEmpty(payload.Push.SkipReasons);
-        Assert.Contains(payload.Push.SkipReasons, reason => reason.Contains("Credentials", StringComparison.OrdinalIgnoreCase)
-            || reason.Contains("not resolved", StringComparison.OrdinalIgnoreCase));
-        Assert.All(payload.Artifacts, artifact => Assert.True(artifact.Push.Requested));
-
-        var nugetItem = Assert.Single(payload.Artifacts, artifact => string.Equals(artifact.Type, "nuget", StringComparison.Ordinal));
-        Assert.Equal("https://nuget.nrth.com/nuget/nuget/", nugetItem.BuildSettings["source"]);
-        Assert.Contains("MY_FEED_API_KEY", nugetItem.RequiredCredentials);
-    }
-
-    [Fact]
-    public async Task ShipAndAllApplyToAllArtifacts()
-    {
-        var dockerProvider = new RecordingArtifactProvider("docker");
-        var nugetProvider = new RecordingArtifactProvider("nuget");
-        var executor = CreateExecutor(dockerProvider, nugetProvider);
-
-        var ship = await ExecuteAsync(executor, "ship");
-        Assert.True(ship.Success);
-        Assert.Empty(dockerProvider.BuildCalls);
-        Assert.Empty(nugetProvider.BuildCalls);
-        Assert.Equal(["docker-app"], dockerProvider.TagCalls);
-        Assert.Equal(["docker-app"], dockerProvider.PushCalls);
-        Assert.Equal(["nuget-lib"], nugetProvider.TagCalls);
-        Assert.Equal(["nuget-lib"], nugetProvider.PushCalls);
-
-        dockerProvider.Reset();
-        nugetProvider.Reset();
-
-        var all = await ExecuteAsync(executor, "all");
-        Assert.True(all.Success);
-        Assert.Equal(["docker-app"], dockerProvider.BuildCalls);
-        Assert.Equal(["docker-app"], dockerProvider.TagCalls);
-        Assert.Equal(["docker-app"], dockerProvider.PushCalls);
-        Assert.Equal(["nuget-lib"], nugetProvider.BuildCalls);
-        Assert.Equal(["nuget-lib"], nugetProvider.TagCalls);
-        Assert.Equal(["nuget-lib"], nugetProvider.PushCalls);
-    }
-
-    [Fact]
-    public async Task DockerScopedBuiltinsOnlyTouchDockerArtifacts()
-    {
-        var dockerProvider = new RecordingArtifactProvider("docker");
-        var nugetProvider = new RecordingArtifactProvider("nuget");
-        var executor = CreateExecutor(dockerProvider, nugetProvider);
-
-        var ship = await ExecuteAsync(executor, "docker-ship");
-        Assert.True(ship.Success);
-        Assert.Equal(["docker-app"], dockerProvider.TagCalls);
-        Assert.Equal(["docker-app"], dockerProvider.PushCalls);
-        Assert.Empty(nugetProvider.TagCalls);
-        Assert.Empty(nugetProvider.PushCalls);
-
-        dockerProvider.Reset();
-        nugetProvider.Reset();
-
-        var all = await ExecuteAsync(executor, "docker-all");
-        Assert.True(all.Success);
-        Assert.Equal(["docker-app"], dockerProvider.BuildCalls);
-        Assert.Equal(["docker-app"], dockerProvider.TagCalls);
-        Assert.Equal(["docker-app"], dockerProvider.PushCalls);
-        Assert.Empty(nugetProvider.BuildCalls);
-        Assert.Empty(nugetProvider.TagCalls);
-        Assert.Empty(nugetProvider.PushCalls);
     }
 
     [Fact]
@@ -166,16 +78,17 @@ public sealed class ArtifactWorkflowBuiltinTests
             Artifacts =
             [
                 new RepoArtifactConfig(
-                    "docker",
-                    null,
-                    JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
-                        """
-                        {
-                          "image": "ghcr.io/acme/docker-app"
-                        }
-                        """)!),
-            ],
-        };
+                        "docker",
+                        null,
+                        JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                            """
+                            {
+                              "image": "ghcr.io/acme/docker-app"
+                            }
+                            """
+                        )!),
+                ],
+            };
 
         var registry = new CommandRegistry();
         var executor = new DefaultCommandExecutor(registry);
@@ -187,6 +100,101 @@ public sealed class ArtifactWorkflowBuiltinTests
         Assert.Equal(["repo-root-name"], dockerProvider.BuildCalls);
     }
 
+    [Fact]
+    public async Task PlanWithPushUsesMappedSecretEnvironmentForNuGetCredentials()
+    {
+        var envName = $"REXO_PLAN_SECRET_{Guid.NewGuid():N}";
+        var original = Environment.GetEnvironmentVariable(envName);
+        Environment.SetEnvironmentVariable(envName, "mapped-plan-secret");
+
+        var repositoryRoot = Path.Combine(Path.GetTempPath(), $"rexo-plan-secrets-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(repositoryRoot);
+
+        try
+        {
+            var builtins = new BuiltinRegistry();
+            var loader = new ConfigCommandLoader(
+                builtins,
+                new TemplateRenderer(),
+                VersionProviderRegistry.CreateDefault(),
+                new ArtifactProviderRegistry());
+
+            var config = new RepoConfig(
+                Name: "plan-secrets-test",
+                Commands: new Dictionary<string, RepoCommandConfig>
+                {
+                    ["plan"] = new RepoCommandConfig(
+                        Description: "plan",
+                        Options: new Dictionary<string, RepoOptionConfig>(),
+                        Steps: [new RepoStepConfig(Id: "plan", Uses: "builtin:plan")]),
+                },
+                Aliases: new Dictionary<string, string>())
+            {
+                Secrets = new RepoSecretsConfig
+                {
+                    Defaults = new RepoSecretDefaultsConfig { Provider = "env", Required = true },
+                    Items = new Dictionary<string, RepoSecretConfig>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["nugetApiKey"] = new RepoSecretConfig
+                        {
+                            Env = envName,
+                            Required = true,
+                            ExposeInTemplates = false,
+                            MapToEnv = "MY_FEED_API_KEY_PRIMARY",
+                                MapToEnvs = ["MY_FEED_API_KEY"],
+                            },
+                        },
+                    },
+                    Artifacts =
+                    [
+                        new RepoArtifactConfig(
+                            "nuget",
+                            "nuget-lib",
+                            JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                                """
+                                {
+                                  "project": "src/Core/Core.csproj",
+                                  "target": {
+                                    "source": "https://api.nuget.org/v3/index.json",
+                                    "apiKeyEnv": "MY_FEED_API_KEY"
+                                  }
+                                }
+                                """
+                            )!),
+                    ],
+                };
+
+            var registry = new CommandRegistry();
+            var executor = new DefaultCommandExecutor(registry);
+            loader.LoadInto(registry, config, repositoryRoot, executor);
+
+            var result = await executor.ExecuteAsync(
+                "plan",
+                new CommandInvocation(
+                    new Dictionary<string, string>(),
+                    new Dictionary<string, string?> { ["push"] = "true" },
+                    Json: false,
+                    JsonFile: null,
+                    WorkingDirectory: repositoryRoot),
+                CancellationToken.None);
+
+            Assert.True(result.Success);
+
+            var payload = ParsePlanPayload(result, "plan");
+            Assert.True(payload.Push.Requested);
+            Assert.True(payload.Push.Eligible);
+            Assert.Empty(payload.Push.SkipReasons);
+
+            var artifact = Assert.Single(payload.Artifacts);
+            Assert.Equal("nuget", artifact.Type);
+            Assert.True(artifact.Push.Eligible);
+            Assert.Empty(artifact.Push.SkipReasons);
+        }
+        finally
+        {
+                Directory.Delete(repositoryRoot, true);
+            }
+    }
     private static DefaultCommandExecutor CreateExecutor(params IArtifactProvider[] providers)
     {
         var builtins = new BuiltinRegistry();

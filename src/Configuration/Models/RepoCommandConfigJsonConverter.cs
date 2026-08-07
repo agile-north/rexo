@@ -16,9 +16,13 @@ internal sealed class RepoCommandConfigJsonConverter : JsonConverter<RepoCommand
 
         var command = new RepoCommandConfig(description, optionsValue, steps)
         {
+            Hidden = ReadOptionalBool(root, "hidden"),
             Args = ReadOptionalObject<Dictionary<string, RepoArgConfig>>(root, "args", options),
             StepOps = ReadOptionalObject<RepoCommandStepOpsConfig>(root, "stepOps", options),
             MaxParallel = ReadOptionalInt(root, "maxParallel"),
+            Before = ReadOptionalHookSteps(root, "before", options),
+            After = ReadOptionalHookSteps(root, "after", options),
+            MaxDepth = ReadOptionalInt(root, "maxDepth"),
         };
 
         if (!root.TryGetProperty("merge", out var mergeElement))
@@ -45,6 +49,11 @@ internal sealed class RepoCommandConfigJsonConverter : JsonConverter<RepoCommand
         if (!string.IsNullOrEmpty(value.Description))
         {
             writer.WriteString("description", value.Description);
+        }
+
+        if (value.Hidden.HasValue)
+        {
+            writer.WriteBoolean("hidden", value.Hidden.Value);
         }
 
         writer.WritePropertyName("options");
@@ -78,6 +87,23 @@ internal sealed class RepoCommandConfigJsonConverter : JsonConverter<RepoCommand
         if (value.MaxParallel.HasValue)
         {
             writer.WriteNumber("maxParallel", value.MaxParallel.Value);
+        }
+
+        if (value.Before is { Count: > 0 })
+        {
+            writer.WritePropertyName("before");
+            JsonSerializer.Serialize(writer, value.Before, options);
+        }
+
+        if (value.After is { Count: > 0 })
+        {
+            writer.WritePropertyName("after");
+            JsonSerializer.Serialize(writer, value.After, options);
+        }
+
+        if (value.MaxDepth.HasValue)
+        {
+            writer.WriteNumber("maxDepth", value.MaxDepth.Value);
         }
 
         writer.WriteEndObject();
@@ -114,5 +140,43 @@ internal sealed class RepoCommandConfigJsonConverter : JsonConverter<RepoCommand
         }
 
         return element.GetInt32();
+    }
+
+    private static bool? ReadOptionalBool(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var element) ||
+            element.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        return element.ValueKind switch
+        {
+            JsonValueKind.True or JsonValueKind.False => element.GetBoolean(),
+            JsonValueKind.String when bool.TryParse(element.GetString(), out var parsed) => parsed,
+            _ => throw new JsonException($"The '{propertyName}' property must be a boolean or boolean string."),
+        };
+    }
+
+    private static List<RepoStepConfig>? ReadOptionalHookSteps(
+        JsonElement root,
+        string propertyName,
+        JsonSerializerOptions options)
+    {
+        if (!root.TryGetProperty(propertyName, out var element) ||
+            element.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        return element.ValueKind switch
+        {
+            JsonValueKind.String =>
+            [
+                new RepoStepConfig(Command: element.GetString()),
+            ],
+            JsonValueKind.Array => JsonSerializer.Deserialize<List<RepoStepConfig>>(element.GetRawText(), options),
+            _ => throw new JsonException($"The '{propertyName}' property must be a string, array, or null."),
+        };
     }
 }

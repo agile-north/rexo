@@ -73,7 +73,7 @@ public sealed class GradleArtifactProvider : IArtifactProvider
         var nativeExe = ResolveNativeExe(useWrapper, workDir);
         var dockerImage = ResolveDockerImage(artifact);
 
-        var fileEnv = RepositoryEnvironmentFiles.Load(context.RepositoryRoot);
+        var fileEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
         var auth = ResolveAuth(artifact, fileEnv);
         IReadOnlyDictionary<string, string?>? envOverrides = auth.HasCredentials
             ? new Dictionary<string, string?>
@@ -164,6 +164,7 @@ public sealed class GradleArtifactProvider : IArtifactProvider
         ArtifactConfig artifact,
         IReadOnlyDictionary<string, string> fileEnv)
     {
+        var ciInferenceEnabled = FeedAuthResolver.IsArtifactCiInferenceEnabled(artifact.Settings);
         var username = FeedAuthResolver.ResolveSecret(
             defaultEnvName: "ORG_GRADLE_PROJECT_mavenUsername",
             configuredEnvName: GetSetting(artifact, "target.usernameEnv"),
@@ -189,6 +190,17 @@ public sealed class GradleArtifactProvider : IArtifactProvider
         if (!string.IsNullOrWhiteSpace(pluginKey) && !string.IsNullOrWhiteSpace(pluginSecret))
         {
             return new FeedAuthResolution(true, pluginKey, pluginSecret, null, null, "env");
+        }
+
+        var azureFallback = FeedAuthResolver.ResolveAzureArtifactsTokenAuth(
+            endpoint: null,
+            fileEnv: fileEnv,
+            username: "VssSessionToken",
+            allowWhenEndpointUnknown: true,
+            ciInferenceEnabled: ciInferenceEnabled);
+        if (azureFallback.HasCredentials)
+        {
+            return azureFallback;
         }
 
         return new FeedAuthResolution(false, null, null, null, null, "none");

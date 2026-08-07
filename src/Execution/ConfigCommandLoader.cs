@@ -7,11 +7,13 @@ using Rexo.Configuration.Models;
 using Rexo.Core.Abstractions;
 using Rexo.Core.Environment;
 using Rexo.Core.Models;
+using Rexo.Execution.Secrets;
 using Rexo.Versioning;
 
 public sealed class ConfigCommandLoader
 {
     private const string DefaultOutputRoot = "artifacts";
+    private const int DefaultMaxCommandDepth = 5;
     internal static readonly System.Text.Json.JsonSerializerOptions IndentedJsonOptions =
         new() { WriteIndented = true };
 
@@ -19,6 +21,7 @@ public sealed class ConfigCommandLoader
     private readonly ITemplateRenderer _templateRenderer;
     private readonly VersionProviderRegistry _versionProviders;
     private readonly Artifacts.ArtifactProviderRegistry _artifactProviders;
+    private readonly SecretProviderRegistry _secretProviders;
 
     internal VersionProviderRegistry VersionProviders => _versionProviders;
     internal Artifacts.ArtifactProviderRegistry ArtifactProviders => _artifactProviders;
@@ -30,12 +33,14 @@ public sealed class ConfigCommandLoader
         BuiltinRegistry builtinRegistry,
         ITemplateRenderer templateRenderer,
         VersionProviderRegistry versionProviders,
-        Artifacts.ArtifactProviderRegistry artifactProviders)
+        Artifacts.ArtifactProviderRegistry artifactProviders,
+        SecretProviderRegistry? secretProviders = null)
     {
         _builtinRegistry = builtinRegistry;
         _templateRenderer = templateRenderer;
         _versionProviders = versionProviders;
         _artifactProviders = artifactProviders;
+        _secretProviders = secretProviders ?? SecretProviderRegistry.CreateDefault();
     }
 
     public void LoadInto(
@@ -137,113 +142,181 @@ public sealed class ConfigCommandLoader
     {
         var emitRuntimeFiles = ShouldEmitRuntimeFiles(config);
         var outputRoot = ResolveOutputRoot(config);
+        var ciVariablePrefix = ResolveCiVariablePrefix(config);
         var normalizedCommandConfig = NormalizeCommandConfig(commandConfig);
+        var globalMaxDepth = config.Runtime?.Commands?.MaxDepth ?? DefaultMaxCommandDepth;
+        var invocationMaxDepth = invocation.MaxCommandDepth ?? int.MaxValue;
+        var effectiveMaxDepth = Math.Min(
+            invocationMaxDepth,
+            normalizedCommandConfig.MaxDepth ?? globalMaxDepth);
         var gitInfo = await Git.GitDetector.DetectAsync(repositoryRoot, cancellationToken);
         var ciInfo = CiDetector.Detect();
-
-        var context = new ExecutionContext(
-            repositoryRoot,
-            gitInfo.Branch,
-            gitInfo.CommitSha,
-            new Dictionary<string, object?>())
+        var fileEnvironment = RepositoryEnvironmentFiles.Load(repositoryRoot);
+        var secretResolver = new ConfigSecretResolver(config, fileEnvironment, _secretProviders);
+        var secretPreflight = await secretResolver.PreflightRequiredAsync(cancellationToken);
+        if (!secretPreflight.Success)
         {
-            ShortSha = gitInfo.ShortSha,
-            RemoteUrl = gitInfo.RemoteUrl,
-            IsCi = ciInfo.IsCi,
-            CiProvider = ciInfo.Provider,
-            IsPullRequest = ciInfo.IsPullRequest,
-            IsCleanWorkingTree = gitInfo.IsClean,
-            CiBuildId = ciInfo.BuildId,
-            CiRunNumber = ciInfo.RunNumber,
-            CiWorkflowName = ciInfo.WorkflowName,
-            CiActor = ciInfo.Actor,
-            CiTag = ciInfo.Tag,
-            CiBuildUrl = ciInfo.BuildUrl,
-            Args = invocation.Args,
-            Options = BuildOptionsWithDefaults(invocation.Options, normalizedCommandConfig),
-            FileEnvironment = RepositoryEnvironmentFiles.Load(repositoryRoot),
-            CommandCallStack = [.. invocation.CallStack, commandName],
-            ResolvedOutputs = BuildOutputsContext(config),
-            ResolvedSettings = BuildSettingsContext(config),
-            ResolvedVars = BuildVarsContext(config),
-        };
+            var firstError = secretPreflight.Errors.Count > 0
+                ? secretPreflight.Errors[0]
+                : null;
+            return new CommandResult(
+                commandName,
+                false,
+                9,
+                firstError?.Message ?? "Secret preflight failed.",
+                new Dictionary<string, object?>
+                {
+                    ["error"] = firstError?.Message ?? "Secret preflight failed.",
+                    ["errorCode"] = firstError?.Code ?? ErrorCodes.ConfigSchemaInvalid,
+                })
+            {
+                StructuredErrors = secretPreflight.Errors,
+            };
+        }
 
-        var stepExecutor = new StepExecutor(commandExecutor, _templateRenderer, _builtinRegistry);
-        var stepResults = new List<StepResult>();
-        var currentContext = context;
-        var artifactEntries = new List<Core.Models.ArtifactManifestEntry>();
-        var pushDecisionEntries = new List<Core.Models.PushDecision>();
-        CommandResult? failedResult = null;
+        var resolvedOutputs = BuildOutputsContext(config);
+        var createdOutputDirectories = emitRuntimeFiles
+            ? EnsureConfiguredOutputDirectories(repositoryRoot, resolvedOutputs)
+            : [];
 
-        // Group consecutive parallel steps; sequential steps are singleton groups
-        var stepGroups = GroupSteps(normalizedCommandConfig.Steps);
-
-        foreach (var group in stepGroups)
+        try
         {
-            List<(RepoStepConfig Config, StepResult Result)> executed;
-
-            if (group.Count == 1)
+            var context = new ExecutionContext(
+                repositoryRoot,
+                gitInfo.Branch,
+                gitInfo.CommitSha,
+                new Dictionary<string, object?>())
             {
-                var stepConfig = group[0];
-                var stepDef = BuildStepDefinition(stepConfig);
-                var stepResult = await stepExecutor.ExecuteAsync(stepDef, currentContext, cancellationToken);
-                stepResult = EnrichWithFileOutputs(stepDef, stepResult, currentContext, repositoryRoot, _templateRenderer);
-                executed = [(stepConfig, stepResult)];
+                ShortSha = gitInfo.ShortSha,
+                RemoteUrl = gitInfo.RemoteUrl,
+                IsCi = ciInfo.IsCi,
+                CiProvider = ciInfo.Provider,
+                IsPullRequest = ciInfo.IsPullRequest,
+                IsCleanWorkingTree = gitInfo.IsClean,
+                CiBuildId = ciInfo.BuildId,
+                CiRunNumber = ciInfo.RunNumber,
+                CiWorkflowName = ciInfo.WorkflowName,
+                CiActor = ciInfo.Actor,
+                CiTag = ciInfo.Tag,
+                CiBuildUrl = ciInfo.BuildUrl,
+                Args = invocation.Args,
+                Options = BuildOptionsWithDefaults(invocation.Options, normalizedCommandConfig),
+                FileEnvironment = fileEnvironment,
+                ResolvedSecrets = secretPreflight.ResolvedValues,
+                SecretMetadata = secretPreflight.Metadata,
+                MappedSecretEnvironment = secretPreflight.MappedEnvironment,
+                CiVariablePrefix = ciVariablePrefix,
+                IsDryRun = TryGetOptionBoolean(invocation.Options, "dry-run") == true,
+                CommandCallStack = [.. invocation.CallStack, commandName],
+                ResolvedOutputs = resolvedOutputs,
+                ResolvedSettings = BuildSettingsContext(config),
+                ResolvedVars = BuildVarsContext(config),
+                MaxCommandDepth = effectiveMaxDepth,
+            };
+
+            var stepExecutor = new StepExecutor(commandExecutor, _templateRenderer, _builtinRegistry);
+            var stepResults = new List<StepResult>();
+            var currentContext = context;
+            var artifactEntries = new List<Core.Models.ArtifactManifestEntry>();
+            var pushDecisionEntries = new List<Core.Models.PushDecision>();
+            var hardFailureSeen = false;
+            var firstFailureStepId = string.Empty;
+            var firstFailureExitCode = 0;
+
+            // Group consecutive parallel steps; sequential steps are singleton groups
+            var stepGroups = GroupSteps(normalizedCommandConfig.Steps);
+
+            foreach (var group in stepGroups)
+            {
+                var effectiveGroup = hardFailureSeen
+                    ? group.Where(step => step.AlwaysRun == true).ToList()
+                    : group;
+
+                if (effectiveGroup.Count == 0)
+                {
+                    continue;
+                }
+
+                List<(RepoStepConfig Config, StepResult Result)> executed;
+
+                if (effectiveGroup.Count == 1)
+                {
+                    var stepConfig = effectiveGroup[0];
+                    var stepDef = BuildStepDefinition(stepConfig, currentContext, _templateRenderer);
+                    var stepResult = await stepExecutor.ExecuteAsync(stepDef, currentContext, cancellationToken);
+                    stepResult = EnrichWithFileOutputs(stepDef, stepResult, currentContext, repositoryRoot, _templateRenderer);
+                    executed = [(stepConfig, stepResult)];
+                }
+                else
+                {
+                    executed = await ExecuteParallelGroupAsync(
+                        effectiveGroup,
+                        stepExecutor,
+                        currentContext,
+                        normalizedCommandConfig.MaxParallel,
+                        cancellationToken);
+                    // Enrich parallel results with file outputs
+                    var enriched = new List<(RepoStepConfig Config, StepResult Result)>(executed.Count);
+                    foreach (var (cfg, res) in executed)
+                    {
+                        var def = BuildStepDefinition(cfg, currentContext, _templateRenderer);
+                        enriched.Add((cfg, EnrichWithFileOutputs(def, res, currentContext, repositoryRoot, _templateRenderer)));
+                    }
+
+                    executed = enriched;
+                }
+
+                foreach (var (stepConfig, stepResult) in executed)
+                {
+                    stepResults.Add(stepResult);
+                    currentContext = currentContext.WithStep(stepResult);
+
+                    if (stepResult.Outputs.TryGetValue("__version", out var versionObj) &&
+                        versionObj is VersionResult versionResult)
+                    {
+                        currentContext = currentContext.WithVersion(versionResult);
+                    }
+
+                    if (stepResult.Outputs.TryGetValue("__artifacts", out var artifactsObj) &&
+                        artifactsObj is List<Core.Models.ArtifactManifestEntry> stepArtifacts)
+                    {
+                        artifactEntries.AddRange(stepArtifacts);
+                    }
+
+                    if (stepResult.Outputs.TryGetValue("__pushDecisions", out var decisionsObj) &&
+                        decisionsObj is List<Core.Models.PushDecision> stepDecisions)
+                    {
+                        pushDecisionEntries.AddRange(stepDecisions);
+                    }
+
+                    var hardFailure = !stepResult.Success && stepConfig.ContinueOnError != true;
+                    if (!hardFailureSeen && hardFailure)
+                    {
+                        hardFailureSeen = true;
+                        firstFailureStepId = stepResult.StepId;
+                        firstFailureExitCode = stepResult.ExitCode;
+                    }
+                }
             }
-            else
-            {
-                executed = await ExecuteParallelGroupAsync(
-                    group,
-                    stepExecutor,
-                    currentContext,
-                    normalizedCommandConfig.MaxParallel,
-                    cancellationToken);
-                // Enrich parallel results with file outputs
-                var enriched = new List<(RepoStepConfig Config, StepResult Result)>(executed.Count);
-                foreach (var (cfg, res) in executed)
-                {
-                    var def = BuildStepDefinition(cfg);
-                    enriched.Add((cfg, EnrichWithFileOutputs(def, res, currentContext, repositoryRoot, _templateRenderer)));
-                }
 
-                executed = enriched;
-            }
-
-            foreach (var (_, stepResult) in executed)
-            {
-                stepResults.Add(stepResult);
-                currentContext = currentContext.WithStep(stepResult);
-
-                if (stepResult.Outputs.TryGetValue("__version", out var versionObj) &&
-                    versionObj is VersionResult versionResult)
-                {
-                    currentContext = currentContext.WithVersion(versionResult);
-                }
-
-                if (stepResult.Outputs.TryGetValue("__artifacts", out var artifactsObj) &&
-                    artifactsObj is List<Core.Models.ArtifactManifestEntry> stepArtifacts)
-                {
-                    artifactEntries.AddRange(stepArtifacts);
-                }
-
-                if (stepResult.Outputs.TryGetValue("__pushDecisions", out var decisionsObj) &&
-                    decisionsObj is List<Core.Models.PushDecision> stepDecisions)
-                {
-                    pushDecisionEntries.AddRange(stepDecisions);
-                }
-            }
-
-            // Fail fast if any step failed and it doesn't have continueOnError
-            var failed = executed
-                .FirstOrDefault(t => !t.Result.Success && t.Config.ContinueOnError != true);
-
-            if (failed.Result is not null)
-            {
-                failedResult = new CommandResult(
+            var commandResult = hardFailureSeen
+                ? new CommandResult(
                     commandName,
                     false,
-                    failed.Result.ExitCode,
-                    $"Step '{failed.Result.StepId}' failed with exit code {failed.Result.ExitCode}.",
+                    firstFailureExitCode,
+                    $"Step '{firstFailureStepId}' failed with exit code {firstFailureExitCode}.",
+                    new Dictionary<string, object?>())
+                {
+                    Steps = stepResults,
+                    Version = currentContext.Version,
+                    Artifacts = artifactEntries,
+                    PushDecisions = pushDecisionEntries,
+                }
+                : new CommandResult(
+                    commandName,
+                    true,
+                    0,
+                    $"Command '{commandName}' completed successfully.",
                     new Dictionary<string, object?>())
                 {
                     Steps = stepResults,
@@ -251,29 +324,21 @@ public sealed class ConfigCommandLoader
                     Artifacts = artifactEntries,
                     PushDecisions = pushDecisionEntries,
                 };
-                break;
+
+            if (emitRuntimeFiles)
+            {
+                await WriteCommandManifestAsync(repositoryRoot, outputRoot, config, commandName, commandResult, cancellationToken);
+            }
+
+            return commandResult;
+        }
+        finally
+        {
+            if (emitRuntimeFiles)
+            {
+                CleanupConfiguredOutputDirectories(repositoryRoot, createdOutputDirectories);
             }
         }
-
-        var commandResult = failedResult ?? new CommandResult(
-            commandName,
-            true,
-            0,
-            $"Command '{commandName}' completed successfully.",
-            new Dictionary<string, object?>())
-        {
-            Steps = stepResults,
-            Version = currentContext.Version,
-            Artifacts = artifactEntries,
-            PushDecisions = pushDecisionEntries,
-        };
-
-        if (emitRuntimeFiles)
-        {
-            await WriteCommandManifestAsync(repositoryRoot, outputRoot, commandName, commandResult, cancellationToken);
-        }
-
-        return commandResult;
     }
 
     internal async Task<StepResult> BuildArtifactsAsync(
@@ -378,8 +443,9 @@ public sealed class ConfigCommandLoader
         var pushDecisions = new List<Core.Models.PushDecision>();
         var globalPolicy = ParsePushPolicyRules(config);
         var confirmRequested = ResolveConfirmRequested(ctx.Options);
+        var dryRun = ctx.IsDryRun;
 
-        if (!confirmRequested)
+        if (!confirmRequested && !dryRun)
         {
             foreach (var artifactCfg in artifacts)
             {
@@ -432,7 +498,24 @@ public sealed class ConfigCommandLoader
                 continue;
             }
 
-            var pushResult = await provider.PushAsync(ToArtifactConfig(artifactCfg, config, outputRoot), ctx, cancellationToken);
+            var artifactConfig = ToArtifactConfig(artifactCfg, config, outputRoot);
+            ArtifactPushResult pushResult;
+            if (dryRun)
+            {
+                Console.WriteLine($"  Dry run enabled: simulating push for '{artifactName}'.");
+                var simulatedReferences = provider.GetPlannedTags(artifactConfig, ctx).ToList();
+                if (simulatedReferences.Count == 0)
+                {
+                    simulatedReferences.Add($"{artifactName}:{ctx.Version?.SemVer ?? "latest"}");
+                }
+
+                pushResult = new ArtifactPushResult(artifactName, true, simulatedReferences);
+            }
+            else
+            {
+                pushResult = await provider.PushAsync(artifactConfig, ctx, cancellationToken);
+            }
+
             var pushPerformed = pushResult.PublishedReferences.Count > 0;
             manifestEntries.Add(new Core.Models.ArtifactManifestEntry(
                 artifactCfg.Type,
@@ -443,9 +526,11 @@ public sealed class ConfigCommandLoader
             pushDecisions.Add(new Core.Models.PushDecision(
                 artifactName,
                 pushResult.Success,
-                pushResult.Success
-                    ? (pushPerformed ? "Push succeeded." : "Push skipped.")
-                    : $"Failed to push artifact '{artifactName}'."));
+                dryRun
+                    ? "Dry run: push simulated."
+                    : pushResult.Success
+                        ? (pushPerformed ? "Push succeeded." : "Push skipped.")
+                        : $"Failed to push artifact '{artifactName}'."));
 
             if (!pushResult.Success)
             {
@@ -470,7 +555,7 @@ public sealed class ConfigCommandLoader
         return new StepResult(stepId, true, 0, TimeSpan.Zero,
             new Dictionary<string, object?>
             {
-                ["message"] = successMessage,
+                ["message"] = dryRun ? $"{successMessage} (dry run)" : successMessage,
                 ["__artifacts"] = manifestEntries,
                 ["__pushDecisions"] = pushDecisions,
             });
@@ -657,7 +742,7 @@ public sealed class ConfigCommandLoader
                 skipReasons.Add(reason);
             }
 
-            foreach (var credentialCheck in GetCredentialChecks(artifact, ctx.RepositoryRoot))
+            foreach (var credentialCheck in GetCredentialChecks(artifact, ctx.RepositoryRoot, ctx.MappedSecretEnvironment))
             {
                 if (!credentialCheck.Available)
                 {
@@ -726,38 +811,51 @@ public sealed class ConfigCommandLoader
     {
         return artifact.Type.ToLowerInvariant() switch
         {
-            "docker" => ["DOCKER_LOGIN_USERNAME", "DOCKER_LOGIN_PASSWORD", "DOCKER_LOGIN_REGISTRY", "GITHUB_ACTOR/GITHUB_TOKEN (for ghcr.io in GitHub Actions)"],
+            "docker" => ["DOCKER_LOGIN_USERNAME", "DOCKER_LOGIN_PASSWORD", "DOCKER_LOGIN_REGISTRY", "GITHUB_ACTOR/GITHUB_TOKEN (for ghcr.io in GitHub Actions)", "CI_REGISTRY_USER/CI_JOB_TOKEN (for GitLab Container Registry in GitLab CI)"],
             "nuget" => [$"{TryGetArtifactSettingString(artifact.Settings, "target.apiKeyEnv") ?? "NUGET_API_KEY"}", "NUGET_AUTH_TOKEN", "GITHUB_TOKEN or SYSTEM_ACCESSTOKEN (CI fallback)"],
-            "helm-oci" => ["HELM_REGISTRY_USERNAME", "HELM_REGISTRY_PASSWORD", "HELM_REGISTRY", "GITHUB_ACTOR/GITHUB_TOKEN (for ghcr.io in GitHub Actions)"],
+            "helm-oci" => ["HELM_REGISTRY_USERNAME", "HELM_REGISTRY_PASSWORD", "HELM_REGISTRY", "GITHUB_ACTOR/GITHUB_TOKEN (for ghcr.io in GitHub Actions)", "CI_REGISTRY_USER/CI_JOB_TOKEN (for GitLab Container Registry in GitLab CI)"],
             _ => Array.Empty<string>(),
         };
     }
 
-    private static IReadOnlyList<PlanCredentialCheck> GetCredentialChecks(RepoArtifactConfig artifact, string repositoryRoot)
+    private static IReadOnlyList<PlanCredentialCheck> GetCredentialChecks(
+        RepoArtifactConfig artifact,
+        string repositoryRoot,
+        IReadOnlyDictionary<string, string> mappedSecretEnvironment)
     {
-        var fileEnv = RepositoryEnvironmentFiles.Load(repositoryRoot);
+        var fileEnv = Artifacts.FeedAuthResolver.OverlayMappedEnvironment(
+            RepositoryEnvironmentFiles.Load(repositoryRoot),
+            mappedSecretEnvironment);
+        var ciInferenceEnabled = IsArtifactCiInferenceEnabled(artifact.Settings);
 
         return artifact.Type.ToLowerInvariant() switch
         {
             "docker" =>
             [
                 ToPlanCredentialCheck(Artifacts.FeedAuthResolver.ResolveDocker(
-                    TryGetArtifactSettingString(artifact.Settings, "loginRegistry"),
+                    TryGetArtifactSettingString(artifact.Settings, "loginRegistry")
+                    ?? TryGetArtifactSettingString(artifact.Settings, "target.loginRegistry")
+                    ?? TryGetArtifactSettingString(artifact.Settings, "target.registry"),
                     InferDockerRegistry(TryGetArtifactSettingString(artifact.Settings, "image")),
-                    fileEnv))
+                    fileEnv,
+                    ciInferenceEnabled: ciInferenceEnabled))
             ],
             "nuget" =>
             [
                 ToPlanCredentialCheck(ResolvePlanNuGetAuth(
                     TryGetArtifactSettingString(artifact.Settings, "target.source") ?? "https://api.nuget.org/v3/index.json",
                     TryGetArtifactSettingString(artifact.Settings, "target.apiKeyEnv"),
-                    fileEnv))
+                    fileEnv,
+                    ciInferenceEnabled))
             ],
             "helm-oci" =>
             [
                 ToPlanCredentialCheck(ResolvePlanHelmOciAuth(
-                    TryGetArtifactSettingString(artifact.Settings, "registry"),
-                    fileEnv))
+                    TryGetArtifactSettingString(artifact.Settings, "target.loginRegistry")
+                    ?? TryGetArtifactSettingString(artifact.Settings, "target.registry")
+                    ?? Artifacts.FeedAuthResolver.ExtractRegistryHost(TryGetArtifactSettingString(artifact.Settings, "target.oci")),
+                    fileEnv,
+                    ciInferenceEnabled))
             ],
             _ => Array.Empty<PlanCredentialCheck>(),
         };
@@ -775,7 +873,8 @@ public sealed class ConfigCommandLoader
     private static Artifacts.FeedAuthResolution ResolvePlanNuGetAuth(
         string source,
         string? configuredApiKeyEnv,
-        IReadOnlyDictionary<string, string> fileEnv)
+        IReadOnlyDictionary<string, string> fileEnv,
+        bool ciInferenceEnabled)
     {
         var envName = string.IsNullOrWhiteSpace(configuredApiKeyEnv) ? "NUGET_API_KEY" : configuredApiKeyEnv;
         var secret = Artifacts.FeedAuthResolver.GetEnv(envName, fileEnv)
@@ -783,6 +882,11 @@ public sealed class ConfigCommandLoader
 
         if (string.IsNullOrWhiteSpace(secret))
         {
+            if (!ciInferenceEnabled)
+            {
+                return new Artifacts.FeedAuthResolution(false, null, null, source, null, "none");
+            }
+
             secret = source.Contains("nuget.pkg.github.com", StringComparison.OrdinalIgnoreCase)
                 ? Environment.GetEnvironmentVariable("GITHUB_TOKEN")
                 : Environment.GetEnvironmentVariable("SYSTEM_ACCESSTOKEN");
@@ -800,35 +904,38 @@ public sealed class ConfigCommandLoader
 
     private static Artifacts.FeedAuthResolution ResolvePlanHelmOciAuth(
         string? configuredRegistry,
-        IReadOnlyDictionary<string, string> fileEnv)
+        IReadOnlyDictionary<string, string> fileEnv,
+        bool ciInferenceEnabled)
     {
         var username = Artifacts.FeedAuthResolver.GetEnv("HELM_REGISTRY_USERNAME", fileEnv);
         var secret = Artifacts.FeedAuthResolver.GetEnv("HELM_REGISTRY_PASSWORD", fileEnv);
         var endpoint = Artifacts.FeedAuthResolver.GetEnv("HELM_REGISTRY", fileEnv) ?? configuredRegistry;
 
-        if (string.IsNullOrWhiteSpace(username) && string.IsNullOrWhiteSpace(secret))
+        if (string.IsNullOrWhiteSpace(endpoint))
         {
-            if (!string.IsNullOrWhiteSpace(endpoint) &&
-                endpoint.Contains("ghcr.io", StringComparison.OrdinalIgnoreCase))
-            {
-                var actor = Environment.GetEnvironmentVariable("GITHUB_ACTOR");
-                var token = Environment.GetEnvironmentVariable("GITHUB_TOKEN");
-                if (!string.IsNullOrWhiteSpace(actor) && !string.IsNullOrWhiteSpace(token))
-                {
-                    return new Artifacts.FeedAuthResolution(true, actor, token, endpoint, null, "github-token");
-                }
-            }
-
-            return new Artifacts.FeedAuthResolution(false, null, null, endpoint, null, "none");
+            endpoint = Artifacts.FeedAuthResolver.ResolveImplicitContainerRegistry(fileEnv, ciInferenceEnabled);
         }
 
-        if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(secret))
+        return Artifacts.FeedAuthResolver.FinalizeContainerRegistryAuth(
+            username,
+            secret,
+            endpoint,
+            fileEnv,
+            "HELM_REGISTRY_USERNAME and HELM_REGISTRY_PASSWORD must both be set.",
+            "Helm login registry could not be determined. Set settings.target.loginRegistry or HELM_REGISTRY.",
+            ciInferenceEnabled);
+    }
+
+    private static bool IsArtifactCiInferenceEnabled(Dictionary<string, JsonElement>? settings)
+    {
+        if (settings is null)
         {
-            return new Artifacts.FeedAuthResolution(false, null, null, endpoint,
-                "HELM_REGISTRY_USERNAME and HELM_REGISTRY_PASSWORD must both be set.", "env");
+            return true;
         }
 
-        return new Artifacts.FeedAuthResolution(true, username, secret, endpoint, null, "env");
+        return TryGetBool(settings, "ciInference")
+            ?? TryGetBool(settings, "target.ciInference")
+            ?? true;
     }
 
 
@@ -856,6 +963,12 @@ public sealed class ConfigCommandLoader
         }
 
         return bool.TryParse(value, out var parsed) ? parsed : null;
+    }
+
+    private static string ResolveCiVariablePrefix(RepoConfig config)
+    {
+        var prefix = config.Outputs?.Ci?.Prefix;
+        return string.IsNullOrWhiteSpace(prefix) ? "REXO_" : prefix;
     }
 
     private static (bool canPush, List<string> skipReasons) EvaluatePushEligibility(
@@ -1004,12 +1117,35 @@ public sealed class ConfigCommandLoader
         new(
             commandConfig.Description,
             commandConfig.Options ?? [],
-            commandConfig.Steps ?? [])
+            BuildCommandSteps(commandConfig))
         {
+            Hidden = commandConfig.Hidden,
             Args = commandConfig.Args ?? [],
             Merge = commandConfig.Merge,
             MaxParallel = commandConfig.MaxParallel,
+            MaxDepth = commandConfig.MaxDepth,
         };
+
+    private static List<RepoStepConfig> BuildCommandSteps(RepoCommandConfig commandConfig)
+    {
+        var steps = new List<RepoStepConfig>();
+        if (commandConfig.Before is { Count: > 0 })
+        {
+            steps.AddRange(commandConfig.Before);
+        }
+
+        if (commandConfig.Steps is { Count: > 0 })
+        {
+            steps.AddRange(commandConfig.Steps);
+        }
+
+        if (commandConfig.After is { Count: > 0 })
+        {
+            steps.AddRange(commandConfig.After);
+        }
+
+        return steps;
+    }
 
     private static async Task WriteArtifactManifestAsync(
         string repositoryRoot,
@@ -1036,16 +1172,29 @@ public sealed class ConfigCommandLoader
     private static async Task WriteCommandManifestAsync(
         string repositoryRoot,
         string outputRoot,
+        RepoConfig config,
         string commandName,
         CommandResult commandResult,
         CancellationToken cancellationToken)
     {
-        var manifestsDir = Path.Combine(repositoryRoot, outputRoot, "manifests");
+        var manifestsDir = ResolveManifestsDirectory(repositoryRoot, outputRoot, config);
         Directory.CreateDirectory(manifestsDir);
+
+        var mode = string.Equals(config.Outputs?.Manifests?.CommandMode, "perCommand", StringComparison.OrdinalIgnoreCase)
+            ? "perCommand"
+            : "aggregate";
+        var detail = string.Equals(config.Outputs?.Manifests?.CommandDetail, "verbose", StringComparison.OrdinalIgnoreCase)
+            ? "verbose"
+            : "summary";
 
         // Sanitize command name for use as a file name
         var safeName = string.Concat(commandName.Select(c => char.IsLetterOrDigit(c) || c == '-' || c == '_' ? c : '_'));
-        var manifestPath = Path.Combine(manifestsDir, $"{safeName}.json");
+        var manifestFileName = mode switch
+        {
+            "perCommand" => $"{safeName}.json",
+            _ => "commands.json",
+        };
+        var manifestPath = Path.Combine(manifestsDir, manifestFileName);
 
         var stepSummaries = commandResult.Steps
             .Select(s =>
@@ -1083,19 +1232,158 @@ public sealed class ConfigCommandLoader
             }
         }
 
+        object entry;
+        if (detail == "verbose")
+        {
+            entry = new
+            {
+                command = commandName,
+                status = commandResult.Success ? "success" : "failure",
+                version = commandResult.Version?.SemVer,
+                fileOutputs = aggregatedFileOutputs,
+                steps = stepSummaries,
+                result = commandResult,
+                generatedAt = DateTimeOffset.UtcNow,
+            };
+        }
+        else
+        {
+            entry = new
+            {
+                command = commandName,
+                status = commandResult.Success ? "success" : "failure",
+                version = commandResult.Version?.SemVer,
+                fileOutputs = aggregatedFileOutputs,
+                steps = stepSummaries,
+                generatedAt = DateTimeOffset.UtcNow,
+            };
+        }
+
+        if (mode == "aggregate")
+        {
+            await WriteAggregateCommandManifestAsync(manifestPath, entry, cancellationToken);
+            return;
+        }
+
+        object manifest;
+        if (detail == "verbose")
+        {
+            manifest = new
+            {
+                schemaVersion = "1.0",
+                generatedAt = DateTimeOffset.UtcNow,
+                command = commandName,
+                status = commandResult.Success ? "success" : "failure",
+                version = commandResult.Version?.SemVer,
+                fileOutputs = aggregatedFileOutputs,
+                steps = stepSummaries,
+                result = commandResult,
+            };
+        }
+        else
+        {
+            manifest = new
+            {
+                schemaVersion = "1.0",
+                generatedAt = DateTimeOffset.UtcNow,
+                command = commandName,
+                status = commandResult.Success ? "success" : "failure",
+                version = commandResult.Version?.SemVer,
+                fileOutputs = aggregatedFileOutputs,
+                steps = stepSummaries,
+            };
+        }
+
+        var json = System.Text.Json.JsonSerializer.Serialize(manifest, IndentedJsonOptions);
+        await WriteTextFileAsync(manifestPath, json, cancellationToken);
+    }
+
+    private static async Task WriteAggregateCommandManifestAsync(string manifestPath, object entry, CancellationToken cancellationToken)
+    {
+        var commands = new List<object>();
+
+        if (File.Exists(manifestPath))
+        {
+            try
+            {
+                var existingJson = await ReadTextFileAsyncWithRetry(manifestPath, cancellationToken);
+                using var document = JsonDocument.Parse(existingJson);
+                if (document.RootElement.TryGetProperty("commands", out var commandsElement) &&
+                    commandsElement.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var commandElement in commandsElement.EnumerateArray())
+                    {
+                        commands.Add(commandElement.Clone());
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore malformed existing aggregate manifest and overwrite with a fresh one.
+            }
+        }
+
+        commands.Add(entry);
+
         var manifest = new
         {
             schemaVersion = "1.0",
             generatedAt = DateTimeOffset.UtcNow,
-            command = commandName,
-            status = commandResult.Success ? "success" : "failure",
-            version = commandResult.Version is { } v ? v.SemVer : null,
-            fileOutputs = aggregatedFileOutputs,
-            steps = stepSummaries,
+            commands,
         };
 
         var json = System.Text.Json.JsonSerializer.Serialize(manifest, IndentedJsonOptions);
-        await File.WriteAllTextAsync(manifestPath, json, cancellationToken);
+        await WriteTextFileAsync(manifestPath, json, cancellationToken);
+    }
+
+    private static async Task<string> ReadTextFileAsyncWithRetry(string path, CancellationToken cancellationToken)
+    {
+        const int maxAttempts = 5;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await File.ReadAllTextAsync(path, cancellationToken);
+            }
+            catch (IOException) when (attempt < maxAttempts)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(50 * attempt), cancellationToken);
+            }
+        }
+    }
+
+    private static async Task WriteTextFileAsync(string path, string contents, CancellationToken cancellationToken)
+    {
+        const int maxAttempts = 5;
+        var directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await File.WriteAllTextAsync(path, contents, cancellationToken);
+                return;
+            }
+            catch (IOException) when (attempt < maxAttempts)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(50 * attempt), cancellationToken);
+            }
+        }
+    }
+
+    private static string ResolveManifestsDirectory(string repositoryRoot, string outputRoot, RepoConfig config)
+    {
+        var manifestsPath = ResolveOutputPath(outputRoot, config.Outputs?.Manifests?.Path, "manifests");
+        if (Path.IsPathRooted(manifestsPath))
+        {
+            return manifestsPath;
+        }
+
+        return Path.Combine(repositoryRoot, manifestsPath);
     }
 
     internal static string ResolveOutputRoot(RepoConfig config) =>
@@ -1456,7 +1744,10 @@ public sealed class ConfigCommandLoader
         }
     }
 
-    private static StepDefinition BuildStepDefinition(RepoStepConfig stepConfig) =>
+    private static StepDefinition BuildStepDefinition(
+        RepoStepConfig stepConfig,
+        ExecutionContext context,
+        ITemplateRenderer templateRenderer) =>
         new(
             Id: stepConfig.Id,
             Run: stepConfig.Run,
@@ -1468,10 +1759,55 @@ public sealed class ConfigCommandLoader
             WhenExists = stepConfig.WhenExists ?? false,
             Parallel = stepConfig.Parallel ?? false,
             ContinueOnError = stepConfig.ContinueOnError ?? false,
+            AlwaysRun = stepConfig.AlwaysRun ?? false,
             OutputPattern = stepConfig.OutputPattern,
             OutputFile = stepConfig.OutputFile,
             StepOutputs = BuildStepOutputs(stepConfig.Outputs),
+            Container = stepConfig.Container is null
+                ? null
+                : BuildStepContainerDefinition(stepConfig.Container, context, templateRenderer),
         };
+
+    private static Core.Models.StepContainerDefinition BuildStepContainerDefinition(
+        RepoStepContainerConfig container,
+        ExecutionContext context,
+        ITemplateRenderer templateRenderer) =>
+        new(
+            templateRenderer.Render(container.Image, context),
+            RenderStringDictionary(container.Env, context, templateRenderer),
+            container.WorkingDirectory is null ? null : templateRenderer.Render(container.WorkingDirectory, context),
+            container.Entrypoint is null ? null : templateRenderer.Render(container.Entrypoint, context),
+            container.Dockerfile is null ? null : templateRenderer.Render(container.Dockerfile, context),
+            container.Context is null ? null : templateRenderer.Render(container.Context, context),
+            container.Build is null
+                ? null
+                : new Core.Models.StepContainerBuildDefinition(
+                    container.Build.Target is null ? null : templateRenderer.Render(container.Build.Target, context),
+                    RenderStringDictionary(container.Build.Args, context, templateRenderer)));
+
+    private static IReadOnlyDictionary<string, string>? RenderStringDictionary(
+        IReadOnlyDictionary<string, string>? source,
+        ExecutionContext context,
+        ITemplateRenderer templateRenderer)
+    {
+        if (source is null)
+        {
+            return null;
+        }
+
+        if (source.Count == 0)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var rendered = new Dictionary<string, string>(source.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in source)
+        {
+            rendered[key] = templateRenderer.Render(value, context);
+        }
+
+        return rendered;
+    }
 
     private static IReadOnlyDictionary<string, IReadOnlyList<string>>? BuildStepOutputs(
         Dictionary<string, string[]>? outputs)
@@ -1525,18 +1861,18 @@ public sealed class ConfigCommandLoader
             };
         }
 
-        var testsResults = config.Outputs?.Tests?.Results ?? $"{root}/tests";
-        var testsCoverage = config.Outputs?.Tests?.Coverage ?? $"{root}/coverage";
-        var testsReports = config.Outputs?.Tests?.Reports ?? $"{root}/tests/reports";
-        var analysisReports = config.Outputs?.Analysis?.Reports ?? $"{root}/analysis";
-        var analysisSarif = config.Outputs?.Analysis?.Sarif ?? $"{root}/analysis/sarif";
-        var securityAudit = config.Outputs?.Security?.Audit ?? $"{root}/security/audit.json";
-        var securityReports = config.Outputs?.Security?.Reports ?? $"{root}/security";
-        var securitySarif = config.Outputs?.Security?.Sarif ?? $"{root}/security/sarif";
-        var packages = config.Outputs?.Packages ?? $"{root}/packages";
-        var manifests = config.Outputs?.Manifests ?? $"{root}/manifests";
-        var logs = config.Outputs?.Logs ?? $"{root}/logs";
-        var temp = config.Outputs?.Temp ?? ".rexo/temp";
+        var testsResults = ResolveOutputPath(root, config.Outputs?.Tests?.Results, "tests");
+        var testsCoverage = ResolveOutputPath(root, config.Outputs?.Tests?.Coverage, "tests/coverage");
+        var testsReports = ResolveOutputPath(root, config.Outputs?.Tests?.Reports, "tests/reports");
+        var analysisReports = ResolveOutputPath(root, config.Outputs?.Analysis?.Reports, "analysis");
+        var analysisSarif = ResolveOutputPath(root, config.Outputs?.Analysis?.Sarif, "analysis/sarif");
+        var securityAudit = ResolveOutputPath(root, config.Outputs?.Security?.Audit, "security/audit.json");
+        var securityReports = ResolveOutputPath(root, config.Outputs?.Security?.Reports, "security");
+        var securitySarif = ResolveOutputPath(root, config.Outputs?.Security?.Sarif, "security/sarif");
+        var packages = ResolveOutputPath(root, config.Outputs?.Packages, "packages");
+        var manifests = ResolveOutputPath(root, config.Outputs?.Manifests?.Path, "manifests");
+        var logs = ResolveOutputPath(root, config.Outputs?.Logs, "logs");
+        var temp = ResolveOutputPath(root, config.Outputs?.Temp, "tmp");
 
         return new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
@@ -1564,6 +1900,230 @@ public sealed class ConfigCommandLoader
             ["logs"] = logs,
             ["temp"] = temp,
         };
+    }
+
+    private static IReadOnlyList<string> EnsureConfiguredOutputDirectories(
+        string repositoryRoot,
+        IReadOnlyDictionary<string, object?> outputs)
+    {
+        var createdDirectories = new List<string>();
+        EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "tests", "results");
+        EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "tests", "coverage");
+        EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "tests", "reports");
+        EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "analysis", "reports");
+        EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "analysis", "sarif");
+        EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: true, "security", "audit");
+        EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "security", "reports");
+        EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "security", "sarif");
+        EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "packages");
+        EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "manifests");
+        EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "logs");
+        EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "temp");
+
+        return createdDirectories;
+    }
+
+    private static void EnsureOutputDirectory(
+        string repositoryRoot,
+        IReadOnlyDictionary<string, object?> outputs,
+        List<string> createdDirectories,
+        bool treatAsFile,
+        params string[] pathSegments)
+    {
+        var outputPath = ResolveOutputPath(outputs, pathSegments);
+        if (string.IsNullOrWhiteSpace(outputPath))
+        {
+            return;
+        }
+
+        var absolutePath = Path.IsPathRooted(outputPath)
+            ? outputPath
+            : Path.GetFullPath(Path.Combine(repositoryRoot, outputPath));
+
+        var targetDirectory = treatAsFile
+            ? Path.GetDirectoryName(absolutePath)
+            : absolutePath;
+
+        if (!string.IsNullOrWhiteSpace(targetDirectory))
+        {
+            CreateOutputDirectory(repositoryRoot, targetDirectory, createdDirectories);
+        }
+    }
+
+    private static void CreateOutputDirectory(
+        string repositoryRoot,
+        string targetDirectory,
+        List<string> createdDirectories)
+    {
+        var repositoryRootFullPath = Path.GetFullPath(repositoryRoot);
+        var targetDirectoryFullPath = Path.GetFullPath(targetDirectory);
+
+        if (!TryGetRelativeSubPath(repositoryRootFullPath, targetDirectoryFullPath, out var relativePath))
+        {
+            Directory.CreateDirectory(targetDirectoryFullPath);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(relativePath))
+        {
+            return;
+        }
+
+        var currentDirectory = repositoryRootFullPath;
+        foreach (var segment in relativePath.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            currentDirectory = Path.Combine(currentDirectory, segment);
+            if (!Directory.Exists(currentDirectory))
+            {
+                Directory.CreateDirectory(currentDirectory);
+                createdDirectories.Add(currentDirectory);
+            }
+        }
+    }
+
+    private static void CleanupConfiguredOutputDirectories(
+        string repositoryRoot,
+        IReadOnlyCollection<string> createdDirectories)
+    {
+        if (createdDirectories.Count == 0)
+        {
+            return;
+        }
+
+        var repositoryRootFullPath = Path.GetFullPath(repositoryRoot);
+        foreach (var directory in createdDirectories
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(path => path.Length))
+        {
+            CleanupEmptyDirectory(repositoryRootFullPath, directory);
+        }
+    }
+
+    private static void CleanupEmptyDirectory(string repositoryRoot, string directory)
+    {
+        var directoryFullPath = Path.GetFullPath(directory);
+        if (!TryGetRelativeSubPath(repositoryRoot, directoryFullPath, out _))
+        {
+            return;
+        }
+
+        try
+        {
+            if (Directory.Exists(directoryFullPath) && !Directory.EnumerateFileSystemEntries(directoryFullPath).Any())
+            {
+                Directory.Delete(directoryFullPath, recursive: false);
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private static bool TryGetRelativeSubPath(string root, string path, out string relativePath)
+    {
+        var normalizedRoot = NormalizeDirectoryPath(root);
+        var normalizedPath = NormalizeDirectoryPath(path);
+
+        if (string.Equals(normalizedRoot, normalizedPath, StringComparison.OrdinalIgnoreCase))
+        {
+            relativePath = string.Empty;
+            return true;
+        }
+
+        var rootPrefix = EnsureTrailingSeparator(normalizedRoot);
+        if (!normalizedPath.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            relativePath = string.Empty;
+            return false;
+        }
+
+        relativePath = normalizedPath[rootPrefix.Length..];
+        return true;
+    }
+
+    private static string NormalizeDirectoryPath(string path) =>
+        Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+    private static string EnsureTrailingSeparator(string path) =>
+        path.EndsWith(Path.DirectorySeparatorChar) || path.EndsWith(Path.AltDirectorySeparatorChar)
+            ? path
+            : path + Path.DirectorySeparatorChar;
+
+    private static string? ResolveOutputPath(
+        IReadOnlyDictionary<string, object?> outputs,
+        params string[] pathSegments)
+    {
+        object? current = outputs;
+
+        foreach (var segment in pathSegments)
+        {
+            if (current is IReadOnlyDictionary<string, object?> dictionary &&
+                dictionary.TryGetValue(segment, out var next))
+            {
+                current = next;
+                continue;
+            }
+
+            return null;
+        }
+
+        return current?.ToString();
+    }
+
+    private static string ResolveOutputPath(string root, string? configuredPath, string defaultRelativePath)
+    {
+        if (string.IsNullOrWhiteSpace(configuredPath))
+        {
+            return CombineOutputPath(root, defaultRelativePath);
+        }
+
+        if (Path.IsPathRooted(configuredPath))
+        {
+            return configuredPath;
+        }
+
+        if (configuredPath.StartsWith("~/", StringComparison.Ordinal) ||
+            configuredPath.StartsWith("~\\", StringComparison.Ordinal))
+        {
+            return CombineOutputPath(root, configuredPath[2..]);
+        }
+
+        // Plain relative paths are repo-relative, not outputs.root-relative.
+        return configuredPath;
+    }
+
+    private static string ResolveManifestDirectory(string repositoryRoot, string outputRoot, string? configuredPath)
+    {
+        if (string.IsNullOrWhiteSpace(configuredPath))
+        {
+            return Path.Combine(repositoryRoot, outputRoot, "manifests");
+        }
+
+        if (Path.IsPathRooted(configuredPath))
+        {
+            return configuredPath;
+        }
+
+        if (configuredPath.StartsWith("~/", StringComparison.Ordinal) ||
+            configuredPath.StartsWith("~\\", StringComparison.Ordinal))
+        {
+            return Path.Combine(repositoryRoot, CombineOutputPath(outputRoot, configuredPath[2..]));
+        }
+
+        return Path.Combine(repositoryRoot, configuredPath);
+    }
+
+    private static string CombineOutputPath(string root, string relative)
+    {
+        var normalizedRoot = root.TrimEnd('/', '\\');
+        var normalizedRelative = relative.TrimStart('/', '\\');
+
+        return string.IsNullOrEmpty(normalizedRoot)
+            ? normalizedRelative
+            : $"{normalizedRoot}/{normalizedRelative}";
     }
 
     /// <summary>
@@ -1672,7 +2232,7 @@ public sealed class ConfigCommandLoader
         return groups;
     }
 
-    private static async Task<List<(RepoStepConfig Config, StepResult Result)>> ExecuteParallelGroupAsync(
+    private async Task<List<(RepoStepConfig Config, StepResult Result)>> ExecuteParallelGroupAsync(
         IReadOnlyList<RepoStepConfig> group,
         StepExecutor stepExecutor,
         ExecutionContext snapshot,
@@ -1680,7 +2240,7 @@ public sealed class ConfigCommandLoader
         CancellationToken cancellationToken)
     {
         var pending = group
-            .Select(sc => (Config: sc, Definition: BuildStepDefinition(sc)))
+            .Select(sc => (Config: sc, Definition: BuildStepDefinition(sc, snapshot, _templateRenderer)))
             .ToList();
 
         var results = new List<(RepoStepConfig Config, StepResult Result)>();

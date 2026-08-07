@@ -63,6 +63,26 @@ public sealed class TemplateRendererTests
     }
 
     [Fact]
+    public void RenderResolvesGitVariables()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = ExecutionContext.Empty("C:\\repo") with
+        {
+            Branch = "feature/demo",
+            CommitSha = "abcdef1234567890",
+            ShortSha = "abcdef1",
+            RemoteUrl = "https://github.com/agile-north/rexo",
+            IsCleanWorkingTree = true,
+        };
+
+        Assert.Equal("feature/demo", renderer.Render("{{git.branch}}", ctx));
+        Assert.Equal("abcdef1234567890", renderer.Render("{{git.commitSha}}", ctx));
+        Assert.Equal("abcdef1", renderer.Render("{{git.shortSha}}", ctx));
+        Assert.Equal("https://github.com/agile-north/rexo", renderer.Render("{{git.remoteUrl}}", ctx));
+        Assert.Equal("true", renderer.Render("{{git.isCleanWorkingTree}}", ctx));
+    }
+
+    [Fact]
     public void RenderAppliesSlugFilter()
     {
         var renderer = new TemplateRenderer();
@@ -99,6 +119,108 @@ public sealed class TemplateRendererTests
     }
 
     [Fact]
+    public void RenderDefaultFilterCanResolveFallbackVariable()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string>
+        {
+            ["fallback"] = "release",
+        });
+
+        var result = renderer.Render("{{args.missing | default(args.fallback)}}", ctx);
+        Assert.Equal("release", result);
+    }
+
+    [Fact]
+    public void RenderCoalesceFilterReturnsCurrentValueWhenPresent()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string>
+        {
+            ["tag"] = "v1",
+            ["fallback"] = "release",
+        });
+
+        var result = renderer.Render("{{args.tag | coalesce(args.fallback, 'dev')}}", ctx);
+        Assert.Equal("v1", result);
+    }
+
+    [Fact]
+    public void RenderCoalesceFilterFallsBackAcrossVariablesAndLiteral()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string>
+        {
+            ["fallback"] = "release",
+        });
+
+        var result = renderer.Render("{{args.tag | coalesce(args.missing, args.fallback, 'dev')}}", ctx);
+        Assert.Equal("release", result);
+    }
+
+    [Fact]
+    public void RenderCoalesceFilterCanResolveEnvironmentFallback()
+    {
+        const string key = "REXO_TEMPLATE_COALESCE_ENV_TEST";
+        var original = Environment.GetEnvironmentVariable(key);
+        Environment.SetEnvironmentVariable(key, "from-env");
+
+        try
+        {
+            var renderer = new TemplateRenderer();
+            var ctx = MakeContext();
+
+            var result = renderer.Render($"{{{{args.tag | coalesce(args.missing, env.{key}, 'dev')}}}}", ctx);
+            Assert.Equal("from-env", result);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(key, original);
+        }
+    }
+
+    [Fact]
+    public void RenderCoalesceFilterTreatsWhitespaceAsEmpty()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string>
+        {
+            ["tag"] = "   ",
+            ["fallback"] = "release",
+        });
+
+        var result = renderer.Render("{{args.tag | coalesce(args.fallback, 'dev')}}", ctx);
+        Assert.Equal("release", result);
+    }
+
+    [Fact]
+    public void RenderSupportsNullCoalescingOperator()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string>
+        {
+            ["fallback"] = "release",
+        });
+
+        var result = renderer.Render("{{args.tag ?? args.fallback ?? 'dev'}}", ctx);
+        Assert.Equal("release", result);
+    }
+
+    [Fact]
+    public void RenderSupportsNullCoalescingOperatorWithFilters()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string>
+        {
+            ["tag"] = "   ",
+            ["fallback"] = "release",
+        });
+
+        var result = renderer.Render("{{args.tag | trim ?? args.fallback | upper ?? 'dev'}}", ctx);
+        Assert.Equal("RELEASE", result);
+    }
+
+    [Fact]
     public void RenderResolvesVersionMajorMinorPatch()
     {
         var renderer = new TemplateRenderer();
@@ -106,6 +228,31 @@ public sealed class TemplateRendererTests
         Assert.Equal("2", renderer.Render("{{version.major}}", ctx));
         Assert.Equal("3", renderer.Render("{{version.minor}}", ctx));
         Assert.Equal("4", renderer.Render("{{version.patch}}", ctx));
+    }
+
+    [Fact]
+    public void RenderResolvesVersionPreReleaseComponents()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = ExecutionContext.Empty("C:\\repo") with
+        {
+            Version = new VersionResult(
+                SemVer: "0.1.322-qa.5",
+                Major: 0,
+                Minor: 1,
+                Patch: 322,
+                PreRelease: "qa.5",
+                CommitSha: "abc1234",
+                ShortSha: "abc1234",
+                IsPreRelease: true,
+                IsStable: false),
+        };
+
+        Assert.Equal("qa.5", renderer.Render("{{version.preReleaseTag}}", ctx));
+        Assert.Equal("qa", renderer.Render("{{version.preReleaseLabel}}", ctx));
+        Assert.Equal("5", renderer.Render("{{version.preReleaseNumber}}", ctx));
+        Assert.Equal("-qa", renderer.Render("{{version.preReleaseLabelWithDash}}", ctx));
+        Assert.Equal("-qa.5", renderer.Render("{{version.preReleaseTagWithDash}}", ctx));
     }
 
     [Fact]
@@ -202,6 +349,26 @@ public sealed class TemplateRendererTests
     }
 
     [Fact]
+    public void EqualityExpressionSupportsCoalesceOperands()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string> { ["fallback"] = "release" });
+
+        var result = renderer.Render("{{args.tag | coalesce(args.fallback, 'dev') == 'release'}}", ctx);
+        Assert.Equal("true", result);
+    }
+
+    [Fact]
+    public void EqualityExpressionSupportsNullCoalescingOperatorOperands()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string> { ["fallback"] = "release" });
+
+        var result = renderer.Render("{{args.tag ?? args.fallback ?? 'dev' == 'release'}}", ctx);
+        Assert.Equal("true", result);
+    }
+
+    [Fact]
     public void EqualityExpressionComparesLiteralToLiteral()
     {
         var renderer = new TemplateRenderer();
@@ -266,6 +433,22 @@ public sealed class TemplateRendererTests
         var renderer = new TemplateRenderer();
         var ctx = MakeContext(args: new Dictionary<string, string> { ["branch"] = "feature/my-feature" });
         Assert.Equal("feature-my-feature", renderer.Render("{{args.branch | replace(/,-)}}", ctx));
+    }
+
+    [Fact]
+    public void ReplaceFilterDoesNotInterpretRegexSyntax()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string> { ["value"] = "fooXXXbar" });
+        Assert.Equal("fooXXXbar", renderer.Render("{{args.value | replace(/foo.*bar/, 'baz')}}", ctx));
+    }
+
+    [Fact]
+    public void ReplacePatternFilterSupportsRegexCaptureGroups()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string> { ["pair"] = "foo=123" });
+        Assert.Equal("123-foo", renderer.Render("{{args.pair | replacePattern(/(\\w+)=(\\d+)/, '$2-$1')}}", ctx));
     }
 
     [Fact]
@@ -342,7 +525,7 @@ public sealed class TemplateRendererTests
     {
         var renderer = new TemplateRenderer();
         var ctx = MakeOutputsContext();
-        Assert.Equal("artifacts/coverage", renderer.Render("{{outputs.tests.coverage}}", ctx));
+        Assert.Equal("artifacts/tests/coverage", renderer.Render("{{outputs.tests.coverage}}", ctx));
     }
 
     [Fact]
@@ -428,6 +611,14 @@ public sealed class TemplateRendererTests
     }
 
     [Fact]
+    public void PrefixFilterReturnsEmptyWhenInputIsWhitespace()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string> { ["val"] = "   " });
+        Assert.Equal("", renderer.Render("{{args.val | prefix('--flag ')}}", ctx));
+    }
+
+    [Fact]
     public void PrefixFilterReturnsEmptyWhenVariableIsMissing()
     {
         var renderer = new TemplateRenderer();
@@ -452,6 +643,14 @@ public sealed class TemplateRendererTests
     }
 
     [Fact]
+    public void SuffixFilterReturnsEmptyWhenInputIsWhitespace()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string> { ["val"] = "   " });
+        Assert.Equal("", renderer.Render("{{args.val | suffix('.sarif')}}", ctx));
+    }
+
+    [Fact]
     public void SuffixFilterReturnsEmptyWhenVariableIsMissing()
     {
         var renderer = new TemplateRenderer();
@@ -468,6 +667,24 @@ public sealed class TemplateRendererTests
     }
 
     [Fact]
+    public void AbspathFilterReturnsEmptyWhenInputIsEmpty()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string> { ["dir"] = "" });
+        Assert.Equal("", renderer.Render("{{args.dir | abspath}}", ctx));
+    }
+
+    [Fact]
+    public void AbspathFilterResolvesRepoRelativePath()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string> { ["dir"] = "artifacts/analysis/sarif/dotnet-build.sarif" });
+        Assert.Equal(
+            Path.GetFullPath(Path.Combine(ctx.RepositoryRoot, "artifacts", "analysis", "sarif", "dotnet-build.sarif")),
+            renderer.Render("{{args.dir | abspath}}", ctx));
+    }
+
+    [Fact]
     public void MultiPipeChainProducesEmptyWhenInputIsMissing()
     {
         var renderer = new TemplateRenderer();
@@ -481,7 +698,73 @@ public sealed class TemplateRendererTests
         var renderer = new TemplateRenderer();
         var ctx = MakeContext(args: new Dictionary<string, string> { ["dir"] = "artifacts/analysis/sarif" });
         Assert.Equal(
-            "/p:ErrorLog=artifacts/analysis/sarif/dotnet-build.sarif",
-            renderer.Render("{{args.dir | suffix('/dotnet-build.sarif') | prefix('/p:ErrorLog=')}}", ctx));
+            "/p:ErrorLog=" + Path.GetFullPath(Path.Combine(ctx.RepositoryRoot, "artifacts", "analysis", "sarif", "dotnet-build.sarif")),
+            renderer.Render("{{args.dir | suffix('/dotnet-build.sarif') | abspath | prefix('/p:ErrorLog=')}}", ctx));
+    }
+
+    [Fact]
+    public void CoalesceFilterComposesWithLaterFilters()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(args: new Dictionary<string, string> { ["dir"] = "artifacts/analysis/sarif" });
+
+        Assert.Equal(
+            "/p:ErrorLog=" + Path.GetFullPath(Path.Combine(ctx.RepositoryRoot, "artifacts", "analysis", "sarif", "dotnet-build.sarif")),
+            renderer.Render("{{args.missing | coalesce(args.dir, 'artifacts/analysis') | suffix('/dotnet-build.sarif') | abspath | prefix('/p:ErrorLog=')}}", ctx));
+    }
+
+    [Fact]
+    public void RenderResolvesPushSummaryDefaultsWhenNoPushStepsHaveRun()
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext();
+
+        Assert.Equal("false", renderer.Render("{{push.hasData}}", ctx));
+        Assert.Equal("false", renderer.Render("{{push.anyPushed}}", ctx));
+        Assert.Equal("0", renderer.Render("{{push.pushedCount}}", ctx));
+        Assert.Equal("", renderer.Render("{{push.blockReasons}}", ctx));
+    }
+
+    [Fact]
+    public void RenderResolvesPushSummaryFromCompletedStepOutputs()
+    {
+        var renderer = new TemplateRenderer();
+        var pushStep = new StepResult(
+            "push",
+            true,
+            0,
+            TimeSpan.Zero,
+            new Dictionary<string, object?>
+            {
+                ["__artifacts"] = new List<ArtifactManifestEntry>
+                {
+                    new("docker", "api", true, true, ["ghcr.io/org/api:1.2.3"]),
+                    new("npm", "sdk", true, false, []),
+                },
+                ["__pushDecisions"] = new List<PushDecision>
+                {
+                    new("api", true, "Push succeeded."),
+                    new("sdk", false, "Push disabled by policy."),
+                    new("cli", false, "Push disabled by policy."),
+                },
+            });
+
+        var ctx = MakeContext() with
+        {
+            CompletedSteps = new Dictionary<string, StepResult>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["push"] = pushStep,
+            },
+        };
+
+        Assert.Equal("true", renderer.Render("{{push.hasData}}", ctx));
+        Assert.Equal("true", renderer.Render("{{push.anyPushed}}", ctx));
+        Assert.Equal("1", renderer.Render("{{push.pushedCount}}", ctx));
+        Assert.Equal("2", renderer.Render("{{push.artifactCount}}", ctx));
+        Assert.Equal("3", renderer.Render("{{push.decisionCount}}", ctx));
+        Assert.Equal("1", renderer.Render("{{push.allowedCount}}", ctx));
+        Assert.Equal("2", renderer.Render("{{push.deniedCount}}", ctx));
+        Assert.Equal("true", renderer.Render("{{push.anyBlocked}}", ctx));
+        Assert.Equal("Push disabled by policy.", renderer.Render("{{push.blockReasons}}", ctx));
     }
 }

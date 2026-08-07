@@ -11,8 +11,10 @@ public sealed record StepDefinition(
     public bool WhenExists { get; init; }
     public bool Parallel { get; init; }
     public bool ContinueOnError { get; init; }
+    public bool AlwaysRun { get; init; }
     public string? OutputPattern { get; init; }
     public string? OutputFile { get; init; }
+    public StepContainerDefinition? Container { get; init; }
 
     /// <summary>
     /// Declared output glob patterns produced by this step.
@@ -22,3 +24,16 @@ public sealed record StepDefinition(
     /// </summary>
     public IReadOnlyDictionary<string, IReadOnlyList<string>>? StepOutputs { get; init; }
 }
+
+public sealed record StepContainerDefinition(
+    string Image,
+    IReadOnlyDictionary<string, string>? Env = null,
+    string? WorkingDirectory = null,
+    string? Entrypoint = null,
+    string? Dockerfile = null,
+    string? Context = null,
+    StepContainerBuildDefinition? Build = null);
+
+public sealed record StepContainerBuildDefinition(
+    string? Target = null,
+    IReadOnlyDictionary<string, string>? Args = null);

@@ -114,5 +114,589 @@ public sealed class CliJsonOutputTests
       }
     }
   }
+
+  [Fact]
+  public async Task CommandOutputDefaultsCanDisableStdoutAndSetJsonFile()
+  {
+    var tempDir = Path.Combine(Path.GetTempPath(), $"rexo-cli-output-defaults-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(tempDir);
+
+    var originalDirectory = Environment.CurrentDirectory;
+    var originalOut = Console.Out;
+    var originalError = Console.Error;
+
+    try
+    {
+      var jsonFile = Path.Combine(tempDir, "artifacts", "version.json");
+
+      await File.WriteAllTextAsync(
+          Path.Combine(tempDir, "rexo.json"),
+          $$"""
+          {
+            "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+            "schemaVersion": "1.0",
+            "name": "sample",
+            "outputs": {
+              "command": {
+                "stdout": false,
+                "jsonFile": "{{jsonFile.Replace("\\", "\\\\", StringComparison.Ordinal)}}"
+              }
+            },
+            "commands": {
+              "hello": {
+                "description": "Test command",
+                "steps": [
+                  { "id": "resolve", "uses": "builtin:resolve-version" }
+                ]
+              }
+            },
+            "versioning": {
+              "provider": "fixed",
+              "fallback": "1.2.3"
+            }
+          }
+          """);
+
+      Environment.CurrentDirectory = tempDir;
+
+      using var stdout = new StringWriter(CultureInfo.InvariantCulture);
+      using var stderr = new StringWriter(CultureInfo.InvariantCulture);
+      Console.SetOut(stdout);
+      Console.SetError(stderr);
+
+      var exitCode = await Program.ExecuteAsync(["version"], CancellationToken.None);
+
+      Assert.Equal(0, exitCode);
+      Assert.True(File.Exists(jsonFile));
+      Assert.True(File.Exists(Path.Combine(tempDir, "artifacts", "version-manifest.json")));
+      Assert.True(string.IsNullOrWhiteSpace(stdout.ToString()));
+      Assert.True(string.IsNullOrWhiteSpace(stderr.ToString()));
+    }
+    finally
+    {
+      Console.SetOut(originalOut);
+      Console.SetError(originalError);
+      Environment.CurrentDirectory = originalDirectory;
+
+      if (Directory.Exists(tempDir))
+      {
+        Directory.Delete(tempDir, true);
+      }
+    }
+  }
+
+  [Fact]
+  public async Task ExplicitCiProviderCanEmitLocallyWithoutDetectedCi()
+  {
+    var tempDir = Path.Combine(Path.GetTempPath(), $"rexo-cli-ci-emit-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(tempDir);
+
+    var originalDirectory = Environment.CurrentDirectory;
+    var originalOut = Console.Out;
+    var originalError = Console.Error;
+
+    try
+    {
+      await File.WriteAllTextAsync(
+          Path.Combine(tempDir, "rexo.json"),
+          """
+          {
+            "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+            "schemaVersion": "1.0",
+            "name": "sample",
+            "outputs": {
+              "command": {
+                "stdout": false
+              },
+              "ci": {
+                "emit": true,
+                "provider": "generic",
+                "prefix": "CI_"
+              }
+            },
+            "versioning": {
+              "provider": "fixed",
+              "fallback": "1.2.3"
+            }
+          }
+          """);
+
+      Environment.CurrentDirectory = tempDir;
+
+      using var stdout = new StringWriter(CultureInfo.InvariantCulture);
+      using var stderr = new StringWriter(CultureInfo.InvariantCulture);
+      Console.SetOut(stdout);
+      Console.SetError(stderr);
+
+      var exitCode = await Program.ExecuteAsync(["version"], CancellationToken.None);
+
+      Assert.Equal(0, exitCode);
+      Assert.Contains("CI_COMMAND_EXECUTED=version", stdout.ToString(), StringComparison.OrdinalIgnoreCase);
+      Assert.Contains("CI_SUCCESS=true", stdout.ToString(), StringComparison.OrdinalIgnoreCase);
+      Assert.True(string.IsNullOrWhiteSpace(stderr.ToString()));
+    }
+    finally
+    {
+      Console.SetOut(originalOut);
+      Console.SetError(originalError);
+      Environment.CurrentDirectory = originalDirectory;
+
+      if (Directory.Exists(tempDir))
+      {
+        Directory.Delete(tempDir, true);
+      }
+    }
+  }
+
+  [Fact]
+  public async Task RunManifestIncludesStepExecutionModeForRunStep()
+  {
+    var tempDir = Path.Combine(Path.GetTempPath(), $"rexo-cli-manifest-execution-mode-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(tempDir);
+
+    var originalDirectory = Environment.CurrentDirectory;
+
+    try
+    {
+      await File.WriteAllTextAsync(
+          Path.Combine(tempDir, "rexo.json"),
+          """
+          {
+            "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+            "schemaVersion": "1.0",
+            "name": "sample",
+            "commands": {
+              "hello": {
+                "description": "Test command",
+                "steps": [
+                  { "id": "say", "run": "echo hello" }
+                ]
+              }
+            }
+          }
+          """);
+
+      Environment.CurrentDirectory = tempDir;
+
+      var jsonFile = Path.Combine(tempDir, "out", "hello.json");
+      var manifestFile = Path.Combine(tempDir, "out", "hello-manifest.json");
+
+      var exitCode = await Program.ExecuteAsync(["hello", "--json-file", jsonFile, "--quiet"], CancellationToken.None);
+
+      Assert.Equal(0, exitCode);
+      Assert.True(File.Exists(manifestFile));
+
+      var manifestJson = await File.ReadAllTextAsync(manifestFile);
+      using var manifestDoc = JsonDocument.Parse(manifestJson);
+
+      var steps = manifestDoc.RootElement.GetProperty("Steps");
+      Assert.Equal(1, steps.GetArrayLength());
+
+      var step = steps[0];
+      Assert.Equal("native", step.GetProperty("ExecutionMode").GetString());
+      Assert.Equal("native", step.GetProperty("RequestedExecutionMode").GetString());
+      Assert.False(step.GetProperty("ContainerFallbackUsed").GetBoolean());
+    }
+    finally
+    {
+      Environment.CurrentDirectory = originalDirectory;
+
+      if (Directory.Exists(tempDir))
+      {
+        Directory.Delete(tempDir, true);
+      }
+    }
+  }
+
+  [Fact]
+  public async Task CommandManifestDefaultsToAggregateSummaryFile()
+  {
+    var tempDir = Path.Combine(Path.GetTempPath(), $"rexo-cli-command-manifest-default-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(tempDir);
+
+    var originalDirectory = Environment.CurrentDirectory;
+
+    try
+    {
+      await File.WriteAllTextAsync(
+          Path.Combine(tempDir, "rexo.json"),
+          """
+          {
+            "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+            "schemaVersion": "1.0",
+            "name": "sample",
+            "commands": {
+              "hello": {
+                "description": "Test command",
+                "steps": [
+                  { "id": "say", "run": "echo hello" }
+                ]
+              }
+            }
+          }
+          """);
+
+      Environment.CurrentDirectory = tempDir;
+      var exitCode = await Program.ExecuteAsync(["hello", "--quiet"], CancellationToken.None);
+
+      Assert.Equal(0, exitCode);
+
+      var aggregatePath = Path.Combine(tempDir, "artifacts", "manifests", "commands.json");
+      var perCommandPath = Path.Combine(tempDir, "artifacts", "manifests", "hello.json");
+
+      Assert.True(File.Exists(aggregatePath));
+      Assert.False(File.Exists(perCommandPath));
+
+      var manifestJson = await File.ReadAllTextAsync(aggregatePath);
+      using var doc = JsonDocument.Parse(manifestJson);
+      var commandElement = doc.RootElement.GetProperty("commands")[0];
+      Assert.Equal("hello", commandElement.GetProperty("command").GetString());
+      Assert.False(commandElement.TryGetProperty("result", out _));
+    }
+    finally
+    {
+      Environment.CurrentDirectory = originalDirectory;
+
+      if (Directory.Exists(tempDir))
+      {
+        Directory.Delete(tempDir, true);
+      }
+    }
+  }
+
+  [Fact]
+  public async Task CommandManifestSingleModeBehavesLikeAggregate()
+  {
+    var tempDir = Path.Combine(Path.GetTempPath(), $"rexo-cli-command-manifest-single-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(tempDir);
+
+    var originalDirectory = Environment.CurrentDirectory;
+
+    try
+    {
+      await File.WriteAllTextAsync(
+          Path.Combine(tempDir, "rexo.json"),
+          """
+          {
+            "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+            "schemaVersion": "1.0",
+            "name": "sample",
+            "outputs": {
+              "manifests": {
+                "commandMode": "single"
+              }
+            },
+            "commands": {
+              "hello": {
+                "description": "Test command",
+                "steps": [
+                  { "id": "say", "run": "echo hello" }
+                ]
+              }
+            }
+          }
+          """);
+
+      Environment.CurrentDirectory = tempDir;
+      var exitCode = await Program.ExecuteAsync(["hello", "--quiet"], CancellationToken.None);
+
+      Assert.Equal(0, exitCode);
+
+      var aggregatePath = Path.Combine(tempDir, "artifacts", "manifests", "commands.json");
+      var singlePath = Path.Combine(tempDir, "artifacts", "manifests", "latest.json");
+      var perCommandPath = Path.Combine(tempDir, "artifacts", "manifests", "hello.json");
+
+      Assert.True(File.Exists(aggregatePath));
+      Assert.False(File.Exists(singlePath));
+      Assert.False(File.Exists(perCommandPath));
+    }
+    finally
+    {
+      Environment.CurrentDirectory = originalDirectory;
+
+      if (Directory.Exists(tempDir))
+      {
+        Directory.Delete(tempDir, true);
+      }
+    }
+  }
+
+  [Fact]
+  public async Task CommandManifestCanBePerCommandAndVerbose()
+  {
+    var tempDir = Path.Combine(Path.GetTempPath(), $"rexo-cli-command-manifest-verbose-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(tempDir);
+
+    var originalDirectory = Environment.CurrentDirectory;
+
+    try
+    {
+      await File.WriteAllTextAsync(
+          Path.Combine(tempDir, "rexo.json"),
+          """
+          {
+            "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+            "schemaVersion": "1.0",
+            "name": "sample",
+            "outputs": {
+              "manifests": {
+                "commandMode": "perCommand",
+                "commandDetail": "verbose"
+              }
+            },
+            "commands": {
+              "hello": {
+                "description": "Test command",
+                "steps": [
+                  { "id": "say", "run": "echo hello" }
+                ]
+              }
+            }
+          }
+          """);
+
+      Environment.CurrentDirectory = tempDir;
+      var exitCode = await Program.ExecuteAsync(["hello", "--quiet"], CancellationToken.None);
+
+      Assert.Equal(0, exitCode);
+
+      var aggregatePath = Path.Combine(tempDir, "artifacts", "manifests", "commands.json");
+      var perCommandPath = Path.Combine(tempDir, "artifacts", "manifests", "hello.json");
+
+      Assert.False(File.Exists(aggregatePath));
+      Assert.True(File.Exists(perCommandPath));
+
+      var manifestJson = await File.ReadAllTextAsync(perCommandPath);
+      using var doc = JsonDocument.Parse(manifestJson);
+      Assert.Equal("hello", doc.RootElement.GetProperty("command").GetString());
+      Assert.True(doc.RootElement.TryGetProperty("result", out var resultNode));
+      Assert.Equal("hello", resultNode.GetProperty("Command").GetString());
+    }
+    finally
+    {
+      Environment.CurrentDirectory = originalDirectory;
+
+      if (Directory.Exists(tempDir))
+      {
+        Directory.Delete(tempDir, true);
+      }
+    }
+  }
+
+  [Fact]
+  public async Task CommandManifestCanAggregateAllCommandsInOneFile()
+  {
+    var tempDir = Path.Combine(Path.GetTempPath(), $"rexo-cli-command-manifest-aggregate-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(tempDir);
+
+    var originalDirectory = Environment.CurrentDirectory;
+
+    try
+    {
+      await File.WriteAllTextAsync(
+          Path.Combine(tempDir, "rexo.json"),
+          """
+          {
+            "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+            "schemaVersion": "1.0",
+            "name": "sample",
+            "outputs": {
+              "manifests": {
+                "commandMode": "aggregate"
+              }
+            },
+            "commands": {
+              "hello": {
+                "description": "Test command",
+                "steps": [
+                  { "id": "say", "run": "echo hello" }
+                ]
+              },
+              "goodbye": {
+                "description": "Test command",
+                "steps": [
+                  { "id": "say", "run": "echo goodbye" }
+                ]
+              }
+            }
+          }
+          """);
+
+      Environment.CurrentDirectory = tempDir;
+      Assert.Equal(0, await Program.ExecuteAsync(["hello", "--quiet"], CancellationToken.None));
+      Assert.Equal(0, await Program.ExecuteAsync(["goodbye", "--quiet"], CancellationToken.None));
+
+      var aggregatePath = Path.Combine(tempDir, "artifacts", "manifests", "commands.json");
+      var latestPath = Path.Combine(tempDir, "artifacts", "manifests", "latest.json");
+      var helloPath = Path.Combine(tempDir, "artifacts", "manifests", "hello.json");
+
+      Assert.True(File.Exists(aggregatePath));
+      Assert.False(File.Exists(latestPath));
+      Assert.False(File.Exists(helloPath));
+
+      var manifestJson = await File.ReadAllTextAsync(aggregatePath);
+      using var doc = JsonDocument.Parse(manifestJson);
+      var commands = doc.RootElement.GetProperty("commands").EnumerateArray().ToArray();
+      Assert.Equal(2, commands.Length);
+      Assert.Equal("hello", commands[0].GetProperty("command").GetString());
+      Assert.Equal("goodbye", commands[1].GetProperty("command").GetString());
+    }
+    finally
+    {
+      Environment.CurrentDirectory = originalDirectory;
+
+      if (Directory.Exists(tempDir))
+      {
+        Directory.Delete(tempDir, true);
+      }
+    }
+  }
+
+  [Fact]
+  public async Task GitHubActionsProviderWritesVariablesToGitHubEnvFile()
+  {
+    var tempDir = Path.Combine(Path.GetTempPath(), $"rexo-cli-gh-env-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(tempDir);
+
+    var originalDirectory = Environment.CurrentDirectory;
+    var originalOut = Console.Out;
+    var originalError = Console.Error;
+    var previousGitHubEnv = Environment.GetEnvironmentVariable("GITHUB_ENV");
+
+    try
+    {
+      var envFile = Path.Combine(tempDir, "github.env");
+      await File.WriteAllTextAsync(envFile, string.Empty);
+
+      await File.WriteAllTextAsync(
+          Path.Combine(tempDir, "rexo.json"),
+          """
+          {
+            "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+            "schemaVersion": "1.0",
+            "name": "sample",
+            "outputs": {
+              "command": {
+                "stdout": false
+              },
+              "ci": {
+                "emit": true,
+                "provider": "github-actions",
+                "prefix": "CI_"
+              }
+            },
+            "versioning": {
+              "provider": "fixed",
+              "fallback": "1.2.3"
+            }
+          }
+          """);
+
+      Environment.SetEnvironmentVariable("GITHUB_ENV", envFile);
+      Environment.CurrentDirectory = tempDir;
+
+      using var stdout = new StringWriter(CultureInfo.InvariantCulture);
+      using var stderr = new StringWriter(CultureInfo.InvariantCulture);
+      Console.SetOut(stdout);
+      Console.SetError(stderr);
+
+      var exitCode = await Program.ExecuteAsync(["version"], CancellationToken.None);
+
+      Assert.Equal(0, exitCode);
+      Assert.True(string.IsNullOrWhiteSpace(stdout.ToString()));
+      Assert.True(string.IsNullOrWhiteSpace(stderr.ToString()));
+
+      var envContent = await File.ReadAllTextAsync(envFile);
+      Assert.Contains("CI_COMMAND_EXECUTED=version", envContent, StringComparison.OrdinalIgnoreCase);
+      Assert.Contains("CI_SUCCESS=true", envContent, StringComparison.OrdinalIgnoreCase);
+    }
+    finally
+    {
+      Console.SetOut(originalOut);
+      Console.SetError(originalError);
+      Environment.SetEnvironmentVariable("GITHUB_ENV", previousGitHubEnv);
+      Environment.CurrentDirectory = originalDirectory;
+
+      if (Directory.Exists(tempDir))
+      {
+        Directory.Delete(tempDir, true);
+      }
+    }
+  }
+
+  [Fact]
+  public async Task GitHubActionsProviderCanWriteVariablesToGitHubOutputFile()
+  {
+    var tempDir = Path.Combine(Path.GetTempPath(), $"rexo-cli-gh-output-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(tempDir);
+
+    var originalDirectory = Environment.CurrentDirectory;
+    var originalOut = Console.Out;
+    var originalError = Console.Error;
+    var previousGitHubOutput = Environment.GetEnvironmentVariable("GITHUB_OUTPUT");
+
+    try
+    {
+      var outputFile = Path.Combine(tempDir, "github.output");
+      await File.WriteAllTextAsync(outputFile, string.Empty);
+
+      await File.WriteAllTextAsync(
+          Path.Combine(tempDir, "rexo.json"),
+          """
+          {
+            "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+            "schemaVersion": "1.0",
+            "name": "sample",
+            "outputs": {
+              "command": {
+                "stdout": false
+              },
+              "ci": {
+                "emit": true,
+                "provider": "github-actions",
+                "github-actions": {
+                  "scope": "output"
+                },
+                "prefix": "CI_"
+              }
+            },
+            "versioning": {
+              "provider": "fixed",
+              "fallback": "1.2.3"
+            }
+          }
+          """);
+
+      Environment.SetEnvironmentVariable("GITHUB_OUTPUT", outputFile);
+      Environment.CurrentDirectory = tempDir;
+
+      using var stdout = new StringWriter(CultureInfo.InvariantCulture);
+      using var stderr = new StringWriter(CultureInfo.InvariantCulture);
+      Console.SetOut(stdout);
+      Console.SetError(stderr);
+
+      var exitCode = await Program.ExecuteAsync(["version"], CancellationToken.None);
+
+      Assert.Equal(0, exitCode);
+      Assert.True(string.IsNullOrWhiteSpace(stdout.ToString()));
+      Assert.True(string.IsNullOrWhiteSpace(stderr.ToString()));
+
+      var outputContent = await File.ReadAllTextAsync(outputFile);
+      Assert.Contains("CI_COMMAND_EXECUTED=version", outputContent, StringComparison.OrdinalIgnoreCase);
+      Assert.Contains("CI_SUCCESS=true", outputContent, StringComparison.OrdinalIgnoreCase);
+    }
+    finally
+    {
+      Console.SetOut(originalOut);
+      Console.SetError(originalError);
+      Environment.SetEnvironmentVariable("GITHUB_OUTPUT", previousGitHubOutput);
+      Environment.CurrentDirectory = originalDirectory;
+
+      if (Directory.Exists(tempDir))
+      {
+        Directory.Delete(tempDir, true);
+      }
+    }
+  }
 }
 

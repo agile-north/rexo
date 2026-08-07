@@ -29,7 +29,7 @@ public sealed class TerraformArtifactProvider : IArtifactProvider
     {
         var workDir = GetWorkDir(artifact, context);
         var dockerImage = ResolveDockerImage(artifact);
-        var fileEnv = RepositoryEnvironmentFiles.Load(context.RepositoryRoot);
+        var fileEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
         var varFile = FeedAuthResolver.ResolveTargetValue(
             defaultEnvName: "TERRAFORM_TARGET_VAR_FILE",
             configuredEnvName: GetSetting(artifact, "target.varFileEnv"),
@@ -78,7 +78,7 @@ public sealed class TerraformArtifactProvider : IArtifactProvider
     {
         var workDir = GetWorkDir(artifact, context);
         var dockerImage = ResolveDockerImage(artifact);
-        var fileEnv = RepositoryEnvironmentFiles.Load(context.RepositoryRoot);
+        var fileEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
         var workspace = FeedAuthResolver.ResolveTargetValue(
             defaultEnvName: "TERRAFORM_TARGET_WORKSPACE",
             configuredEnvName: GetSetting(artifact, "target.workspaceEnv"),

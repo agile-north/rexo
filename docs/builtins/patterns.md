@@ -100,7 +100,7 @@ These mappings are intentionally approximate.
 Approximate (dotnet overlay):
 
 ```bash
-dotnet test -c Release --logger trx --collect "XPlat Code Coverage"
+dotnet test -c Release --logger trx
 ```
 
 Approximate (node overlay):

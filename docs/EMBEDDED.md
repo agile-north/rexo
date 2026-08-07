@@ -445,6 +445,8 @@ Behavior notes:
 - Coverage is enabled by default for the dotnet overlay using `--collect:"XPlat Code Coverage"`.
 - Set `vars.dotnet.test.coverage.mode` to `none` to disable coverage without overriding the `test` command.
 - If you need a non-standard collector or a completely custom test invocation, overriding the `test` command is still the fallback.
+- The analysis `dotnet build` step does not force warnings as errors by default; use `vars.dotnet.analyze.buildExtraArgs` to opt in.
+- Configured output directories are materialized before command steps run and cleaned up after the command if they stay empty.
 
 ## Option Mapping With Step with
 

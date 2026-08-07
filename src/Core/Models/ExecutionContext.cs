@@ -14,6 +14,7 @@ public sealed record ExecutionContext(
     public string? CiProvider { get; init; }
     public bool IsPullRequest { get; init; }
     public bool IsCleanWorkingTree { get; init; }
+    public bool IsDryRun { get; init; }
     public string? CiBuildId { get; init; }
     public string? CiRunNumber { get; init; }
     public string? CiWorkflowName { get; init; }
@@ -23,6 +24,10 @@ public sealed record ExecutionContext(
     public IReadOnlyDictionary<string, string> Args { get; init; } = new Dictionary<string, string>();
     public IReadOnlyDictionary<string, string?> Options { get; init; } = new Dictionary<string, string?>();
     public IReadOnlyDictionary<string, string> FileEnvironment { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
+    public IReadOnlyDictionary<string, string> ResolvedSecrets { get; init; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    public IReadOnlyDictionary<string, SecretResolutionMetadata> SecretMetadata { get; init; } = new Dictionary<string, SecretResolutionMetadata>(StringComparer.OrdinalIgnoreCase);
+    public IReadOnlyDictionary<string, string> MappedSecretEnvironment { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
+    public string CiVariablePrefix { get; init; } = "REXO_";
     public VersionResult? Version { get; init; }
     public IReadOnlyDictionary<string, StepResult> CompletedSteps { get; init; } = new Dictionary<string, StepResult>();
 
@@ -37,6 +42,9 @@ public sealed record ExecutionContext(
 
     /// <summary>Tracks the command call stack for cross-command cycle detection.</summary>
     public IReadOnlyList<string> CommandCallStack { get; init; } = [];
+
+    /// <summary>Maximum delegated command call depth allowed for this execution context.</summary>
+    public int MaxCommandDepth { get; init; } = 5;
 
     public static ExecutionContext Empty(string repositoryRoot) =>
         new(repositoryRoot, null, null, new Dictionary<string, object?>())

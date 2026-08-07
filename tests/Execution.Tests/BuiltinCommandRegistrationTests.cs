@@ -359,6 +359,168 @@ public sealed class BuiltinCommandRegistrationTests
     }
 
     [Fact]
+    public async Task SecretsDoctorReturnsNoSecretsWhenConfigHasNoSecrets()
+    {
+        var config = new RepoConfig(
+            Name: "test",
+            Commands: new Dictionary<string, RepoCommandConfig>(),
+            Aliases: new Dictionary<string, string>())
+        {
+            SchemaVersion = "1.0",
+        };
+
+        var registry = BuiltinCommandRegistration.CreateDefault(config);
+        var executor = new DefaultCommandExecutor(registry);
+
+        var result = await executor.ExecuteAsync("secrets doctor", EmptyInvocation(), CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("No configured secrets", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SecretsDoctorFailsWhenRequiredSecretMissing()
+    {
+        var envName = $"REXO_MISSING_SECRET_{Guid.NewGuid():N}";
+        var config = new RepoConfig(
+            Name: "test",
+            Commands: new Dictionary<string, RepoCommandConfig>(),
+            Aliases: new Dictionary<string, string>())
+        {
+            SchemaVersion = "1.0",
+            Secrets = new RepoSecretsConfig
+            {
+                Defaults = new RepoSecretDefaultsConfig { Provider = "env", Required = true },
+                Items = new Dictionary<string, RepoSecretConfig>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["apiKey"] = new RepoSecretConfig
+                    {
+                        Env = envName,
+                        Required = true,
+                        ExposeInTemplates = true,
+                    },
+                },
+            },
+        };
+
+        var original = Environment.GetEnvironmentVariable(envName);
+        Environment.SetEnvironmentVariable(envName, null);
+
+        try
+        {
+            var registry = BuiltinCommandRegistration.CreateDefault(config);
+            var executor = new DefaultCommandExecutor(registry);
+
+            var result = await executor.ExecuteAsync("secrets preflight", EmptyInvocation(), CancellationToken.None);
+
+            Assert.False(result.Success);
+            Assert.Equal(9, result.ExitCode);
+            Assert.Contains("missing-required", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+            Assert.NotEmpty(result.StructuredErrors);
+            Assert.Equal(ErrorCodes.SecretResolutionFailed, result.StructuredErrors[0].Code);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(envName, original);
+        }
+    }
+
+    [Fact]
+    public async Task SecretsDoctorShowsMappedSecretMetadataWhenResolved()
+    {
+        var envName = $"REXO_PRESENT_SECRET_{Guid.NewGuid():N}";
+        var config = new RepoConfig(
+            Name: "test",
+            Commands: new Dictionary<string, RepoCommandConfig>(),
+            Aliases: new Dictionary<string, string>())
+        {
+            SchemaVersion = "1.0",
+            Secrets = new RepoSecretsConfig
+            {
+                Defaults = new RepoSecretDefaultsConfig { Provider = "env", Required = true },
+                Items = new Dictionary<string, RepoSecretConfig>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["nugetApiKey"] = new RepoSecretConfig
+                    {
+                        Env = envName,
+                        Required = true,
+                        ExposeInTemplates = false,
+                        MapToEnv = "MY_FEED_API_KEY",
+                    },
+                },
+            },
+        };
+
+        var original = Environment.GetEnvironmentVariable(envName);
+        Environment.SetEnvironmentVariable(envName, "present-secret");
+
+        try
+        {
+            var registry = BuiltinCommandRegistration.CreateDefault(config);
+            var executor = new DefaultCommandExecutor(registry);
+
+            var result = await executor.ExecuteAsync("secrets doctor", EmptyInvocation(), CancellationToken.None);
+
+            Assert.True(result.Success);
+            Assert.Contains("resolved", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("mapToEnv=MY_FEED_API_KEY", result.Message ?? string.Empty, StringComparison.Ordinal);
+            Assert.DoesNotContain("present-secret", result.Message ?? string.Empty, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(envName, original);
+        }
+    }
+
+    [Fact]
+    public async Task SecretsDoctorShowsMultipleMappedSecretMetadataWhenResolved()
+    {
+        var envName = $"REXO_PRESENT_SECRET_{Guid.NewGuid():N}";
+        var config = new RepoConfig(
+            Name: "test",
+            Commands: new Dictionary<string, RepoCommandConfig>(),
+            Aliases: new Dictionary<string, string>())
+        {
+            SchemaVersion = "1.0",
+            Secrets = new RepoSecretsConfig
+            {
+                Defaults = new RepoSecretDefaultsConfig { Provider = "env", Required = true },
+                Items = new Dictionary<string, RepoSecretConfig>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["nugetApiKey"] = new RepoSecretConfig
+                    {
+                        Env = envName,
+                        Required = true,
+                        ExposeInTemplates = false,
+                        MapToEnv = "MY_FEED_API_KEY_PRIMARY",
+                        MapToEnvs = ["MY_FEED_API_KEY_SECONDARY", "MY_FEED_API_KEY_TERTIARY"],
+                    },
+                },
+            },
+        };
+
+        var original = Environment.GetEnvironmentVariable(envName);
+        Environment.SetEnvironmentVariable(envName, "present-secret");
+
+        try
+        {
+            var registry = BuiltinCommandRegistration.CreateDefault(config);
+            var executor = new DefaultCommandExecutor(registry);
+
+            var result = await executor.ExecuteAsync("secrets doctor", EmptyInvocation(), CancellationToken.None);
+
+            Assert.True(result.Success);
+            Assert.Contains("resolved", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("mapToEnvs=MY_FEED_API_KEY_PRIMARY, MY_FEED_API_KEY_SECONDARY, MY_FEED_API_KEY_TERTIARY", result.Message ?? string.Empty, StringComparison.Ordinal);
+            Assert.DoesNotContain("present-secret", result.Message ?? string.Empty, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(envName, original);
+        }
+    }
+
+    [Fact]
     public async Task ExplainAliasWithNoMatchingCommandShowsAliasOnly()
     {
         var config = new RepoConfig(
@@ -441,5 +603,155 @@ public sealed class BuiltinCommandRegistrationTests
 
         Assert.True(result.Success);
         Assert.Contains("built-in", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ListOmitsHiddenConfigCommands()
+    {
+        var config = new RepoConfig(
+            Name: "test",
+            Commands: new Dictionary<string, RepoCommandConfig>
+            {
+                ["visible"] = new RepoCommandConfig(
+                    Description: "Shown in list",
+                    Options: [],
+                    Steps: []),
+                ["hidden-helper"] = new RepoCommandConfig(
+                    Description: "Hidden from list",
+                    Options: [],
+                    Steps: [])
+                {
+                    Hidden = true,
+                },
+            },
+            Aliases: [])
+        { SchemaVersion = "1.0" };
+
+        var registry = BuiltinCommandRegistration.CreateDefault(config);
+        var executor = new DefaultCommandExecutor(registry);
+
+        var result = await executor.ExecuteAsync("list", EmptyInvocation(), CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("visible", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("hidden-helper", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ExplainHiddenCommandReturnsCommandDetailsWhenExplicitlyRequested()
+    {
+        var config = new RepoConfig(
+            Name: "test",
+            Commands: new Dictionary<string, RepoCommandConfig>
+            {
+                ["hidden-helper"] = new RepoCommandConfig(
+                    Description: "Reusable hidden helper",
+                    Options: [],
+                    Steps: [new RepoStepConfig { Id = "helper", Uses = "builtin:resolve-version" }])
+                {
+                    Hidden = true,
+                },
+            },
+            Aliases: [])
+        {
+            SchemaVersion = "1.0",
+            Versioning = new RepoVersioningConfig(Provider: "fixed", Fallback: "1.2.3"),
+        };
+
+        var registry = BuiltinCommandRegistration.CreateDefault(config);
+        var executor = new DefaultCommandExecutor(registry);
+
+        var invocation = new CommandInvocation(
+            new Dictionary<string, string> { ["command"] = "hidden-helper" },
+            new Dictionary<string, string?>(),
+            Json: false,
+            JsonFile: null,
+            WorkingDirectory: "C:\\repo");
+
+        var result = await executor.ExecuteAsync("explain", invocation, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("hidden-helper", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Reusable hidden helper", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ExplainAliasToHiddenTargetReturnsAliasAndTargetInfo()
+    {
+        var config = new RepoConfig(
+            Name: "test",
+            Commands: new Dictionary<string, RepoCommandConfig>
+            {
+                ["hidden-helper"] = new RepoCommandConfig(
+                    Description: "Reusable hidden helper",
+                    Options: [],
+                    Steps: [new RepoStepConfig { Id = "helper", Uses = "builtin:resolve-version" }])
+                {
+                    Hidden = true,
+                },
+            },
+            Aliases: new Dictionary<string, string> { ["helper"] = "hidden-helper" })
+        {
+            SchemaVersion = "1.0",
+            Versioning = new RepoVersioningConfig(Provider: "fixed", Fallback: "1.2.3"),
+        };
+
+        var registry = BuiltinCommandRegistration.CreateDefault(config);
+        var executor = new DefaultCommandExecutor(registry);
+
+        var invocation = new CommandInvocation(
+            new Dictionary<string, string> { ["command"] = "helper" },
+            new Dictionary<string, string?>(),
+            Json: false,
+            JsonFile: null,
+            WorkingDirectory: "C:\\repo");
+
+        var result = await executor.ExecuteAsync("explain", invocation, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("helper", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("hidden-helper", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("alias", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ListIncludesHiddenCommandsWhenIncludeHiddenOptionIsTrue()
+    {
+        var config = new RepoConfig(
+            Name: "test",
+            Commands: new Dictionary<string, RepoCommandConfig>
+            {
+                ["visible"] = new RepoCommandConfig(
+                    Description: "Shown in list",
+                    Options: [],
+                    Steps: []),
+                ["hidden-helper"] = new RepoCommandConfig(
+                    Description: "Shown only when requested",
+                    Options: [],
+                    Steps: [])
+                {
+                    Hidden = true,
+                },
+            },
+            Aliases: [])
+        { SchemaVersion = "1.0" };
+
+        var registry = BuiltinCommandRegistration.CreateDefault(config);
+        var executor = new DefaultCommandExecutor(registry);
+        var invocation = new CommandInvocation(
+            new Dictionary<string, string>(),
+            new Dictionary<string, string?>
+            {
+                ["include-hidden"] = "true",
+            },
+            Json: false,
+            JsonFile: null,
+            WorkingDirectory: "C:\\repo");
+
+        var result = await executor.ExecuteAsync("list", invocation, CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Contains("visible", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("hidden-helper", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
     }
 }

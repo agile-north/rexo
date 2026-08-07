@@ -1,5 +1,5 @@
 {
-  "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/policy.schema.json",
+  "$schema": "policy.schema.json",
   "schemaVersion": "1.0",
   "name": "standard-policy",
   "description": "Standard artifact lifecycle policy with user-facing commands.",
@@ -108,7 +108,8 @@
         {
           "id": "post-verify",
           "command": "post-verify",
-          "whenExists": true
+          "whenExists": true,
+          "alwaysRun": true
         }
       ]
     },
@@ -123,6 +124,11 @@
         {
           "id": "version",
           "uses": "builtin:resolve-version"
+        },
+        {
+          "id": "build-content",
+          "command": "build",
+          "whenExists": true
         },
         {
           "id": "pre-build",
@@ -140,7 +146,8 @@
         {
           "id": "post-build",
           "command": "post-build",
-          "whenExists": true
+          "whenExists": true,
+          "alwaysRun": true
         }
       ]
     },
@@ -222,7 +229,8 @@
         {
           "id": "post-release",
           "command": "post-release",
-          "whenExists": true
+          "whenExists": true,
+          "alwaysRun": true
         }
       ]
     },

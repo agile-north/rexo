@@ -61,7 +61,7 @@ Options:
 
 ## Customization Via vars.dotnet
 
-Coverage is enabled by default for the dotnet overlay using `--collect:"XPlat Code Coverage"`.
+Coverage is enabled by default for the dotnet overlay using `--collect:"XPlat Code Coverage"` and writes to `outputs.tests.coverage` by default.
 
 Recommended customization path:
 
@@ -96,6 +96,17 @@ Recommended customization path:
   }
 }
 ```
+
+The runtime materializes configured output directories before command steps run, so
+`analyze` can write reports and SARIF files without shell-specific setup. Empty directories
+that remain unused are removed after the command completes.
+
+The built-in `dotnet build` analysis step also converts the SARIF path to a repo-absolute
+path before passing it to Roslyn, which avoids project-local `artifacts/...` lookups when
+multi-project solutions write a shared `ErrorLog`.
+
+The analysis `dotnet build` step does not force warnings as errors by default. If you want
+that behavior, add `/p:TreatWarningsAsErrors=true` through `vars.dotnet.analyze.buildExtraArgs`.
 
 ### Supported Optional vars
 

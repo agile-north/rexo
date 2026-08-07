@@ -14,6 +14,7 @@
 | `target.source` | `string` | Feed URL/name for push. |
 | `target.sourceEnv` | `string` | Env var name containing feed URL/name (default env key `NUGET_TARGET_SOURCE`). |
 | `target.apiKeyEnv` | `string` | Env var name containing API key/token (default env key `NUGET_API_KEY`). |
+| `ciInference` | `boolean` | Enable CI token fallback (`GITHUB_TOKEN` / `CI_JOB_TOKEN` / `SYSTEM_ACCESSTOKEN`) (default `true`; alias `target.ciInference`). |
 | `symbols.enabled` | `boolean` | When `true`, also pushes matching `.snupkg` symbol packages for this artifact. |
 | `symbols.source` | `string` | Symbol feed URL/name. Defaults to `target.source` when omitted. |
 | `symbols.sourceEnv` | `string` | Env var containing symbol feed URL/name (default env key `NUGET_SYMBOL_TARGET_SOURCE`). |
@@ -27,7 +28,13 @@ Credential resolution order:
 1. `settings.target.apiKeyEnv` (or `NUGET_API_KEY`)
 2. `NUGET_AUTH_TOKEN`
 3. `GITHUB_TOKEN` for `nuget.pkg.github.com`
-4. `SYSTEM_ACCESSTOKEN` for non-GitHub CI fallback (for example Azure Artifacts)
+4. `CI_JOB_TOKEN` when `target.source` points to an explicit GitLab Package Registry NuGet endpoint (`.../api/v4/projects/<id>/packages/nuget/...`)
+5. `SYSTEM_ACCESSTOKEN` for non-GitHub CI fallback (for example Azure Artifacts)
+
+CI inference toggle:
+
+- `settings.ciInference` (or `settings.target.ciInference`) defaults to `true`
+- set to `false` to disable CI token fallback for this artifact
 
 Source resolution order:
 
@@ -48,7 +55,8 @@ Symbol credential resolution order (when `symbols.enabled = true`):
 3. `NUGET_AUTH_TOKEN`
 4. Same token already resolved for primary package push
 5. `GITHUB_TOKEN` for `nuget.pkg.github.com`
-6. `SYSTEM_ACCESSTOKEN` for non-GitHub CI fallback
+6. `CI_JOB_TOKEN` when symbol source points to an explicit GitLab Package Registry NuGet endpoint
+7. `SYSTEM_ACCESSTOKEN` for non-GitHub CI fallback
 
 ## Example
 

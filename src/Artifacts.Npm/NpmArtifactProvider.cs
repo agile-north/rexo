@@ -47,13 +47,13 @@ public sealed class NpmArtifactProvider : IArtifactProvider
         CancellationToken cancellationToken)
     {
         var workDir = GetSetting(artifact, "directory") ?? context.RepositoryRoot;
-        var fileEnv = RepositoryEnvironmentFiles.Load(context.RepositoryRoot);
+        var fileEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
         var registry = ResolveRegistry(artifact, fileEnv);
         var access = GetSetting(artifact, "access") ?? "public";
         var tag = GetSetting(artifact, "tag") ?? context.Version?.SemVer;
         var dockerImage = ResolveDockerImage(artifact, "NPM_CONTAINER_IMAGE");
 
-        var auth = ResolveAuth(registry, GetSetting(artifact, "target.tokenEnv"), fileEnv);
+        var auth = ResolveAuth(artifact, registry, GetSetting(artifact, "target.tokenEnv"), fileEnv);
         IReadOnlyDictionary<string, string?>? envOverrides = auth.HasCredentials
             ? new Dictionary<string, string?> { ["NPM_TOKEN"] = auth.Secret }
             : null;
@@ -99,14 +99,17 @@ public sealed class NpmArtifactProvider : IArtifactProvider
 
     /// <summary>
     /// Resolves npm publish credentials.  Order: target.tokenEnv (or NPM_TOKEN) →
-    /// NODE_AUTH_TOKEN → GITHUB_TOKEN for npm.pkg.github.com.
+    /// NODE_AUTH_TOKEN → GITHUB_TOKEN for npm.pkg.github.com → CI_JOB_TOKEN for
+    /// explicit GitLab package endpoints → SYSTEM_ACCESSTOKEN for Azure Artifacts.
     /// The resolved token is injected as <c>NPM_TOKEN</c> for the publish invocation.
     /// </summary>
     private static FeedAuthResolution ResolveAuth(
+        ArtifactConfig artifact,
         string? registry,
         string? tokenEnvOverride,
         IReadOnlyDictionary<string, string> fileEnv)
     {
+        var ciInferenceEnabled = FeedAuthResolver.IsArtifactCiInferenceEnabled(artifact.Settings);
         var token = FeedAuthResolver.ResolveSecret(
             defaultEnvName: "NPM_TOKEN",
             configuredEnvName: tokenEnvOverride,
@@ -115,15 +118,34 @@ public sealed class NpmArtifactProvider : IArtifactProvider
 
         if (string.IsNullOrWhiteSpace(token))
         {
-            // CI-native fallback for GitHub Packages.
-            if (!string.IsNullOrWhiteSpace(registry) &&
-                registry.Contains("npm.pkg.github.com", StringComparison.OrdinalIgnoreCase))
+            var githubFallback = FeedAuthResolver.ResolveGitHubPackagesTokenAuth(
+                registry,
+                fileEnv,
+                "npm.pkg.github.com",
+                ciInferenceEnabled);
+            if (githubFallback.HasCredentials)
             {
-                token = Environment.GetEnvironmentVariable("GITHUB_TOKEN");
-                if (!string.IsNullOrWhiteSpace(token))
-                {
-                    return new FeedAuthResolution(true, null, token, registry, null, "github-token");
-                }
+                return githubFallback;
+            }
+
+            var gitLabFallback = FeedAuthResolver.ResolveGitLabPackageTokenAuth(
+                registry,
+                fileEnv,
+                username: null,
+                ciInferenceEnabled: ciInferenceEnabled);
+            if (gitLabFallback.HasCredentials)
+            {
+                return gitLabFallback;
+            }
+
+            var azureFallback = FeedAuthResolver.ResolveAzureArtifactsTokenAuth(
+                endpoint: registry,
+                fileEnv: fileEnv,
+                username: null,
+                ciInferenceEnabled: ciInferenceEnabled);
+            if (azureFallback.HasCredentials)
+            {
+                return azureFallback;
             }
 
             return new FeedAuthResolution(false, null, null, registry, null, "none");

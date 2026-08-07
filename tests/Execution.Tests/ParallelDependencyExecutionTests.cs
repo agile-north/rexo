@@ -75,6 +75,41 @@ public sealed class ParallelDependencyExecutionTests
         Assert.Contains("deadlock/cycle", failure.Outputs["error"]?.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task AlwaysRunStepsExecuteAfterHardFailure()
+    {
+        var (executor, builtins) = CreateExecutorWithCommand(
+            [
+                new RepoStepConfig(Id: "fail", Uses: "builtin:fail"),
+                new RepoStepConfig(Id: "report", Uses: "builtin:report", AlwaysRun: true),
+                new RepoStepConfig(Id: "skip", Uses: "builtin:skip"),
+            ],
+            maxParallel: null);
+
+        var calls = new List<string>();
+        builtins.Register("builtin:fail", static (_, _, _) =>
+            Task.FromResult(new StepResult("fail", false, 17, TimeSpan.Zero, new Dictionary<string, object?>())));
+        builtins.Register("builtin:report", (_, _, _) =>
+        {
+            calls.Add("report");
+            return Task.FromResult(new StepResult("report", true, 0, TimeSpan.Zero, new Dictionary<string, object?>()));
+        });
+        builtins.Register("builtin:skip", (_, _, _) =>
+        {
+            calls.Add("skip");
+            return Task.FromResult(new StepResult("skip", true, 0, TimeSpan.Zero, new Dictionary<string, object?>()));
+        });
+
+        var result = await ExecuteAsync(executor, "dep-test");
+
+        Assert.False(result.Success);
+        Assert.Equal(17, result.ExitCode);
+        Assert.Equal(["report"], calls);
+        Assert.Equal(2, result.Steps.Count);
+        Assert.Equal("fail", result.Steps[0].StepId);
+        Assert.Equal("report", result.Steps[1].StepId);
+    }
+
     private static (DefaultCommandExecutor Executor, BuiltinRegistry Builtins) CreateExecutorWithCommand(
         IReadOnlyList<RepoStepConfig> steps,
         int? maxParallel)

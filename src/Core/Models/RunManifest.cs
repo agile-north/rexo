@@ -1,5 +1,7 @@
 namespace Rexo.Core.Models;
 
+using System.Text.Json.Serialization;
+
 public sealed record RunManifest
 {
     public string SchemaVersion { get; init; } = "1.0";
@@ -40,6 +42,7 @@ public sealed record RunManifest
     public string? InformationalVersion { get; init; }
 
     /// <summary>NuGet-compatible version string derived from the resolved version.</summary>
+    [JsonPropertyName("nugetVersion")]
     public string? NuGetVersion { get; init; }
 }
 
@@ -52,6 +55,24 @@ public sealed record StepManifestEntry(
     /// <summary>Files produced by this step, keyed by logical output name.</summary>
     public IReadOnlyDictionary<string, IReadOnlyList<string>> FileOutputs { get; init; } =
         new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Actual execution mode used for this step (for example: native, container).</summary>
+    public string? ExecutionMode { get; init; }
+
+    /// <summary>Requested execution mode before any fallback was applied.</summary>
+    public string? RequestedExecutionMode { get; init; }
+
+    /// <summary>Container image configured for the step when applicable.</summary>
+    public string? ContainerImage { get; init; }
+
+    /// <summary>Working directory used inside the container when applicable.</summary>
+    public string? ContainerWorkingDirectory { get; init; }
+
+    /// <summary>True when container execution was requested but native execution was used instead.</summary>
+    public bool? ContainerFallbackUsed { get; init; }
+
+    /// <summary>Machine-readable fallback reason.</summary>
+    public string? ContainerFallbackReason { get; init; }
 }
 
 public sealed record ArtifactManifestEntry(

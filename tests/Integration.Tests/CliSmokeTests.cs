@@ -229,6 +229,59 @@ public sealed class CliSmokeTests
     }
 
     [Fact]
+    public async Task ConfigCommandCleansUpEmptyAnalysisOutputDirectories()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"rexo-cli-analysis-dirs-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        var originalDirectory = Environment.CurrentDirectory;
+
+        try
+        {
+            await File.WriteAllTextAsync(
+                    Path.Combine(tempDir, "rexo.json"),
+                    """
+                                {
+                                    "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+                                    "schemaVersion": "1.0",
+                                    "name": "sample",
+                                    "outputs": {
+                                        "analysis": {
+                                            "reports": "artifacts/analysis",
+                                            "sarif": "artifacts/analysis/sarif"
+                                        }
+                                    },
+                                    "commands": {
+                                        "noop": {
+                                            "steps": [
+                                                { "run": "dotnet --version" }
+                                            ]
+                                        }
+                                    }
+                                }
+                                """);
+
+            Environment.CurrentDirectory = tempDir;
+
+            var exitCode = await Program.ExecuteAsync(["noop"], CancellationToken.None);
+            Assert.Equal(0, exitCode);
+
+            Assert.False(Directory.Exists(Path.Combine(tempDir, "artifacts", "analysis")));
+            Assert.False(Directory.Exists(Path.Combine(tempDir, "artifacts", "analysis", "sarif")));
+            Assert.True(File.Exists(Path.Combine(tempDir, "artifacts", "manifests", "commands.json")));
+        }
+        finally
+        {
+            Environment.CurrentDirectory = originalDirectory;
+
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, true);
+            }
+        }
+    }
+
+    [Fact]
     public async Task PolicyCommandAppearsInListAndExecutesDirectly()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), $"rexo-cli-policy-{Guid.NewGuid():N}");
@@ -552,10 +605,15 @@ public sealed class CliSmokeTests
             var output = await File.ReadAllTextAsync(outFile);
             Assert.Contains("standard", output, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("dotnet", output, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("git-tag", output, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("none", output, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("node", output, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("dotnet-library", output, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("dotnet-api", output, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("github-status", output, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("github-sarif", output, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("gitlab-status", output, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("github-release", output, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -807,6 +865,64 @@ public sealed class CliSmokeTests
     }
 
     [Fact]
+    public async Task ListIncludeHiddenShowsHiddenCommandsWhenRequested()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), $"rexo-cli-list-hidden-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+
+        var originalDirectory = Environment.CurrentDirectory;
+
+        try
+        {
+            await File.WriteAllTextAsync(
+                    Path.Combine(tempDir, "rexo.json"),
+                    """
+                                {
+                                    "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+                                    "schemaVersion": "1.0",
+                                    "name": "sample",
+                                    "commands": {
+                                        "visible": {
+                                            "steps": [
+                                                { "run": "echo visible" }
+                                            ]
+                                        },
+                                        "hidden-helper": {
+                                            "hidden": true,
+                                            "steps": [
+                                                { "run": "echo hidden" }
+                                            ]
+                                        }
+                                    }
+                                }
+                                """);
+
+            Environment.CurrentDirectory = tempDir;
+
+            var defaultListJsonPath = Path.Combine(tempDir, "list-default.json");
+            var defaultListExitCode = await Program.ExecuteAsync(["--json-file", defaultListJsonPath, "--json", "list"], CancellationToken.None);
+            Assert.Equal(0, defaultListExitCode);
+
+            var defaultListOutput = await File.ReadAllTextAsync(defaultListJsonPath);
+            Assert.Contains("visible", defaultListOutput, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("hidden-helper", defaultListOutput, StringComparison.OrdinalIgnoreCase);
+
+            var includeHiddenListJsonPath = Path.Combine(tempDir, "list-include-hidden.json");
+            var includeHiddenListExitCode = await Program.ExecuteAsync(["--json-file", includeHiddenListJsonPath, "--json", "list", "--include-hidden"], CancellationToken.None);
+            Assert.Equal(0, includeHiddenListExitCode);
+
+            var includeHiddenListOutput = await File.ReadAllTextAsync(includeHiddenListJsonPath);
+            Assert.Contains("visible", includeHiddenListOutput, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("hidden-helper", includeHiddenListOutput, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Environment.CurrentDirectory = originalDirectory;
+            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
     public async Task StandardTestStandaloneRunsGracefullyWithNoInnerLayer()
     {
         // When extends: ["embedded:standard"] is used alone (no dotnet/node layer),
@@ -847,7 +963,7 @@ public sealed class CliSmokeTests
     }
 
     [Fact]
-    public async Task StandardDotnetLayerModeReleaseBuildCallDoesNotIncludeDotnetBuildSteps()
+    public async Task StandardDotnetLayerModeReleaseBuildCallIncludesDotnetBuildSteps()
     {
         // Verify that when standard + dotnet are merged with layer mode,
         // the 'build' command that 'release' calls does NOT include dotnet.build steps.
@@ -888,9 +1004,9 @@ public sealed class CliSmokeTests
             Assert.Contains("build-artifacts", output, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("tag-artifacts", output, StringComparison.OrdinalIgnoreCase);
 
-            // But should NOT include dotnet-specific steps
-            Assert.DoesNotContain("dotnet build", output, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("dotnet-build", output, StringComparison.OrdinalIgnoreCase);
+            // And should include the dotnet overlay build step in the continuation slot
+            Assert.Contains("dotnet build", output, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("dotnet-build", output, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {

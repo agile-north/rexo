@@ -313,9 +313,39 @@ public sealed partial class RepoConfigurationLoader
                 Required = childSecret.Required ?? baseSecret.Required,
                 ExposeInTemplates = childSecret.ExposeInTemplates ?? baseSecret.ExposeInTemplates,
                 MapToEnv = childSecret.MapToEnv ?? baseSecret.MapToEnv,
+                MapToEnvs = MergeSecretEnvironmentAliases(baseSecret.MapToEnvs, childSecret.MapToEnvs),
                 Cache = MergeSecretCache(baseSecret.Cache, childSecret.Cache),
                 Settings = MergeDictionaries(baseSecret.Settings, childSecret.Settings),
             };
+        }
+
+        return result;
+    }
+
+    private static IReadOnlyList<string>? MergeSecretEnvironmentAliases(
+        IReadOnlyList<string>? @base,
+        IReadOnlyList<string>? child)
+    {
+        if (@base is null or { Count: 0 }) return child;
+        if (child is null or { Count: 0 }) return @base;
+
+        var result = new List<string>(@base.Count + child.Count);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var value in @base)
+        {
+            if (!string.IsNullOrWhiteSpace(value) && seen.Add(value))
+            {
+                result.Add(value);
+            }
+        }
+
+        foreach (var value in child)
+        {
+            if (!string.IsNullOrWhiteSpace(value) && seen.Add(value))
+            {
+                result.Add(value);
+            }
         }
 
         return result;

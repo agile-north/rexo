@@ -174,7 +174,8 @@ If you want one secret name to use 1Password locally and env in CI, prefer a run
 
 - Required secrets fail command execution during preflight when unresolved.
 - Optional secrets are warmed for template use when `exposeInTemplates` is true.
-- `mapToEnv` injects resolved values into runtime environment for command steps and artifact provider auth resolution.
+- `mapToEnv` injects a primary runtime environment variable, and `mapToEnvs` can add more aliases.
+- Those aliases flow into command steps, container-wrapped run steps, and artifact provider auth resolution.
 - `providerChain` makes it easy to prefer local tooling such as 1Password on developer machines and native CI secret sources in pipelines without branching scripts.
 
 ## Exec provider example

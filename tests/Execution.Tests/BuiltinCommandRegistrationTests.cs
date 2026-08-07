@@ -473,6 +473,54 @@ public sealed class BuiltinCommandRegistrationTests
     }
 
     [Fact]
+    public async Task SecretsDoctorShowsMultipleMappedSecretMetadataWhenResolved()
+    {
+        var envName = $"REXO_PRESENT_SECRET_{Guid.NewGuid():N}";
+        var config = new RepoConfig(
+            Name: "test",
+            Commands: new Dictionary<string, RepoCommandConfig>(),
+            Aliases: new Dictionary<string, string>())
+        {
+            SchemaVersion = "1.0",
+            Secrets = new RepoSecretsConfig
+            {
+                Defaults = new RepoSecretDefaultsConfig { Provider = "env", Required = true },
+                Items = new Dictionary<string, RepoSecretConfig>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["nugetApiKey"] = new RepoSecretConfig
+                    {
+                        Env = envName,
+                        Required = true,
+                        ExposeInTemplates = false,
+                        MapToEnv = "MY_FEED_API_KEY_PRIMARY",
+                        MapToEnvs = ["MY_FEED_API_KEY_SECONDARY", "MY_FEED_API_KEY_TERTIARY"],
+                    },
+                },
+            },
+        };
+
+        var original = Environment.GetEnvironmentVariable(envName);
+        Environment.SetEnvironmentVariable(envName, "present-secret");
+
+        try
+        {
+            var registry = BuiltinCommandRegistration.CreateDefault(config);
+            var executor = new DefaultCommandExecutor(registry);
+
+            var result = await executor.ExecuteAsync("secrets doctor", EmptyInvocation(), CancellationToken.None);
+
+            Assert.True(result.Success);
+            Assert.Contains("resolved", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("mapToEnvs=MY_FEED_API_KEY_PRIMARY, MY_FEED_API_KEY_SECONDARY, MY_FEED_API_KEY_TERTIARY", result.Message ?? string.Empty, StringComparison.Ordinal);
+            Assert.DoesNotContain("present-secret", result.Message ?? string.Empty, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(envName, original);
+        }
+    }
+
+    [Fact]
     public async Task ExplainAliasWithNoMatchingCommandShowsAliasOnly()
     {
         var config = new RepoConfig(

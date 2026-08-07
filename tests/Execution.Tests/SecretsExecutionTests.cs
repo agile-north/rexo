@@ -421,6 +421,50 @@ public sealed class SecretsExecutionTests
     }
 
     [Fact]
+    public async Task SecretMapToEnvAliasesAreInjectedForRunStepEnvironment()
+    {
+        var config = CreateConfig(
+            runCommand: "pwsh -NoProfile -Command \"if ([Environment]::GetEnvironmentVariable('REXO_MAPPED_SECRET_PRIMARY') -eq 'mapped-value' -and [Environment]::GetEnvironmentVariable('REXO_MAPPED_SECRET_SECONDARY') -eq 'mapped-value' -and [Environment]::GetEnvironmentVariable('REXO_MAPPED_SECRET_TERTIARY') -eq 'mapped-value') { Write-Output ok } else { Write-Output bad; exit 7 }\"",
+            secrets: new RepoSecretsConfig
+            {
+                Defaults = new RepoSecretDefaultsConfig { Provider = "env", Required = true },
+                Items = new Dictionary<string, RepoSecretConfig>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["mappedSecret"] = new RepoSecretConfig
+                    {
+                        Env = "REXO_TEST_MAPPED_SECRET_ALIASES",
+                        MapToEnv = "REXO_MAPPED_SECRET_PRIMARY",
+                        MapToEnvs = ["REXO_MAPPED_SECRET_SECONDARY", "REXO_MAPPED_SECRET_TERTIARY"],
+                        Required = true,
+                        ExposeInTemplates = false,
+                    },
+                },
+            });
+
+        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+
+        var original = Environment.GetEnvironmentVariable("REXO_TEST_MAPPED_SECRET_ALIASES");
+        try
+        {
+            Environment.SetEnvironmentVariable("REXO_TEST_MAPPED_SECRET_ALIASES", "mapped-value");
+
+            var result = await ExecuteConfigCommandAsync(config, tempRoot);
+
+            Assert.True(result.Success);
+            var step = Assert.Single(result.Steps);
+            Assert.Equal(0, step.ExitCode);
+            Assert.True(step.Outputs.TryGetValue("stdout", out var stdoutObj));
+            Assert.Contains("ok", Assert.IsType<string>(stdoutObj), StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("REXO_TEST_MAPPED_SECRET_ALIASES", original);
+            Directory.Delete(tempRoot, true);
+        }
+    }
+
+    [Fact]
     public async Task SecretsDoctorUsesLocalRuntimeProviderChainWhenNotInCi()
     {
         var config = CreateConfig(

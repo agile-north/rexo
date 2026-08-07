@@ -260,6 +260,13 @@
           "type": "string",
           "description": "Optional environment variable name to inject the resolved secret into at runtime."
         },
+        "mapToEnvs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional additional environment variable names to inject the resolved secret into at runtime."
+        },
         "cache": {
           "$ref": "#/$defs/secretCacheConfig"
         },

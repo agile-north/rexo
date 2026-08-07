@@ -134,15 +134,19 @@ internal sealed class ConfigSecretResolver : ISecretResolver
 
         if (result.Success)
         {
+            var mappedEnvironmentNames = GetMappedEnvironmentNames(item);
             var exposeInTemplates = item.ExposeInTemplates ?? true;
             if (exposeInTemplates && result.Value is not null)
             {
                 _resolvedValues[name] = result.Value;
             }
 
-            if (!string.IsNullOrWhiteSpace(item.MapToEnv) && result.Value is not null)
+            if (result.Value is not null)
             {
-                _mappedEnvironment[item.MapToEnv] = result.Value;
+                foreach (var mappedEnvironmentName in mappedEnvironmentNames)
+                {
+                    _mappedEnvironment[mappedEnvironmentName] = result.Value;
+                }
             }
 
             _metadata[name] = new SecretResolutionMetadata(
@@ -150,7 +154,7 @@ internal sealed class ConfigSecretResolver : ISecretResolver
                 result.Source,
                 IsRequired(item),
                 result.Cached,
-                item.MapToEnv);
+                mappedEnvironmentNames);
         }
 
         if (cachePolicy.Enabled)
@@ -160,6 +164,35 @@ internal sealed class ConfigSecretResolver : ISecretResolver
 
         cancellationToken.ThrowIfCancellationRequested();
         return result;
+    }
+
+    private static IReadOnlyList<string> GetMappedEnvironmentNames(RepoSecretConfig item)
+    {
+        if (string.IsNullOrWhiteSpace(item.MapToEnv) && item.MapToEnvs is not { Count: > 0 })
+        {
+            return Array.Empty<string>();
+        }
+
+        var mappedNames = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        if (!string.IsNullOrWhiteSpace(item.MapToEnv) && seen.Add(item.MapToEnv))
+        {
+            mappedNames.Add(item.MapToEnv);
+        }
+
+        if (item.MapToEnvs is { Count: > 0 } mapToEnvs)
+        {
+            foreach (var mappedName in mapToEnvs)
+            {
+                if (!string.IsNullOrWhiteSpace(mappedName) && seen.Add(mappedName))
+                {
+                    mappedNames.Add(mappedName);
+                }
+            }
+        }
+
+        return mappedNames.Count == 0 ? Array.Empty<string>() : mappedNames;
     }
 
     private async Task<SecretResolution> ResolveFromCandidateChainAsync(

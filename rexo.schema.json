@@ -39,12 +39,12 @@
     "description": {
       "type": "string",
       "description": "Optional longer description of the repository runtime.",
-      "markdownDescription": "Optional longer description of the repository runtime. Leave it out if you do not need a human-readable summary.",
+      "markdownDescription": "Optional longer description of the repository runtime. Leave it out if you do not need a human-readable summary."
     },
     "version": {
       "type": "string",
       "description": "Optional static version string. Most repositories should prefer the versioning section instead.",
-      "markdownDescription": "Optional static version string. Most repositories should prefer the `versioning` section instead.",
+      "markdownDescription": "Optional static version string. Most repositories should prefer the `versioning` section instead."
     },
     "extends": {
       "type": "array",
@@ -334,7 +334,7 @@
         "contractVersion": {
           "type": "string",
           "description": "Capability contract version expected by this config. Current runtime contract is 1.0.",
-          "markdownDescription": "Capability contract version expected by this config. Current runtime contract is `1.0`.",
+          "markdownDescription": "Capability contract version expected by this config. Current runtime contract is `1.0`."
         },
         "required": {
           "type": "array",

@@ -32,7 +32,7 @@ public sealed record SecretResolutionMetadata(
     string Source,
     bool Required,
     bool Cached,
-    string? Mapping = null);
+    IReadOnlyList<string>? Mappings = null);
 
 /// <summary>
 /// Cache policy for a secret provider request.

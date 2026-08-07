@@ -576,9 +576,14 @@ public static class BuiltinCommandRegistration
                 $"source={source}",
             };
 
-            if (!string.IsNullOrWhiteSpace(definition.MapToEnv))
+            var mappedEnvironmentNames = resolved && metadata?.Mappings is { Count: > 0 }
+                ? metadata.Mappings
+                : GetMappedEnvironmentNames(definition);
+            if (mappedEnvironmentNames is { Count: > 0 })
             {
-                details.Add($"mapToEnv={definition.MapToEnv}");
+                details.Add(mappedEnvironmentNames.Count == 1
+                    ? $"mapToEnv={mappedEnvironmentNames[0]}"
+                    : $"mapToEnvs={string.Join(", ", mappedEnvironmentNames)}");
             }
 
             lines.Add($"  [{(resolved ? "OK" : "WARN")}] {name}: {status} ({string.Join(", ", details)})");
@@ -637,6 +642,35 @@ public static class BuiltinCommandRegistration
             System.Text.Json.JsonValueKind.String => value.GetString() ?? string.Empty,
             _ => value.ToString(),
         };
+
+    private static IReadOnlyList<string> GetMappedEnvironmentNames(RepoSecretConfig definition)
+    {
+        if (string.IsNullOrWhiteSpace(definition.MapToEnv) && definition.MapToEnvs is not { Count: > 0 })
+        {
+            return Array.Empty<string>();
+        }
+
+        var mappedNames = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        if (!string.IsNullOrWhiteSpace(definition.MapToEnv) && seen.Add(definition.MapToEnv))
+        {
+            mappedNames.Add(definition.MapToEnv);
+        }
+
+        if (definition.MapToEnvs is { Count: > 0 } mapToEnvs)
+        {
+            foreach (var mappedName in mapToEnvs)
+            {
+                if (!string.IsNullOrWhiteSpace(mappedName) && seen.Add(mappedName))
+                {
+                    mappedNames.Add(mappedName);
+                }
+            }
+        }
+
+        return mappedNames.Count == 0 ? Array.Empty<string>() : mappedNames;
+    }
 
     private static CommandResult RunConfigResolved(RepoConfig? config)
     {

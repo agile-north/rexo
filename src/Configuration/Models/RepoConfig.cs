@@ -385,6 +385,9 @@ public sealed record RepoSecretConfig
     /// <summary>Optional runtime environment variable mapping for command steps.</summary>
     public string? MapToEnv { get; init; }
 
+    /// <summary>Optional additional runtime environment variable mappings for command steps and providers.</summary>
+    public IReadOnlyList<string>? MapToEnvs { get; init; }
+
     /// <summary>Per-secret cache override.</summary>
     public RepoSecretCacheConfig? Cache { get; init; }
 

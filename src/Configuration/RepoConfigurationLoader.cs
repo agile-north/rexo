@@ -329,26 +329,11 @@ public sealed partial class RepoConfigurationLoader
         if (@base is null or { Count: 0 }) return child;
         if (child is null or { Count: 0 }) return @base;
 
-        var result = new List<string>(@base.Count + child.Count);
-        var seen = new HashSet<string>(StringComparer.Ordinal);
-
-        foreach (var value in @base)
-        {
-            if (!string.IsNullOrWhiteSpace(value) && seen.Add(value))
-            {
-                result.Add(value);
-            }
-        }
-
-        foreach (var value in child)
-        {
-            if (!string.IsNullOrWhiteSpace(value) && seen.Add(value))
-            {
-                result.Add(value);
-            }
-        }
-
-        return result;
+        return @base
+            .Concat(child)
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
     }
 
     private static IReadOnlyList<RepoSecretProviderRouteConfig>? MergeSecretRoutes(

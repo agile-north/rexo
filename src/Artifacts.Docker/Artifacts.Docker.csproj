@@ -2,5 +2,6 @@
   <ItemGroup>
     <ProjectReference Include="..\\Artifacts\\Artifacts.csproj" />
     <ProjectReference Include="..\\Core\\Core.csproj" />
+    <ProjectReference Include="..\Templating\Templating.csproj" />
   </ItemGroup>
 </Project>

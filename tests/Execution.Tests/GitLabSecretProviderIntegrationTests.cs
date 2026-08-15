@@ -15,7 +15,7 @@ public sealed class GitLabSecretProviderIntegrationTests
     [Fact]
     public async Task SecretsDoctorUsesGitLabApiVariablesModeWithCiJobTokenPrecedence()
     {
-        var (listener, baseUrl) = StartLoopbackServer();
+        using var listener = StartLoopbackServer(out var baseUrl);
         var serverTask = Task.Run(async () =>
         {
             try
@@ -89,14 +89,13 @@ public sealed class GitLabSecretProviderIntegrationTests
             Environment.SetEnvironmentVariable("GITLAB_TOKEN", originalGitLabToken);
             Directory.Delete(tempRoot, true);
             await serverTask;
-            listener.Close();
         }
     }
 
     [Fact]
     public async Task SecretsDoctorUsesGitLabVaultModeWithOidcTokenEnv()
     {
-        var (listener, baseUrl) = StartLoopbackServer();
+        using var listener = StartLoopbackServer(out var baseUrl);
         var serverTask = Task.Run(async () =>
         {
             try
@@ -180,7 +179,6 @@ public sealed class GitLabSecretProviderIntegrationTests
             Environment.SetEnvironmentVariable("REXO_TEST_OIDC_TOKEN", originalOidc);
             Directory.Delete(tempRoot, true);
             await serverTask;
-            listener.Close();
         }
     }
 
@@ -192,9 +190,9 @@ public sealed class GitLabSecretProviderIntegrationTests
         response.OutputStream.Close();
     }
 
-    private static (HttpListener Listener, string BaseUrl) StartLoopbackServer()
+    private static HttpListener StartLoopbackServer(out string baseUrl)
     {
-        var tcpListener = new TcpListener(IPAddress.Loopback, 0);
+        using var tcpListener = new TcpListener(IPAddress.Loopback, 0);
         tcpListener.Start();
         var port = ((IPEndPoint)tcpListener.LocalEndpoint).Port;
         tcpListener.Stop();
@@ -204,7 +202,8 @@ public sealed class GitLabSecretProviderIntegrationTests
         listener.Prefixes.Add(prefix);
         listener.Start();
 
-        return (listener, prefix.TrimEnd('/'));
+        baseUrl = prefix.TrimEnd('/');
+        return listener;
     }
 
     private static async Task<CommandResult> ExecuteBuiltinCommandAsync(RepoConfig config, string repositoryRoot, string commandName)

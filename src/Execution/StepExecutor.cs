@@ -166,9 +166,11 @@ public sealed class StepExecutor : IStepExecutor
         // Write stdout to OutputFile if specified
         if (!string.IsNullOrEmpty(stepDefinition.OutputFile) && !string.IsNullOrEmpty(maskedStdout))
         {
-            var outputFilePath = Path.IsPathRooted(stepDefinition.OutputFile)
-                ? stepDefinition.OutputFile
-                : Path.Combine(context.RepositoryRoot, stepDefinition.OutputFile);
+            var renderedOutputFile = _templateRenderer.Render(stepDefinition.OutputFile, context);
+            var outputFilePath = Path.GetFullPath(
+                Path.IsPathRooted(renderedOutputFile)
+                    ? renderedOutputFile
+                    : Path.Combine(context.RepositoryRoot, renderedOutputFile));
             var dir = Path.GetDirectoryName(outputFilePath);
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
             await File.WriteAllTextAsync(outputFilePath, maskedStdout, cancellationToken);

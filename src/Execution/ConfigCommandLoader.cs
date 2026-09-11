@@ -8,6 +8,7 @@ using Rexo.Core.Abstractions;
 using Rexo.Core.Environment;
 using Rexo.Core.Models;
 using Rexo.Execution.Secrets;
+using Rexo.Templating;
 using Rexo.Versioning;
 
 public sealed class ConfigCommandLoader
@@ -141,7 +142,6 @@ public sealed class ConfigCommandLoader
         CancellationToken cancellationToken)
     {
         var emitRuntimeFiles = ShouldEmitRuntimeFiles(config);
-        var outputRoot = ResolveOutputRoot(config);
         var ciVariablePrefix = ResolveCiVariablePrefix(config);
         var normalizedCommandConfig = NormalizeCommandConfig(commandConfig);
         var globalMaxDepth = config.Runtime?.Commands?.MaxDepth ?? DefaultMaxCommandDepth;
@@ -174,10 +174,7 @@ public sealed class ConfigCommandLoader
             };
         }
 
-        var resolvedOutputs = BuildOutputsContext(config);
-        var createdOutputDirectories = emitRuntimeFiles
-            ? EnsureConfiguredOutputDirectories(repositoryRoot, resolvedOutputs)
-            : [];
+        IReadOnlyList<string> createdOutputDirectories = [];
 
         try
         {
@@ -208,11 +205,18 @@ public sealed class ConfigCommandLoader
                 CiVariablePrefix = ciVariablePrefix,
                 IsDryRun = TryGetOptionBoolean(invocation.Options, "dry-run") == true,
                 CommandCallStack = [.. invocation.CallStack, commandName],
-                ResolvedOutputs = resolvedOutputs,
+                ResolvedOutputs = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase),
                 ResolvedSettings = BuildSettingsContext(config),
                 ResolvedVars = BuildVarsContext(config),
                 MaxCommandDepth = effectiveMaxDepth,
             };
+
+            var resolvedOutputs = BuildOutputsContext(config, context);
+            context = context with { ResolvedOutputs = resolvedOutputs };
+            var outputRoot = ResolveOutputRoot(config, context);
+            createdOutputDirectories = emitRuntimeFiles
+                ? EnsureConfiguredOutputDirectories(repositoryRoot, resolvedOutputs)
+                : [];
 
             var stepExecutor = new StepExecutor(commandExecutor, _templateRenderer, _builtinRegistry);
             var stepResults = new List<StepResult>();
@@ -327,7 +331,9 @@ public sealed class ConfigCommandLoader
 
             if (emitRuntimeFiles)
             {
-                await WriteCommandManifestAsync(repositoryRoot, outputRoot, config, commandName, commandResult, cancellationToken);
+                var manifestDirectory = ResolveOutputPath(resolvedOutputs, "manifests")
+                    ?? Path.Combine(outputRoot, "manifests");
+                await WriteCommandManifestAsync(repositoryRoot, config, manifestDirectory, commandName, commandResult, cancellationToken);
             }
 
             return commandResult;
@@ -369,7 +375,7 @@ public sealed class ConfigCommandLoader
                 continue;
             }
 
-            var artifactConfig = ToArtifactConfig(artifactCfg, config, ResolveOutputRoot(config));
+            var artifactConfig = ToArtifactConfig(artifactCfg, config, ResolveOutputRoot(config, ctx));
             var result = await provider.BuildAsync(artifactConfig, ctx, cancellationToken);
             if (!result.Success)
             {
@@ -410,7 +416,7 @@ public sealed class ConfigCommandLoader
                 continue;
             }
 
-            await provider.TagAsync(ToArtifactConfig(artifactCfg, config, ResolveOutputRoot(config)), ctx, cancellationToken);
+            await provider.TagAsync(ToArtifactConfig(artifactCfg, config, ResolveOutputRoot(config, ctx)), ctx, cancellationToken);
         }
 
         return new StepResult(stepId, true, 0, TimeSpan.Zero,
@@ -1027,7 +1033,7 @@ public sealed class ConfigCommandLoader
     }
 
     internal static string ResolveArtifactName(RepoArtifactConfig artifactCfg, RepoConfig config) =>
-        string.IsNullOrWhiteSpace(artifactCfg.Name)
+        artifactCfg.Name is null
             ? config.Name
             : artifactCfg.Name;
 
@@ -1171,13 +1177,13 @@ public sealed class ConfigCommandLoader
 
     private static async Task WriteCommandManifestAsync(
         string repositoryRoot,
-        string outputRoot,
         RepoConfig config,
+        string manifestDirectory,
         string commandName,
         CommandResult commandResult,
         CancellationToken cancellationToken)
     {
-        var manifestsDir = ResolveManifestsDirectory(repositoryRoot, outputRoot, config);
+        var manifestsDir = Path.Combine(repositoryRoot, manifestDirectory);
         Directory.CreateDirectory(manifestsDir);
 
         var mode = string.Equals(config.Outputs?.Manifests?.CommandMode, "perCommand", StringComparison.OrdinalIgnoreCase)
@@ -1390,6 +1396,29 @@ public sealed class ConfigCommandLoader
         string.IsNullOrWhiteSpace(config.Outputs?.Root)
             ? DefaultOutputRoot
             : config.Outputs.Root!;
+
+    internal static string ResolveOutputRoot(RepoConfig config, ExecutionContext context) =>
+        ResolveOutputRoot(config, context, new TemplateRenderer());
+
+    private static string ResolveOutputRoot(
+        RepoConfig config,
+        ExecutionContext? context,
+        ITemplateRenderer? templateRenderer)
+    {
+        var configuredRoot = config.Outputs?.Root;
+        if (string.IsNullOrWhiteSpace(configuredRoot))
+        {
+            return DefaultOutputRoot;
+        }
+
+        if (context is null || templateRenderer is null)
+        {
+            return configuredRoot!;
+        }
+
+        var renderedRoot = templateRenderer.Render(configuredRoot, context);
+        return string.IsNullOrWhiteSpace(renderedRoot) ? DefaultOutputRoot : renderedRoot;
+    }
 
     internal static bool ShouldEmitRuntimeFiles(RepoConfig config) =>
         config.Outputs?.Emit ?? true;
@@ -1826,80 +1855,79 @@ public sealed class ConfigCommandLoader
     /// Builds the nested <c>outputs.*</c> dictionary from the resolved output paths.
     /// Missing values fall back to standard defaults under the artifacts root.
     /// </summary>
-    public static IReadOnlyDictionary<string, object?> BuildOutputsContext(RepoConfig config)
+    public static IReadOnlyDictionary<string, object?> BuildOutputsContext(RepoConfig config) =>
+        BuildOutputsContext(config, null);
+
+    public static IReadOnlyDictionary<string, object?> BuildOutputsContext(
+        RepoConfig config,
+        ExecutionContext? context)
     {
+        var templateRenderer = context is null ? null : new TemplateRenderer();
         var emit = config.Outputs?.Emit ?? true;
-        var root = config.Outputs?.Root ?? DefaultOutputRoot;
+        var root = ResolveOutputRoot(config, context, templateRenderer);
+
+        var outputs = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["emit"] = emit ? "true" : "false",
+            ["root"] = root,
+        };
+
+        var renderContext = context is null
+            ? null
+            : context with { ResolvedOutputs = outputs };
 
         if (!emit)
         {
-            return new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            outputs["tests"] = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
             {
-                ["emit"] = "false",
-                ["root"] = root,
-                ["tests"] = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["results"] = string.Empty,
-                    ["coverage"] = string.Empty,
-                    ["reports"] = string.Empty,
-                },
-                ["analysis"] = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["reports"] = string.Empty,
-                    ["sarif"] = string.Empty,
-                },
-                ["security"] = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
-                {
-                    ["audit"] = string.Empty,
-                    ["reports"] = string.Empty,
-                    ["sarif"] = string.Empty,
-                },
-                ["packages"] = string.Empty,
-                ["manifests"] = string.Empty,
-                ["logs"] = string.Empty,
-                ["temp"] = string.Empty,
+                ["results"] = string.Empty,
+                ["coverage"] = string.Empty,
+                ["reports"] = string.Empty,
             };
+
+            outputs["analysis"] = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["reports"] = string.Empty,
+                ["sarif"] = string.Empty,
+            };
+
+            outputs["security"] = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["audit"] = string.Empty,
+                ["reports"] = string.Empty,
+                ["sarif"] = string.Empty,
+            };
+
+            outputs["packages"] = string.Empty;
+            outputs["manifests"] = string.Empty;
+            outputs["logs"] = string.Empty;
+            outputs["temp"] = string.Empty;
+            return outputs;
         }
 
-        var testsResults = ResolveOutputPath(root, config.Outputs?.Tests?.Results, "tests");
-        var testsCoverage = ResolveOutputPath(root, config.Outputs?.Tests?.Coverage, "tests/coverage");
-        var testsReports = ResolveOutputPath(root, config.Outputs?.Tests?.Reports, "tests/reports");
-        var analysisReports = ResolveOutputPath(root, config.Outputs?.Analysis?.Reports, "analysis");
-        var analysisSarif = ResolveOutputPath(root, config.Outputs?.Analysis?.Sarif, "analysis/sarif");
-        var securityAudit = ResolveOutputPath(root, config.Outputs?.Security?.Audit, "security/audit.json");
-        var securityReports = ResolveOutputPath(root, config.Outputs?.Security?.Reports, "security");
-        var securitySarif = ResolveOutputPath(root, config.Outputs?.Security?.Sarif, "security/sarif");
-        var packages = ResolveOutputPath(root, config.Outputs?.Packages, "packages");
-        var manifests = ResolveOutputPath(root, config.Outputs?.Manifests?.Path, "manifests");
-        var logs = ResolveOutputPath(root, config.Outputs?.Logs, "logs");
-        var temp = ResolveOutputPath(root, config.Outputs?.Temp, "tmp");
+        var tests = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        outputs["tests"] = tests;
+        tests["results"] = ResolveOutputPath(root, RenderTemplate(config.Outputs?.Tests?.Results, renderContext, templateRenderer), "tests");
+        tests["coverage"] = ResolveOutputPath(root, RenderTemplate(config.Outputs?.Tests?.Coverage, renderContext, templateRenderer), "tests/coverage");
+        tests["reports"] = ResolveOutputPath(root, RenderTemplate(config.Outputs?.Tests?.Reports, renderContext, templateRenderer), "tests/reports");
 
-        return new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["emit"] = "true",
-            ["root"] = root,
-            ["tests"] = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["results"] = testsResults,
-                ["coverage"] = testsCoverage,
-                ["reports"] = testsReports,
-            },
-            ["analysis"] = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["reports"] = analysisReports,
-                ["sarif"] = analysisSarif,
-            },
-            ["security"] = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["audit"] = securityAudit,
-                ["reports"] = securityReports,
-                ["sarif"] = securitySarif,
-            },
-            ["packages"] = packages,
-            ["manifests"] = manifests,
-            ["logs"] = logs,
-            ["temp"] = temp,
-        };
+        var analysis = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        outputs["analysis"] = analysis;
+        analysis["reports"] = ResolveOutputPath(root, RenderTemplate(config.Outputs?.Analysis?.Reports, renderContext, templateRenderer), "analysis");
+        analysis["sarif"] = ResolveOutputPath(root, RenderTemplate(config.Outputs?.Analysis?.Sarif, renderContext, templateRenderer), "analysis/sarif");
+
+        var security = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        outputs["security"] = security;
+        security["audit"] = ResolveOutputPath(root, RenderTemplate(config.Outputs?.Security?.Audit, renderContext, templateRenderer), "security/audit.json");
+        security["reports"] = ResolveOutputPath(root, RenderTemplate(config.Outputs?.Security?.Reports, renderContext, templateRenderer), "security");
+        security["sarif"] = ResolveOutputPath(root, RenderTemplate(config.Outputs?.Security?.Sarif, renderContext, templateRenderer), "security/sarif");
+
+        outputs["packages"] = ResolveOutputPath(root, RenderTemplate(config.Outputs?.Packages, renderContext, templateRenderer), "packages");
+        outputs["manifests"] = ResolveOutputPath(root, RenderTemplate(config.Outputs?.Manifests?.Path, renderContext, templateRenderer), "manifests");
+        outputs["logs"] = ResolveOutputPath(root, RenderTemplate(config.Outputs?.Logs, renderContext, templateRenderer), "logs");
+        outputs["temp"] = ResolveOutputPath(root, RenderTemplate(config.Outputs?.Temp, renderContext, templateRenderer), "tmp");
+
+        return outputs;
     }
 
     private static IReadOnlyList<string> EnsureConfiguredOutputDirectories(
@@ -2093,6 +2121,16 @@ public sealed class ConfigCommandLoader
 
         // Plain relative paths are repo-relative, not outputs.root-relative.
         return configuredPath;
+    }
+
+    private static string? RenderTemplate(string? value, ExecutionContext? context, ITemplateRenderer? templateRenderer)
+    {
+        if (context is null || templateRenderer is null || value is null)
+        {
+            return value;
+        }
+
+        return templateRenderer.Render(value, context);
     }
 
     private static string ResolveManifestDirectory(string repositoryRoot, string outputRoot, string? configuredPath)

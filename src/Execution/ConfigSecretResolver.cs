@@ -173,26 +173,16 @@ internal sealed class ConfigSecretResolver : ISecretResolver
             return Array.Empty<string>();
         }
 
-        var mappedNames = new List<string>();
-        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var mappedNames = string.IsNullOrWhiteSpace(item.MapToEnv)
+            ? item.MapToEnvs ?? Array.Empty<string>()
+            : item.MapToEnvs is { Count: > 0 } mapToEnvs
+                ? Enumerable.Repeat(item.MapToEnv!, 1).Concat(mapToEnvs)
+                : Enumerable.Repeat(item.MapToEnv!, 1);
 
-        if (!string.IsNullOrWhiteSpace(item.MapToEnv) && seen.Add(item.MapToEnv))
-        {
-            mappedNames.Add(item.MapToEnv);
-        }
-
-        if (item.MapToEnvs is { Count: > 0 } mapToEnvs)
-        {
-            foreach (var mappedName in mapToEnvs)
-            {
-                if (!string.IsNullOrWhiteSpace(mappedName) && seen.Add(mappedName))
-                {
-                    mappedNames.Add(mappedName);
-                }
-            }
-        }
-
-        return mappedNames.Count == 0 ? Array.Empty<string>() : mappedNames;
+        return mappedNames
+            .Where(mappedName => !string.IsNullOrWhiteSpace(mappedName))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
     }
 
     private async Task<SecretResolution> ResolveFromCandidateChainAsync(

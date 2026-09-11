@@ -41,6 +41,8 @@ Every config file (`rexo.json`/`rexo.yml`) must begin with:
 - `$schema`: the canonical URL `https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json` (recommended), or the relative `rexo.schema.json` / `../rexo.schema.json` for local-only use
 - `schemaVersion`: must be `"1.0"`
 
+The schema annotations now include both `description` and `markdownDescription` on the main config sections. Editors that understand JSON Schema Markdown will show richer hover text and defaults; simpler tools can keep using the plain `description` text.
+
 The loader validates against the embedded schema (or a local `rexo.schema.json`) via NJsonSchema before
 deserializing. Missing/unsupported metadata or schema violations cause a hard failure.
 

@@ -8,6 +8,7 @@ using Rexo.Artifacts;
 using Rexo.Core.Abstractions;
 using Rexo.Core.Environment;
 using Rexo.Core.Models;
+using Rexo.Templating;
 
 public sealed class DockerArtifactProvider : IArtifactProvider
 {
@@ -17,6 +18,7 @@ public sealed class DockerArtifactProvider : IArtifactProvider
     private const string DefaultRunner = "build";
     private const string BuildxRunner = "buildx";
     private const string CleanupModeAuto = "auto";
+    private static readonly ITemplateRenderer _templateRenderer = new TemplateRenderer();
     private readonly Func<IReadOnlyList<string>, string, IReadOnlyDictionary<string, string?>?, string?, CancellationToken, Task<(int ExitCode, string Output)>> _runDockerAsync;
     private readonly Func<string, IReadOnlyDictionary<string, string?>?, CancellationToken, Task<bool>> _isBuildxAvailableAsync;
 
@@ -342,7 +344,7 @@ public sealed class DockerArtifactProvider : IArtifactProvider
             Platform: GetEnvironmentValue("DOCKER_PLATFORM", dotEnv) ?? GetStringSetting(artifact.Settings, "platform"),
             BuildTarget: GetEnvironmentValue("DOCKER_BUILD_TARGET", dotEnv) ?? GetStringSetting(artifact.Settings, "buildTarget"),
             BuildOutputFlags: ResolveBuildOutput(artifact.Settings, dotEnv),
-            BuildArgFlags: ResolveBuildArgs(artifact.Settings, dotEnv),
+            BuildArgFlags: ResolveBuildArgs(artifact.Settings, dotEnv, context),
             BuildSecretFlags: ResolveBuildSecrets(artifact.Settings, dotEnv),
             LoginRegistry: GetStringSetting(artifact.Settings, "loginRegistry", "login.registry"),
             CleanupLocal: ResolveCleanupLocal(artifact.Settings, dotEnv, context.IsCi),
@@ -386,18 +388,19 @@ public sealed class DockerArtifactProvider : IArtifactProvider
 
     private static IReadOnlyList<string> ResolveBuildArgs(
         IReadOnlyDictionary<string, JsonElement> settings,
-        IReadOnlyDictionary<string, string> dotEnv)
+        IReadOnlyDictionary<string, string> dotEnv,
+        ExecutionContext context)
     {
         var envValue = GetEnvironmentValue("DOCKER_BUILD_ARGS", dotEnv);
         if (!string.IsNullOrWhiteSpace(envValue))
         {
-            return ParseBuildArgsValue(envValue, "DOCKER_BUILD_ARGS");
+            return RenderBuildArgs(ParseBuildArgsValue(envValue, "DOCKER_BUILD_ARGS"), context);
         }
 
         var envArgsFile = GetEnvironmentValue("DOCKER_BUILD_ARGS_FILE", dotEnv);
         if (!string.IsNullOrWhiteSpace(envArgsFile))
         {
-            return ParseBuildArgsFile(envArgsFile);
+            return RenderBuildArgs(ParseBuildArgsFile(envArgsFile), context);
         }
 
         if (!TryGetSettingValue(settings, out var value, "buildArgs"))
@@ -407,13 +410,18 @@ public sealed class DockerArtifactProvider : IArtifactProvider
 
         return value.ValueKind switch
         {
-            JsonValueKind.Object => ParseBuildArgsObject(value, "settings.buildArgs"),
-            JsonValueKind.Array => value.EnumerateArray().SelectMany(ParseBuildArgArrayItem).ToArray(),
-            JsonValueKind.String => ParseBuildArgsValue(value.GetString() ?? string.Empty, "settings.buildArgs"),
+            JsonValueKind.Object => RenderBuildArgs(ParseBuildArgsObject(value, "settings.buildArgs"), context),
+            JsonValueKind.Array => RenderBuildArgs(value.EnumerateArray().SelectMany(ParseBuildArgArrayItem).ToArray(), context),
+            JsonValueKind.String => RenderBuildArgs(ParseBuildArgsValue(value.GetString() ?? string.Empty, "settings.buildArgs"), context),
             JsonValueKind.Null or JsonValueKind.Undefined => Array.Empty<string>(),
             _ => throw new InvalidOperationException("Docker setting 'buildArgs' must be an object, string, or array."),
         };
     }
+
+    private static IReadOnlyList<string> RenderBuildArgs(IReadOnlyList<string> buildArgs, ExecutionContext context) =>
+        buildArgs.Count == 0
+            ? buildArgs
+            : buildArgs.Select(buildArg => _templateRenderer.Render(buildArg, context)).ToArray();
 
     private static IReadOnlyList<string> ResolveBuildSecrets(
         IReadOnlyDictionary<string, JsonElement> settings,
@@ -682,7 +690,7 @@ public sealed class DockerArtifactProvider : IArtifactProvider
             if (string.Equals(githubActions, "true", StringComparison.OrdinalIgnoreCase)
                 && !string.IsNullOrWhiteSpace(githubRepository))
             {
-                return NormalizeRepository($"{githubRepository}/{artifactName}");
+                return AppendArtifactNameIfDistinct(githubRepository, artifactName);
             }
         }
 
@@ -692,7 +700,7 @@ public sealed class DockerArtifactProvider : IArtifactProvider
             && string.Equals(normalizedRegistry, gitLabRegistry, StringComparison.OrdinalIgnoreCase)
             && !string.IsNullOrWhiteSpace(gitLabProjectPath))
         {
-            return NormalizeRepository($"{gitLabProjectPath}/{artifactName}");
+            return AppendArtifactNameIfDistinct(gitLabProjectPath, artifactName);
         }
 
         return null;
@@ -713,7 +721,7 @@ public sealed class DockerArtifactProvider : IArtifactProvider
             return null;
         }
 
-        return $"{NormalizeRegistry(gitLabRegistry)}/{NormalizeRepository($"{gitLabProjectPath}/{artifactName}")}";
+        return $"{NormalizeRegistry(gitLabRegistry)}/{AppendArtifactNameIfDistinct(gitLabProjectPath, artifactName)}";
     }
 
     private static string? TryResolveGitHubActionsImage(
@@ -729,7 +737,25 @@ public sealed class DockerArtifactProvider : IArtifactProvider
             return null;
         }
 
-        return $"ghcr.io/{NormalizeRepository($"{githubRepository}/{artifactName}")}";
+        return $"ghcr.io/{AppendArtifactNameIfDistinct(githubRepository, artifactName)}";
+    }
+
+    private static string AppendArtifactNameIfDistinct(string repositoryPath, string artifactName)
+    {
+        var normalizedRepository = NormalizeRepository(repositoryPath);
+        if (string.IsNullOrWhiteSpace(artifactName))
+        {
+            return normalizedRepository;
+        }
+
+        var separatorIndex = normalizedRepository.LastIndexOf('/');
+        var repositoryLeaf = separatorIndex >= 0
+            ? normalizedRepository[(separatorIndex + 1)..]
+            : normalizedRepository;
+
+        return string.Equals(repositoryLeaf, artifactName, StringComparison.OrdinalIgnoreCase)
+            ? normalizedRepository
+            : NormalizeRepository($"{normalizedRepository}/{artifactName}");
     }
 
     private static string NormalizeRegistry(string value)

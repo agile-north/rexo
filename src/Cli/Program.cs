@@ -730,9 +730,9 @@ public static class Program
 
         var ciInfo = CiDetector.Detect();
         string? manifestPath = null;
-        if (shouldWriteManifest && jsonFile is not null)
+        if (shouldWriteManifest)
         {
-            manifestPath = jsonFile.Replace(".json", "-manifest.json", StringComparison.OrdinalIgnoreCase);
+            manifestPath = jsonFile!.Replace(".json", "-manifest.json", StringComparison.OrdinalIgnoreCase);
             if (manifestPath == jsonFile) manifestPath = jsonFile + ".manifest.json";
         }
 
@@ -821,7 +821,7 @@ public static class Program
                 .ToArray(),
         };
 
-        if (shouldWriteManifest && jsonFile is not null && manifestPath is not null)
+        if (manifestPath is not null)
         {
             var manifestJson = JsonSerializer.Serialize(manifest, JsonOptions);
             var dir = Path.GetDirectoryName(manifestPath);

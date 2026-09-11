@@ -2,6 +2,7 @@ namespace Rexo.Execution.Tests;
 
 using Rexo.Configuration.Models;
 using Rexo.Core.Models;
+using Rexo.Execution;
 
 /// <summary>
 /// Tests for the config resolved / config sources built-in commands.
@@ -74,5 +75,14 @@ public sealed class ConfigCommandTests
         // Without a configPath the loader attempts to resolve from working directory — result is still success
         Assert.True(result.Success);
         Assert.Contains("Configuration sources", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ResolveArtifactNamePreservesExplicitEmptyName()
+    {
+        var config = new RepoConfig("root-name", null, null);
+
+        Assert.Equal("root-name", ConfigCommandLoader.ResolveArtifactName(new RepoArtifactConfig("docker"), config));
+        Assert.Equal(string.Empty, ConfigCommandLoader.ResolveArtifactName(new RepoArtifactConfig("docker", string.Empty), config));
     }
 }

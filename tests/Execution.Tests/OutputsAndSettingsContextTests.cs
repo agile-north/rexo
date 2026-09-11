@@ -2,6 +2,7 @@ namespace Rexo.Execution.Tests;
 
 using System.Text.Json;
 using Rexo.Configuration.Models;
+using Rexo.Core.Models;
 using Rexo.Execution;
 
 /// <summary>
@@ -60,6 +61,37 @@ public sealed class OutputsAndSettingsContextTests
         var tests = Assert.IsType<Dictionary<string, object?>>(ctx["tests"]);
         Assert.Equal("out/tests", tests["results"]);
         Assert.Equal("out/tests/coverage", tests["coverage"]);
+    }
+
+    [Fact]
+    public void BuildOutputsContextRendersTemplatedRootAndChildPaths()
+    {
+        var config = EmptyConfig() with
+        {
+            Outputs = new RepoOutputsConfig
+            {
+                Root = "out/{{version.semver}}",
+                Manifests = new RepoManifestOutputsConfig { Path = "~/manifests/{{args.platform}}" },
+                Tests = new RepoTestOutputPathsConfig { Results = "~/tests/{{args.platform}}" },
+            },
+        };
+
+        var context = ExecutionContext.Empty("C:\\repo") with
+        {
+            Version = new VersionResult("1.2.3", 1, 2, 3, null, "commit-sha", "short-sha", false, true),
+            Args = new Dictionary<string, string>
+            {
+                ["platform"] = "linux",
+            },
+        };
+
+        var ctx = ConfigCommandLoader.BuildOutputsContext(config, context);
+
+        Assert.Equal("out/1.2.3", ctx["root"]);
+        Assert.Equal("out/1.2.3/manifests/linux", ctx["manifests"]);
+
+        var tests = Assert.IsType<Dictionary<string, object?>>(ctx["tests"]);
+        Assert.Equal("out/1.2.3/tests/linux", tests["results"]);
     }
 
     [Fact]

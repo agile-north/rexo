@@ -36,6 +36,8 @@
 - `ghcr.io` + GitHub Actions (`GITHUB_ACTIONS=true`) + `GITHUB_REPOSITORY` -> infer repository as `<owner>/<repo>`
 - GitLab registry (`CI_REGISTRY`) + `CI_PROJECT_PATH` -> infer repository as `<CI_PROJECT_PATH>`
 
+If the repository leaf already matches the chart name, Rexo trims that duplicate leaf before pushing so the final OCI reference is not repeated.
+
 1. If still unresolved, infer registry from CI context:
 
 - GitHub Actions (`GITHUB_ACTIONS=true`) -> `ghcr.io`

@@ -14,6 +14,8 @@ This page is a provider-specific companion to the detailed configuration referen
 
 Docker has the largest settings surface (targets, push gates, classification, tag policy, stages, secrets). Use the canonical reference in [../configuration/README.md](../configuration/README.md).
 
+`buildArgs` values are rendered with the same template context used elsewhere before Rexo passes them to Docker.
+
 ## Auth
 
 Docker login resolution is shared by Docker and Docker Compose providers:
@@ -53,6 +55,10 @@ Rexo infers repository as:
 
 - `ghcr.io/<owner>/<repo>/<artifact-name>`
 
+If the artifact name already matches the repository leaf, Rexo does not repeat it. A single Docker artifact in a repo named `rexo` becomes `ghcr.io/<owner>/rexo`, not `ghcr.io/<owner>/rexo/rexo`.
+
+If the artifact name is an empty string, Rexo treats it as an explicit opt-out and appends nothing. If the name is omitted or null, Rexo falls back to the repo root name first.
+
 Example inferred image for artifact `api` in `agile-north/rexo`:
 
 - `ghcr.io/agile-north/rexo/api`
@@ -68,6 +74,10 @@ When running in GitLab CI with:
 and no explicit image/target repository is configured, Rexo infers image as:
 
 - `<CI_REGISTRY>/<CI_PROJECT_PATH>/<artifact-name>`
+
+If the artifact name already matches the project leaf, Rexo does not repeat it.
+
+An empty string name also suppresses the appended leaf here.
 
 This works for both GitLab SaaS and self-hosted registries because `CI_REGISTRY` is used directly.
 

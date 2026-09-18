@@ -7,7 +7,7 @@
     <PackageVersion Include="coverlet.collector" Version="10.0.1" />
     <PackageVersion Include="GitVersion.MsBuild" Version="6.0.5" />
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
-    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.0" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
     <PackageVersion Include="NJsonSchema" Version="11.6.1" />
     <PackageVersion Include="RazorConsole.Core" Version="0.5.0" />
     <PackageVersion Include="Spectre.Console" Version="0.57.2" />

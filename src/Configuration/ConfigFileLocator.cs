@@ -73,7 +73,7 @@ public static class ConfigFileLocator
     }
 
     public static string GetDefaultConfigPath(string workingDirectory) =>
-        Path.Combine(workingDirectory, DefaultConfigDirectory, DefaultConfigFileName);
+        Path.Join(workingDirectory, DefaultConfigDirectory, DefaultConfigFileName);
 
     private static void AddShadowWarning(List<string> warnings, string workingDirectory, IReadOnlyList<string> found, string kind)
     {

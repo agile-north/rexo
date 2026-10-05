@@ -1123,7 +1123,7 @@ public static class BuiltinCommandRegistration
 
         Directory.CreateDirectory(configDir);
 
-        var configPath = Path.Combine(configDir, "rexo" + configExtension);
+        var configPath = Path.Join(configDir, "rexo" + configExtension);
         if (File.Exists(configPath) && !force)
         {
             return CommandResult.Fail("init", 1, $"Target config already exists at '{configPath}'. Use --force to overwrite.");
@@ -1175,7 +1175,7 @@ public static class BuiltinCommandRegistration
         string? policyPath = null;
         if (withPolicy)
         {
-            policyPath = Path.Combine(configDir, "policy" + configExtension);
+            policyPath = Path.Join(configDir, "policy" + configExtension);
             if (File.Exists(policyPath) && !force)
             {
                 return CommandResult.Fail(

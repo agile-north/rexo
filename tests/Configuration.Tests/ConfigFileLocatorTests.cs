@@ -50,15 +50,15 @@ public sealed class ConfigFileLocatorTests
     [Fact]
     public void FindConfigPathPrefersDotRexoOverRootAndYamlOverJsonWithinLocation()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-locator-{Guid.NewGuid():N}");
-        var hiddenDir = Path.Combine(dir, ".rexo");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-locator-{Guid.NewGuid():N}");
+        var hiddenDir = Path.Join(dir, ".rexo");
         Directory.CreateDirectory(hiddenDir);
         try
         {
-            var rootJson = Path.Combine(dir, "rexo.json");
-            var rootYaml = Path.Combine(dir, "rexo.yaml");
-            var dotRexoJson = Path.Combine(hiddenDir, "rexo.json");
-            var dotRexoYaml = Path.Combine(hiddenDir, "rexo.yaml");
+            var rootJson = Path.Join(dir, "rexo.json");
+            var rootYaml = Path.Join(dir, "rexo.yaml");
+            var dotRexoJson = Path.Join(hiddenDir, "rexo.json");
+            var dotRexoYaml = Path.Join(hiddenDir, "rexo.yaml");
             File.WriteAllText(rootJson, "{}");
             File.WriteAllText(rootYaml, "{}");
             File.WriteAllText(dotRexoJson, "{}");
@@ -70,7 +70,7 @@ public sealed class ConfigFileLocatorTests
 
             var warnings = ConfigFileLocator.GetShadowedFileWarnings(dir);
             var warning = Assert.Single(warnings);
-            Assert.Contains(Path.Combine(".rexo", "rexo.yaml"), warning, StringComparison.Ordinal);
+            Assert.Contains(Path.Join(".rexo", "rexo.yaml"), warning, StringComparison.Ordinal);
             Assert.Contains(Path.Combine(".rexo", "rexo.json"), warning, StringComparison.Ordinal);
             Assert.Contains("rexo.json", warning, StringComparison.Ordinal);
         }

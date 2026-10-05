@@ -15,8 +15,8 @@ Codex, etc.) to continue work on this repository without re-reading conversation
 | Language / SDK | C# / .NET 10 (`net10.0`) |
 | Solution file | `solution.slnx` (slnx format) |
 
-Rexo is a **config-driven repository runtime CLI**. A single `rexo.json` file in a
-repository root drives build, versioning, artifact production, verification, analysis,
+Rexo is a **config-driven repository runtime CLI**. A single config file (`.rexo/rexo.yaml` by default; JSON and the
+repository root are also supported) drives build, versioning, artifact production, verification, analysis,
 and release orchestration. The CLI is identical whether run locally or in CI.
 
 ---
@@ -46,9 +46,9 @@ solution.slnx               # Solution file (slnx format)
 Directory.Build.props       # Central build conventions + branding
 Directory.Build.targets     # Shared MSBuild targets
 Directory.Packages.props    # Central NuGet version management
-rexo.json                   # Example / self-describing config
-rexo.schema.json           # JSON Schema for rexo.json v1.0
-policy.schema.json         # JSON Schema for policy.json v1.0
+.rexo/rexo.yaml             # Example / self-describing config (YAML)
+rexo.schema.json           # JSON Schema for rexo config (YAML or JSON) v1.0
+policy.schema.json         # JSON Schema for policy config (YAML or JSON) v1.0
 src/
   Artifacts/                # IArtifactProvider abstraction + registry
   Artifacts.Docker/         # Docker build/tag/push provider
@@ -56,7 +56,7 @@ src/
   Artifacts.NuGet/          # dotnet pack/push provider
   Ci/                       # CI environment detector (GHA/AzDO/GitLab/Bitbucket)
   Cli/                      # CLI entry point (Program.cs) — packs as `rx` tool
-  Configuration/            # rexo.json loader + NJsonSchema validation
+  Configuration/            # rexo config loader (YAML/JSON) + NJsonSchema validation
   Core/                     # Domain models, interfaces (no external deps)
   Execution/                # Step executor, command registry, built-in primitives
   Git/                      # Git info detector (branch/SHA/remote/clean)
@@ -116,9 +116,17 @@ docs/
 
 ## Configuration System
 
-### `rexo.json` required fields
+### Config file location and format
 
-Every `rexo.json` must start with:
+Discovery order (first match wins, warning if several exist): `.rexo/rexo.yaml`,
+`.rexo/rexo.yml`, `.rexo/rexo.json`, root `rexo.yaml|yml|json`, then legacy `.repo/repo.*`/`repo.*`
+(`ConfigFileLocator`). YAML is converted to JSON by `YamlJsonConverter` (YAML 1.2 core schema,
+modeline `# yaml-language-server: $schema=...` accepted in place of a `$schema` key) and then
+validated exactly like JSON. `rx init` writes YAML by default (`--format json` for JSON).
+
+### Required fields
+
+Every config must start with (JSON shown; YAML is equivalent):
 
 ```json
 {
@@ -137,10 +145,11 @@ Alternative `$schema` values accepted:
 
 ### Validation flow (`RepoConfigurationLoader`)
 
-1. Check `$schema` is present and matches an allowed URI
-2. Check `schemaVersion` is present and equals `"1.0"`
-3. Validate full JSON against `rexo.schema.json` (embedded in assembly) via NJsonSchema
-4. Deserialize to `RepoConfig`
+1. For YAML files, convert to JSON (`YamlJsonConverter.ToJson`; modeline fills a missing `$schema`)
+2. Check `$schema` is present and matches an allowed URI
+3. Check `schemaVersion` is present and equals `"1.0"`
+4. Validate full JSON against `rexo.schema.json` (embedded in assembly) via NJsonSchema
+5. Deserialize to `RepoConfig`
 
 The schema file is embedded in `Rexo.Configuration.dll`; a local `rexo.schema.json` at the repo root
 can override it for development.

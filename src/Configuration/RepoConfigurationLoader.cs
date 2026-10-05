@@ -1,12 +1,10 @@
 namespace Rexo.Configuration;
 
-using System.Collections;
 using System.Text.Json;
 using NJsonSchema;
 using Rexo.Configuration.Models;
 using Rexo.Core.Models;
 using Rexo.Policies;
-using YamlDotNet.Serialization;
 
 public sealed partial class RepoConfigurationLoader
 {
@@ -23,9 +21,6 @@ public sealed partial class RepoConfigurationLoader
         ReadCommentHandling = JsonCommentHandling.Skip,
         Converters = { new RepoCommandConfigJsonConverter() },
     };
-
-    private static readonly IDeserializer YamlDeserializer =
-        new DeserializerBuilder().Build();
 
     public static async Task<RepoConfig> LoadAsync(string configPath, CancellationToken cancellationToken)
     {
@@ -1078,20 +1073,29 @@ public sealed partial class RepoConfigurationLoader
     private static async Task<string> ReadAsJsonAsync(string path, CancellationToken cancellationToken)
     {
         var text = await File.ReadAllTextAsync(path, cancellationToken);
-        if (!IsYamlPath(path))
+        if (!YamlJsonConverter.IsYamlPath(path))
         {
             return text;
         }
 
-        using var reader = new StringReader(text);
-        var yamlObject = YamlDeserializer.Deserialize(reader);
-        var normalized = NormalizeYamlObject(yamlObject);
-        return JsonSerializer.Serialize(normalized, JsonOptions);
+        var json = YamlJsonConverter.ToJson(text, path);
+        return NormalizeYamlSchemaVersion(json);
     }
 
-    private static bool IsYamlPath(string path) =>
-        path.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase) ||
-        path.EndsWith(".yml", StringComparison.OrdinalIgnoreCase);
+    // `schemaVersion: 1.0` is a float in YAML; accept it as the string "1.0" for parity with JSON.
+    private static string NormalizeYamlSchemaVersion(string json)
+    {
+        if (System.Text.Json.Nodes.JsonNode.Parse(json) is not System.Text.Json.Nodes.JsonObject root ||
+            !root.TryGetPropertyValue("schemaVersion", out var version) ||
+            version is null ||
+            version.GetValueKind() != JsonValueKind.Number)
+        {
+            return json;
+        }
+
+        root["schemaVersion"] = version.ToJsonString();
+        return root.ToJsonString();
+    }
 
     private static void ValidateCapabilities(RepoCapabilityConfig? capabilities, string sourceKind, string sourcePath)
     {
@@ -1128,48 +1132,6 @@ public sealed partial class RepoConfigurationLoader
         throw new InvalidOperationException(
             $"[{ErrorCodes.CapabilityRequirementNotSupported}] {sourceKind} '{sourcePath}' requires unsupported capabilities: {string.Join(", ", unsupported)}. " +
             $"Supported capabilities: {supportedList}");
-    }
-
-    private static object? NormalizeYamlObject(object? value)
-    {
-        switch (value)
-        {
-            case null:
-                return null;
-            case string stringValue:
-                if (bool.TryParse(stringValue, out var boolValue))
-                {
-                    return boolValue;
-                }
-
-                return stringValue;
-            case bool or byte or sbyte or short or ushort or int or uint or long or ulong or
-                float or double or decimal:
-                return value;
-            case IDictionary dictionary:
-            {
-                var result = new Dictionary<string, object?>(StringComparer.Ordinal);
-                foreach (DictionaryEntry entry in dictionary)
-                {
-                    var key = entry.Key?.ToString() ?? string.Empty;
-                    result[key] = NormalizeYamlObject(entry.Value);
-                }
-
-                return result;
-            }
-            case IEnumerable enumerable when value is not string:
-            {
-                var list = new List<object?>();
-                foreach (var item in enumerable)
-                {
-                    list.Add(NormalizeYamlObject(item));
-                }
-
-                return list;
-            }
-            default:
-                return value.ToString();
-        }
     }
 
     private static bool IsSchemaValidationDisabled()

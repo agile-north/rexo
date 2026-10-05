@@ -3,7 +3,7 @@
 ## Project overview
 
 Rexo (`rx`) is a config-driven repository runtime CLI written in .NET 10 / C#.
-A `repo.json` file in a repository root defines commands, versioning, artifacts,
+A `.rexo/rexo.yaml` file (or `.rexo/rexo.json`, or the same names in the repository root) defines commands, versioning, artifacts,
 tests, and analysis. The CLI is identical locally and in CI.
 
 Full context: read `AGENTS.md` in the repository root.
@@ -32,7 +32,7 @@ dotnet test solution.slnx -c Release --no-build
 
 ```
 src/Core/              Domain models + interfaces (zero project deps)
-src/Configuration/     repo.json loading with NJsonSchema validation
+src/Configuration/     rexo config loading (YAML/JSON) with NJsonSchema validation
 src/Execution/         Step executor, command registry, built-in primitives
 src/Templating/        {{var | filter}} engine
 src/Cli/               Entry point — packs as `rx` dotnet tool
@@ -48,9 +48,9 @@ src/Ui/                Spectre.Console rich renderer
 src/Policies/          Local file policy source
 ```
 
-## Config model (`repo.json`)
+## Config model (`.rexo/rexo.yaml` / `.rexo/rexo.json`)
 
-Every `repo.json` must have `$schema` and `schemaVersion: "1.0"`.
+Every config must have `$schema` (in YAML, a `# yaml-language-server: $schema=` modeline also counts) and `schemaVersion: "1.0"`. YAML is the default format; YAML is converted to JSON by `YamlJsonConverter` and validated identically.
 Schema file: `rexo.schema.json` (repo root).
 Loader: `src/Configuration/RepoConfigurationLoader.cs`.
 

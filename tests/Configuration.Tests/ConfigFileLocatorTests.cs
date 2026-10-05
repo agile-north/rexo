@@ -48,6 +48,81 @@ public sealed class ConfigFileLocatorTests
     }
 
     [Fact]
+    public void FindConfigPathPrefersDotRexoYamlOverRootJson()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"rexo-locator-{Guid.NewGuid():N}");
+        var hiddenDir = Path.Combine(dir, ".rexo");
+        Directory.CreateDirectory(hiddenDir);
+        try
+        {
+            var rootJson = Path.Combine(dir, "rexo.json");
+            var rootYaml = Path.Combine(dir, "rexo.yaml");
+            var dotRexoJson = Path.Combine(hiddenDir, "rexo.json");
+            var dotRexoYaml = Path.Combine(hiddenDir, "rexo.yaml");
+            File.WriteAllText(rootJson, "{}");
+            File.WriteAllText(rootYaml, "{}");
+            File.WriteAllText(dotRexoJson, "{}");
+
+            Assert.Equal(dotRexoJson, ConfigFileLocator.FindConfigPath(dir));
+
+            File.WriteAllText(dotRexoYaml, "{}");
+            Assert.Equal(dotRexoYaml, ConfigFileLocator.FindConfigPath(dir));
+
+            var warnings = ConfigFileLocator.GetShadowedFileWarnings(dir);
+            var warning = Assert.Single(warnings);
+            Assert.Contains(Path.Combine(".rexo", "rexo.yaml"), warning, StringComparison.Ordinal);
+            Assert.Contains(Path.Combine(".rexo", "rexo.json"), warning, StringComparison.Ordinal);
+            Assert.Contains("rexo.json", warning, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void FindConfigPathPrefersRootYamlOverRootJson()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"rexo-locator-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "rexo.json"), "{}");
+            var ymlPath = Path.Combine(dir, "rexo.yml");
+            File.WriteAllText(ymlPath, "{}");
+
+            Assert.Equal(ymlPath, ConfigFileLocator.FindConfigPath(dir));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void GetShadowedFileWarningsIsEmptyForSingleConfig()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"rexo-locator-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "rexo.yaml"), "{}");
+            Assert.Empty(ConfigFileLocator.GetShadowedFileWarnings(dir));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void GetDefaultConfigPathIsDotRexoYaml()
+    {
+        var dir = Path.GetTempPath();
+        Assert.Equal(Path.Combine(dir, ".rexo", "rexo.yaml"), ConfigFileLocator.GetDefaultConfigPath(dir));
+    }
+
+    [Fact]
     public void FindPolicyPathPrefersDotRexoThenDotRepoFallback()
     {
         var dir = Path.Combine(Path.GetTempPath(), $"rexo-policy-locator-{Guid.NewGuid():N}");

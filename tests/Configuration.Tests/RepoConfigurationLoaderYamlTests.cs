@@ -101,6 +101,71 @@ public sealed class RepoConfigurationLoaderYamlTests
   }
 
   [Fact]
+  public async Task LoadAsyncAcceptsModelineInsteadOfSchemaKeyAndTypesScalars()
+  {
+    var originalOverlay = Environment.GetEnvironmentVariable("REXO_OVERLAY");
+    Environment.SetEnvironmentVariable("REXO_OVERLAY", null);
+
+    var dir = Path.Combine(Path.GetTempPath(), $"rexo-yaml-modeline-{Guid.NewGuid():N}");
+    var dotRexo = Path.Combine(dir, ".rexo");
+    Directory.CreateDirectory(dotRexo);
+    var configPath = Path.Combine(dotRexo, "rexo.yaml");
+
+    await File.WriteAllTextAsync(
+        configPath,
+        """
+        # yaml-language-server: $schema=https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json
+        schemaVersion: 1.0
+        name: yaml-modeline-sample
+        commands:
+          build:
+            description: Build
+            options: {}
+            steps:
+              - run: dotnet build
+                continueOnError: false
+        aliases: {}
+        """);
+
+    try
+    {
+      var config = await RepoConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
+
+      Assert.Equal("yaml-modeline-sample", config.Name);
+      Assert.Equal("1.0", config.SchemaVersion);
+      Assert.Equal(
+          "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+          config.Schema);
+      Assert.True(config.Commands!.ContainsKey("build"));
+    }
+    finally
+    {
+      Environment.SetEnvironmentVariable("REXO_OVERLAY", originalOverlay);
+      if (Directory.Exists(dir)) Directory.Delete(dir, true);
+    }
+  }
+
+  [Fact]
+  public async Task LoadAsyncRequiresSchemaWhenYamlHasNoKeyOrModeline()
+  {
+    var dir = Path.Combine(Path.GetTempPath(), $"rexo-yaml-noschema-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(dir);
+    var configPath = Path.Combine(dir, "rexo.yaml");
+    await File.WriteAllTextAsync(configPath, "schemaVersion: \"1.0\"\nname: x\n");
+
+    try
+    {
+      var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+          RepoConfigurationLoader.LoadAsync(configPath, CancellationToken.None));
+      Assert.Contains("$schema", ex.Message, StringComparison.Ordinal);
+    }
+    finally
+    {
+      if (Directory.Exists(dir)) Directory.Delete(dir, true);
+    }
+  }
+
+  [Fact]
     public async Task LoadPolicyAsyncParsesYaml()
     {
         var dir = Path.Combine(Path.GetTempPath(), $"rexo-policy-yaml-{Guid.NewGuid():N}");

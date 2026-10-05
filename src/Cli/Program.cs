@@ -1077,7 +1077,8 @@ public static class Program
         Console.WriteLine("      --detect                Preview detection only (no files written)");
         Console.WriteLine("      --dry-run               Alias for --detect");
         Console.WriteLine("      --schema-source         remote (default) or local");
-        Console.WriteLine("      --with-policy           Also create policy.json from an embedded policy");
+        Console.WriteLine("      --format                yaml (default) or json");
+        Console.WriteLine("      --with-policy           Also create .rexo/policy.yaml from an embedded policy");
         Console.WriteLine("      --policy                standard|dotnet (or any embedded policy name)");
         Console.WriteLine("      --with-docker-artifact  Add starter docker artifact to generated config");
         Console.WriteLine("      --without-docker-artifact  Skip docker artifact scaffolding (non-interactive)");

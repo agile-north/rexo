@@ -16,19 +16,36 @@ fallback, and validation), see [Containerized Run Steps](./containerized-run.md)
 
 For CLI config overrides, see [CLI Overrides](./overrides.md).
 
-Default repository configuration file: **`rexo.json`**
+Default repository configuration file: **`.rexo/rexo.yaml`**
 
-Supported config locations (first match wins):
+YAML and JSON are equally supported: both formats are validated against the same JSON Schema
+and deserialized identically. `rx init` writes YAML by default (`--format json` for JSON).
 
-- `rexo.json`, `rexo.yaml`, `rexo.yml` (repo root)
-- `.rexo/rexo.json`, `.rexo/rexo.yaml`, `.rexo/rexo.yml`
-- Backward-compatible fallback: `repo.json|yaml|yml` in root or `.repo/`
+Supported config locations (first match wins; YAML before JSON in each location):
+
+1. `.rexo/rexo.yaml`, `.rexo/rexo.yml`, `.rexo/rexo.json` (default location)
+2. `rexo.yaml`, `rexo.yml`, `rexo.json` (repo root)
+3. Backward-compatible fallback: `.repo/repo.yaml|yml|json`, then `repo.yaml|yml|json` in root
+
+Policy files use the same order: `.rexo/policy.*`, root `policy.*`, then `.repo/policy.*`.
+
+If more than one candidate exists, Rexo uses the first match and prints a warning naming the
+ignored files (also reported by `rx doctor` as `config-duplicates`).
 
 ---
 
 ## Schema Contract (required)
 
-Every config file (`rexo.json`/`rexo.yml`) must begin with:
+Every config file must declare its schema and version. In YAML:
+
+```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json
+$schema: https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json
+schemaVersion: "1.0"
+name: my-repo
+```
+
+In JSON:
 
 ```json
 {
@@ -39,7 +56,34 @@ Every config file (`rexo.json`/`rexo.yml`) must begin with:
 ```
 
 - `$schema`: the canonical URL `https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json` (recommended), or the relative `rexo.schema.json` / `../rexo.schema.json` for local-only use
-- `schemaVersion`: must be `"1.0"`
+- `schemaVersion`: must be `"1.0"` (in YAML, an unquoted `1.0` is also accepted)
+
+### YAML specifics
+
+- The `# yaml-language-server: $schema=...` modeline gives editors intellisense (completion, hover,
+  validation). Rexo also accepts the modeline **instead of** a `$schema` key; if both are present
+  they must match.
+- Scalars follow the YAML 1.2 core schema: `true`/`false`, integers, floats, and `null`/`~` are typed;
+  everything else (including `yes`/`no`/`on`/`off`) is a string. Quote values to force a string
+  (for example `"true"` or `"1.0"`), or use an explicit `!!str` tag.
+- Anchors, aliases, and `<<` merge keys are supported. Duplicate keys and multi-document files are errors,
+  and parse errors report the file, line, and column.
+
+### Editor intellisense
+
+- **VS Code**: install the Red Hat *YAML* extension (`redhat.vscode-yaml`). The modeline is picked up
+  automatically. Relative modeline paths resolve against the YAML file's directory, so
+  `rx init --schema-source local` writes the schemas next to the config in `.rexo/`.
+- **JetBrains IDEs**: the modeline is honoured natively; alternatively map `.rexo/rexo.yaml` to the schema under
+  *Settings → Languages & Frameworks → Schemas and DTDs → JSON Schema Mappings*.
+- Without a modeline you can map files in VS Code settings:
+
+  ```json
+  "yaml.schemas": {
+    "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json": [".rexo/rexo.yaml", ".rexo/rexo.yml", "rexo.yaml", "rexo.yml"],
+    "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/policy.schema.json": [".rexo/policy.yaml", ".rexo/policy.yml", "policy.yaml", "policy.yml"]
+  }
+  ```
 
 The schema annotations now include both `description` and `markdownDescription` on the main config sections. Editors that understand JSON Schema Markdown will show richer hover text and defaults; simpler tools can keep using the plain `description` text.
 
@@ -51,7 +95,7 @@ To temporarily bypass rexo schema validation during local experimentation, set
 checks (`$schema`, `schemaVersion`) and NJsonSchema validation are skipped for rexo
 configuration loading.
 
-Policy files (`policy.json`/`policy.yml`) follow the same contract, using:
+Policy files (`policy.yaml`/`policy.yml`/`policy.json`) follow the same contract, using:
 
 - `$schema`: `https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/policy.schema.json` (recommended), or `policy.schema.json` / `../policy.schema.json`
 - `schemaVersion`: must be `"1.0"`

@@ -28,6 +28,11 @@ internal static class ConfigBuilder
             return null;
         }
 
+        foreach (var warning in ConfigFileLocator.GetShadowedFileWarnings(workingDir))
+        {
+            Console.Error.WriteLine($"[warn] {warning}");
+        }
+
         try
         {
             var config = await RepoConfigurationLoader.LoadAsync(configPath, cancellationToken);

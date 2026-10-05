@@ -11,6 +11,7 @@ public sealed class YamlJsonConverterTests
         const string yaml = """
             int: 30
             negative: -5
+            leadingZero: 01
             float: 1.5
             versionLike: 1.0.0
             boolTrue: true
@@ -31,6 +32,7 @@ public sealed class YamlJsonConverterTests
 
         Assert.Equal(30, node["int"]!.GetValue<long>());
         Assert.Equal(-5, node["negative"]!.GetValue<long>());
+        Assert.Equal("01", node["leadingZero"]!.GetValue<string>());
         Assert.Equal("1.5", node["float"]!.ToJsonString());
         Assert.Equal("1.0.0", node["versionLike"]!.GetValue<string>());
         Assert.True(node["boolTrue"]!.GetValue<bool>());

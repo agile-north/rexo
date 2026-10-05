@@ -2148,7 +2148,7 @@ public static class BuiltinCommandRegistration
     private static string? NormalizeConfigFormat(string value) =>
         value.ToUpperInvariant() switch
         {
-            "YAML" or "YML" => "yaml",
+            "YAML" => "yaml",
             "JSON" => "json",
             _ => null,
         };
@@ -2168,4 +2168,3 @@ public static class BuiltinCommandRegistration
         return null;
     }
 }
-

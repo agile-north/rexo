@@ -114,8 +114,10 @@ public sealed class InitCommandTests
         }
     }
 
-    [Fact]
-    public async Task InitRejectsInvalidFormat()
+    [Theory]
+    [InlineData("toml")]
+    [InlineData("yml")]
+    public async Task InitRejectsInvalidFormat(string format)
     {
         var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-format-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
@@ -125,7 +127,7 @@ public sealed class InitCommandTests
             var executor = new DefaultCommandExecutor(BuiltinCommandRegistration.CreateDefault());
             var invocation = new CommandInvocation(
                 new Dictionary<string, string>(),
-                new Dictionary<string, string?> { ["yes"] = "true", ["format"] = "toml" },
+                new Dictionary<string, string?> { ["yes"] = "true", ["format"] = format },
                 Json: false,
                 JsonFile: null,
                 WorkingDirectory: dir);
@@ -1098,4 +1100,3 @@ public sealed class InitCommandTests
         }
     }
 }
-

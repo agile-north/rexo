@@ -438,7 +438,7 @@ public static partial class YamlJsonConverter
     [GeneratedRegex(@"^[ \t]*#[ \t]*yaml-language-server:[ \t]*\$schema=(?<schema>\S+)[ \t]*\r?$", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex ModelineRegex();
 
-    [GeneratedRegex(@"^[-+]?[0-9]+$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^[-+]?(0|[1-9][0-9]*)$", RegexOptions.CultureInvariant)]
     private static partial Regex DecimalIntRegex();
 
     [GeneratedRegex(@"^[-+]?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?$|^[-+]?\.(inf|Inf|INF)$|^\.(nan|NaN|NAN)$", RegexOptions.CultureInvariant)]

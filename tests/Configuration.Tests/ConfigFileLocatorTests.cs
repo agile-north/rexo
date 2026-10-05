@@ -48,7 +48,7 @@ public sealed class ConfigFileLocatorTests
     }
 
     [Fact]
-    public void FindConfigPathPrefersDotRexoYamlOverRootJson()
+    public void FindConfigPathPrefersDotRexoOverRootAndYamlOverJsonWithinLocation()
     {
         var dir = Path.Combine(Path.GetTempPath(), $"rexo-locator-{Guid.NewGuid():N}");
         var hiddenDir = Path.Combine(dir, ".rexo");

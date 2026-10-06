@@ -12,6 +12,7 @@ public sealed class YamlJsonConverterTests
             int: 30
             negative: -5
             leadingZero: 01
+            negativeLeadingZero: -01
             float: 1.5
             versionLike: 1.0.0
             boolTrue: true
@@ -33,6 +34,7 @@ public sealed class YamlJsonConverterTests
         Assert.Equal(30, node["int"]!.GetValue<long>());
         Assert.Equal(-5, node["negative"]!.GetValue<long>());
         Assert.Equal("01", node["leadingZero"]!.GetValue<string>());
+        Assert.Equal("-01", node["negativeLeadingZero"]!.GetValue<string>());
         Assert.Equal("1.5", node["float"]!.ToJsonString());
         Assert.Equal("1.0.0", node["versionLike"]!.GetValue<string>());
         Assert.True(node["boolTrue"]!.GetValue<bool>());
@@ -122,6 +124,30 @@ public sealed class YamlJsonConverterTests
             """;
 
         Assert.Throws<InvalidOperationException>(() => YamlJsonConverter.ToJson(yaml, "rexo.yaml"));
+    }
+
+    [Fact]
+    public void ToJsonIgnoresModelineLikeCommentInsideLiteralBlock()
+    {
+        const string yaml = """
+            script: |
+              # yaml-language-server: $schema=unexpected.schema.json
+            """;
+
+        var node = Assert.IsType<JsonObject>(JsonNode.Parse(YamlJsonConverter.ToJson(yaml)));
+
+        Assert.False(node.ContainsKey("$schema"));
+        Assert.Equal("# yaml-language-server: $schema=unexpected.schema.json", node["script"]!.GetValue<string>());
+    }
+
+    [Theory]
+    [InlineData(".inf")]
+    [InlineData(".nan")]
+    public void ToJsonRejectsNonFinitePlainFloats(string value)
+    {
+        var ex = Assert.Throws<InvalidOperationException>(() => YamlJsonConverter.ToJsonNode($"value: {value}"));
+
+        Assert.Contains("float", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]

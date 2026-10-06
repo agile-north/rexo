@@ -291,7 +291,10 @@ public static partial class YamlJsonConverter
             return JsonValue.Create(boolValue);
         }
 
-        return TryResolveInt(value) ?? TryResolveFloat(value) ?? JsonValue.Create(value);
+        return TryResolveInt(value) ??
+            (FloatRegex().IsMatch(value)
+                ? TryResolveFloat(value) ?? throw InvalidTagged(scalar, sourcePath, "float")
+                : JsonValue.Create(value));
     }
 
     private static InvalidOperationException InvalidTagged(YamlScalarNode scalar, string? sourcePath, string type) =>
@@ -435,13 +438,13 @@ public static partial class YamlJsonConverter
     private static string FormatYamlError(string? sourcePath, YamlException ex) =>
         $"Invalid YAML in {DescribeSource(sourcePath)} at line {ex.Start.Line.ToString(CultureInfo.InvariantCulture)}, column {ex.Start.Column.ToString(CultureInfo.InvariantCulture)}: {ex.InnerException?.Message ?? ex.Message}";
 
-    [GeneratedRegex(@"^[ \t]*#[ \t]*yaml-language-server:[ \t]*\$schema=(?<schema>\S+)[ \t]*\r?$", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^#[ \t]*yaml-language-server:[ \t]*\$schema=(?<schema>\S+)[ \t]*\r?$", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex ModelineRegex();
 
     [GeneratedRegex(@"^[-+]?(0|[1-9][0-9]*)$", RegexOptions.CultureInvariant)]
     private static partial Regex DecimalIntRegex();
 
-    [GeneratedRegex(@"^[-+]?(\.[0-9]+|[0-9]+(\.[0-9]*)?)([eE][-+]?[0-9]+)?$|^[-+]?\.(inf|Inf|INF)$|^\.(nan|NaN|NAN)$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^[-+]?(\.[0-9]+|[0-9]+\.[0-9]*)([eE][-+]?[0-9]+)?$|^[-+]?[0-9]+[eE][-+]?[0-9]+$|^[-+]?\.(inf|Inf|INF)$|^\.(nan|NaN|NAN)$", RegexOptions.CultureInvariant)]
     private static partial Regex FloatRegex();
 
     [GeneratedRegex(@"^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][-+]?[0-9]+)?$", RegexOptions.CultureInvariant)]

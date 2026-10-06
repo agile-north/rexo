@@ -16,6 +16,8 @@ Thumbs.db
 TestResults/
 coverage/
 /artifacts/
+/test-results/
+/sarif/
 
 # Generated runtime/provider configs
 .repo/generated/

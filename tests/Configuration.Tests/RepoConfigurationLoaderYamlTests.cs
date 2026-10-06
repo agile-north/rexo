@@ -148,9 +148,9 @@ public sealed class RepoConfigurationLoaderYamlTests
   [Fact]
   public async Task LoadAsyncRequiresSchemaWhenYamlHasNoKeyOrModeline()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-yaml-noschema-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-yaml-noschema-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
-    var configPath = Path.Combine(dir, "rexo.yaml");
+    var configPath = Path.Join(dir, "rexo.yaml");
     await File.WriteAllTextAsync(configPath, "schemaVersion: \"1.0\"\nname: x\n");
 
     try

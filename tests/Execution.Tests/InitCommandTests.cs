@@ -9,7 +9,7 @@ public sealed class InitCommandTests
     [Fact]
     public async Task InitCreatesYamlConfigInDotRexoByDefault()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-yaml-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-yaml-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         try
@@ -32,12 +32,12 @@ public sealed class InitCommandTests
             var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
 
             Assert.True(result.Success, result.Message);
-            var configPath = Path.Combine(dir, ".rexo", "rexo.yaml");
-            var policyPath = Path.Combine(dir, ".rexo", "policy.yaml");
+            var configPath = Path.Join(dir, ".rexo", "rexo.yaml");
+            var policyPath = Path.Join(dir, ".rexo", "policy.yaml");
             Assert.True(File.Exists(configPath));
             Assert.True(File.Exists(policyPath));
-            Assert.False(File.Exists(Path.Combine(dir, ".rexo", "rexo.json")));
-            Assert.False(File.Exists(Path.Combine(dir, ".rexo", "policy.json")));
+            Assert.False(File.Exists(Path.Join(dir, ".rexo", "rexo.json")));
+            Assert.False(File.Exists(Path.Join(dir, ".rexo", "policy.json")));
 
             var content = await File.ReadAllTextAsync(configPath);
             Assert.StartsWith(
@@ -75,7 +75,7 @@ public sealed class InitCommandTests
     [InlineData("generic", "json")]
     public async Task InitTemplatesProduceConfigAndPolicyThatPassSchemaValidation(string stack, string format)
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-matrix-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-matrix-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         try
@@ -99,8 +99,8 @@ public sealed class InitCommandTests
 
             var configPath = Rexo.Configuration.ConfigFileLocator.FindConfigPath(dir);
             var policyPath = Rexo.Configuration.ConfigFileLocator.FindPolicyPath(dir);
-            Assert.Equal(Path.Combine(dir, ".rexo", $"rexo.{format}"), configPath);
-            Assert.Equal(Path.Combine(dir, ".rexo", $"policy.{format}"), policyPath);
+            Assert.Equal(Path.Join(dir, ".rexo", $"rexo.{format}"), configPath);
+            Assert.Equal(Path.Join(dir, ".rexo", $"policy.{format}"), policyPath);
             Assert.Empty(Rexo.Configuration.ConfigFileLocator.GetShadowedFileWarnings(dir));
 
             var config = await Rexo.Configuration.RepoConfigurationLoader.LoadAsync(configPath!, CancellationToken.None);

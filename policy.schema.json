@@ -40,7 +40,7 @@
     },
     "extends": {
       "type": "array",
-      "description": "Other policies this policy builds on ('embedded:<name>' or a path relative to this policy file). Earlier entries have lower priority; this policy overrides them.",
+      "description": "Other policies this policy builds on ('embedded:<name>' or a path relative to this policy file). Later parents take precedence in scalar and deep-merged sections, subject to collection merge rules. For same-name commands, earlier parents win when no merge mode, step operations, or continuation pattern applies; otherwise the configured merge behavior determines the result. This policy overrides inherited sections.",
       "items": {
         "type": "string",
         "minLength": 1

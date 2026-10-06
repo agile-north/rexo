@@ -15,7 +15,7 @@ Only essential behavior is on by default; everything else is an opt-in switch in
 | Dependency audit in `security` | **off** | `vars.node.audit.enabled` |
 | Run inside a container | **off** (host) | `vars.node.container` |
 
-Scripts run with `--if-present`, so a missing script is a no-op rather than a failure.
+Every enabled script must be defined in `package.json`; missing scripts fail the command.
 
 ## Usage
 
@@ -47,6 +47,7 @@ Policy vars are deep-merged underneath your repository's `vars`; your repository
 | Var | Default | Description |
 | --- | --- | --- |
 | `packageManager` | `npm` | `npm`, `pnpm`, `yarn` or `bun`. |
+| `yarnVersion` | `classic` | Yarn audit implementation: `classic` (`yarn audit`) or `modern` (`yarn npm audit`). |
 | `container` | `""` | Container registry name (e.g. `node`) for all node steps; empty/`none` = host. |
 | `restore.command` | `""` | Custom install command replacing the package-manager default. |
 | `build.script` | `build` | Script run by `build`. |
@@ -59,7 +60,7 @@ Policy vars are deep-merged underneath your repository's `vars`; your repository
 | `sarif.enabled` | `false` | Run the SARIF lint script in `analyze`. |
 | `sarif.script` | `lint:sarif` | SARIF lint script name (should write to `outputs.analysis.sarif`). |
 | `audit.enabled` | `false` | Run `<packageManager> audit` in `security`. |
-| `audit.level` | `high` | Minimum severity that fails the audit. |
+| `audit.level` | `high` | Minimum severity that fails the audit. Audit commands are selected for npm, pnpm, Bun, and Yarn Classic/Berry. |
 
 ## Containers
 

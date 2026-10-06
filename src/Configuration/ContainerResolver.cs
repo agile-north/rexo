@@ -42,20 +42,35 @@ public static class ContainerResolver
             return null;
         }
 
+        RepoStepContainerConfig? resolved;
         if (spec.Use is null)
         {
-            return spec with { Extends = null };
+            resolved = spec with { Extends = null };
         }
-
-        var name = renderName(spec.Use).Trim();
-        var inline = spec with { Use = null, Extends = null };
-        if (IsNoneReference(name))
+        else
         {
-            return string.IsNullOrWhiteSpace(inline.Image) ? null : inline;
+            var name = renderName(spec.Use).Trim();
+            var inline = spec with { Use = null, Extends = null };
+            if (IsNoneReference(name))
+            {
+                resolved = string.IsNullOrWhiteSpace(inline.Image) || string.IsNullOrWhiteSpace(renderName(inline.Image))
+                    ? null
+                    : inline;
+            }
+            else
+            {
+                var definition = ResolveNamed(name, registry, renderName, []);
+                resolved = Overlay(definition, inline) with { Use = null, Extends = null };
+            }
         }
 
-        var resolved = ResolveNamed(name, registry, renderName, []);
-        return Overlay(resolved, inline) with { Use = null, Extends = null };
+        if (resolved is not null && string.IsNullOrWhiteSpace(renderName(resolved.Image ?? string.Empty)))
+        {
+            throw new InvalidOperationException(
+                "Resolved container has no image. Specify an image or use 'none' to run on the host.");
+        }
+
+        return resolved;
     }
 
     /// <summary>Layers <paramref name="override"/> on top of <paramref name="base"/> field by field (env and build args merge).</summary>

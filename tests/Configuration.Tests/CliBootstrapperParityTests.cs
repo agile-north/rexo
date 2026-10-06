@@ -6,6 +6,61 @@ using Rexo.Cli;
 public sealed class CliBootstrapperParityTests
 {
     [Fact]
+    public async Task BuildServicesAsyncAppliesPolicySecretRoutesOnlyOnce()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"rexo-policy-secret-routes-{Guid.NewGuid():N}");
+        var rexoDir = Path.Combine(dir, ".rexo");
+        Directory.CreateDirectory(rexoDir);
+        var configPath = Path.Combine(rexoDir, "rexo.json");
+        var policyPath = Path.Combine(rexoDir, "policy.json");
+        var originalPolicySources = Environment.GetEnvironmentVariable("REXO_POLICY_SOURCES");
+        Environment.SetEnvironmentVariable("REXO_POLICY_SOURCES", null);
+
+        try
+        {
+            await File.WriteAllTextAsync(configPath, """
+        {
+          "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+          "schemaVersion": "1.0",
+          "name": "sample",
+          "commands": {},
+          "aliases": {},
+          "secrets": {
+            "defaults": {
+              "providerChain": [{ "runtime": "local", "provider": "env" }]
+            }
+          }
+        }
+        """);
+            await File.WriteAllTextAsync(policyPath, """
+        {
+          "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/policy.schema.json",
+          "schemaVersion": "1.0",
+          "name": "sample-policy",
+          "secrets": {
+            "defaults": {
+              "providerChain": [{ "runtime": "ci", "provider": "env" }]
+            }
+          }
+        }
+        """);
+
+            var (_, _, effectiveConfig) = await CliBootstrapper.BuildServicesAsync(
+                dir, debug: false, setOverrides: null, CancellationToken.None);
+
+            Assert.NotNull(effectiveConfig?.Secrets?.Defaults?.ProviderChain);
+            Assert.Equal(2, effectiveConfig.Secrets.Defaults.ProviderChain!.Count);
+            Assert.Equal("ci", effectiveConfig.Secrets.Defaults.ProviderChain[0].Runtime);
+            Assert.Equal("local", effectiveConfig.Secrets.Defaults.ProviderChain[1].Runtime);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("REXO_POLICY_SOURCES", originalPolicySources);
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
     public async Task BuildServicesAsyncThrowsWhenArtifactTypeIsUnsupported()
     {
         var dir = Path.Combine(Path.GetTempPath(), $"rexo-parity-artifact-{Guid.NewGuid():N}");
@@ -43,4 +98,3 @@ public sealed class CliBootstrapperParityTests
     }
 
 }
-

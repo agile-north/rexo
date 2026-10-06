@@ -150,7 +150,59 @@ public sealed class PolicyDefaultsTests
             "vars": { "node": { "restore": { "command": "npm install" }, "audit": { "enabled": true } } }
             """);
         Assert.Equal(["node-install-custom"], ActiveSteps(custom, "restore", Context(custom)));
-        Assert.Equal(["node-audit"], ActiveSteps(custom, "security", Context(custom)));
+        Assert.Equal(["node-audit-npm"], ActiveSteps(custom, "security", Context(custom)));
+    }
+
+    [Theory]
+    [InlineData("npm", "classic", "node-audit-npm", "npm audit --json --audit-level=critical")]
+    [InlineData("pnpm", "classic", "node-audit-pnpm", "pnpm audit --json --audit-level=critical")]
+    [InlineData("yarn", "classic", "node-audit-yarn-classic", "yarn audit --json --level=critical")]
+    [InlineData("yarn", "modern", "node-audit-yarn-modern", "yarn npm audit --json --severity critical")]
+    [InlineData("bun", "classic", "node-audit-bun", "bun audit --json --audit-level=critical")]
+    public async Task NodePolicyUsesPackageManagerSpecificAuditCommand(
+        string packageManager,
+        string yarnVersion,
+        string stepId,
+        string expectedCommand)
+    {
+        var config = await LoadAsync($$"""
+            "extends": ["embedded:node"],
+            "vars": {
+              "node": {
+                "packageManager": "{{packageManager}}",
+                "yarnVersion": "{{yarnVersion}}",
+                "audit": { "enabled": true, "level": "critical" }
+              }
+            }
+            """);
+
+        Assert.Equal([stepId], ActiveSteps(config, "security", Context(config)));
+        var step = config.Commands!["security"].Steps.Single(candidate => candidate.Id == stepId);
+        var command = new TemplateRenderer().Render(step.Run!, Context(config));
+        Assert.StartsWith(expectedCommand, command, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("npm")]
+    [InlineData("pnpm")]
+    [InlineData("yarn")]
+    [InlineData("bun")]
+    public async Task NodePolicyScriptsRequireExplicitPackageScripts(string packageManager)
+    {
+        var config = await LoadAsync($$"""
+            "extends": ["embedded:node"],
+            "vars": { "node": { "packageManager": "{{packageManager}}" } }
+            """);
+        var renderer = new TemplateRenderer();
+        var context = Context(config);
+
+        foreach (var step in config.Commands!.Values
+                     .SelectMany(command => command.Steps)
+                     .Where(candidate => candidate.Run is not null))
+        {
+            var rendered = renderer.Render(step.Run!, context);
+            Assert.DoesNotContain("--if-present", rendered, StringComparison.Ordinal);
+        }
     }
 
     [Fact]
@@ -228,13 +280,23 @@ public sealed class PolicyDefaultsTests
         {
             ["a"] = new() { Extends = "b" },
             ["b"] = new() { Extends = "a" },
+            ["no-image"] = new(),
         };
 
         Assert.Throws<InvalidOperationException>(() =>
             ContainerResolver.Resolve(new RepoStepContainerConfig { Use = "missing" }, registry, static s => s));
         Assert.Throws<InvalidOperationException>(() =>
             ContainerResolver.Resolve(new RepoStepContainerConfig { Use = "a" }, registry, static s => s));
+        Assert.Throws<InvalidOperationException>(() =>
+            ContainerResolver.Resolve(new RepoStepContainerConfig { Use = "no-image" }, registry, static s => s));
         Assert.Null(ContainerResolver.Resolve(new RepoStepContainerConfig { Use = "none" }, registry, static s => s));
+        Assert.Throws<InvalidOperationException>(() =>
+            ContainerResolver.Resolve(new RepoStepContainerConfig(), registry, static s => s));
+        Assert.Throws<InvalidOperationException>(() =>
+            ContainerResolver.Resolve(
+                new RepoStepContainerConfig { Image = "{{vars.image}}" },
+                registry,
+                static _ => string.Empty));
     }
 
     [Fact]

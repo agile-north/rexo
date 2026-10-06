@@ -126,6 +126,8 @@ When `rx init --schema-source local --with-policy` is used, both schema files ar
 
   "commands": { ... },
   "aliases": { ... },
+  "vars": { ... },        // template vars ({{vars.*}}), deep-merged across layers
+  "containers": { ... },  // reusable container definitions (see containerized-run.md)
   "versioning": { ... },
   "artifacts": [ ... ],
   "secrets": { ... },
@@ -213,6 +215,19 @@ Merge behavior:
 - Configs are merged breadth-first.
 - Child properties win over base properties.
 - Commands and aliases are merged (child additions take priority).
+- `vars` and `settings` are **deep-merged**: nested objects merge key by key, so a child can change
+  `vars.dotnet.analyze.sarif.enabled` without restating the rest of `vars.dotnet`. Scalars and arrays
+  are replaced.
+- `containers` registries merge by name, field by field (child wins).
+
+### Policy parity: policies supply defaults
+
+Policies (embedded, local `policy.json`, or `policySources`) may declare the same sections a
+repository config can: `vars`, `settings`, `containers`, `outputs`, `runtime`, `versioning`,
+`secrets`, and their own `extends`. Policy values are **only defaults** — they are layered underneath
+the repository config, and the repository always wins. This is how stack policies such as
+`embedded:dotnet` ship opt-in switches (e.g. `vars.dotnet.analyze.sarif.enabled: false`) that you
+flip in your own config without overriding the policy's commands.
 
 ### Minimal-by-default lifecycle
 

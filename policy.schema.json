@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/policy.schema.json",
   "title": "Rexo policy configuration schema",
-  "description": "Schema for policy files that may contribute shared command and alias baselines.",
+  "description": "Schema for policy files. Policies contribute shared commands/aliases plus default vars, settings, containers, outputs, runtime, secrets, and versioning. Repository values always win.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -38,6 +38,14 @@
       "type": "string",
       "description": "Optional longer description of what the policy provides."
     },
+    "extends": {
+      "type": "array",
+      "description": "Other policies this policy builds on ('embedded:<name>' or a path relative to this policy file). Earlier entries have lower priority; this policy overrides them.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
     "commands": {
       "type": "object",
       "description": "Policy-defined commands merged into repository command space. Omit this property for empty or capability-only policies.",
@@ -55,6 +63,44 @@
     "capabilities": {
       "description": "Runtime capability requirements and compatibility contract expectations for this policy.",
       "$ref": "#/$defs/capabilityContract"
+    },
+    "vars": {
+      "description": "Policy-declared default template variables ({{vars.*}}). Deep-merged underneath the repository's vars; the repository always wins.",
+      "markdownDescription": "Free-form template variable bag available as `{{vars.*}}` in step `run` strings. See [Template Variables](docs/configuration/templates.md) for rendering rules and filter support.",
+      "$ref": "#/$defs/vars"
+    },
+    "settings": {
+      "description": "Policy-declared default settings ({{settings.*}}). Deep-merged underneath the repository's settings; the repository always wins.",
+      "markdownDescription": "Toolchain-specific settings available as `{{settings.*}}` in policy command templates. Use this for repository- or policy-specific knobs that do not belong in the core schema.",
+      "$ref": "#/$defs/settings"
+    },
+    "containers": {
+      "type": "object",
+      "description": "Named container registry. Steps and commands reference entries by name via 'container: <name>' or 'container: { use: <name>, ... }'. Entries can inherit from each other with 'extends'. Merged across extends/policy layers by name (field-level overlay).",
+      "markdownDescription": "Named container registry. Steps and commands reference entries by name via `container: <name>` or `container: { use: <name>, ... }`. Entries can inherit from each other with `extends`. Registries merge across `extends`/policy layers by name with field-level overlay; the repository config always wins. See [Containers](docs/configuration/containerized-run.md).",
+      "additionalProperties": {
+        "$ref": "#/$defs/stepContainerSpec"
+      }
+    },
+    "outputs": {
+      "description": "Policy-declared default output paths. The repository config always wins.",
+      "markdownDescription": "Output path contract for manifests, CI emission, logs, test output, and package folders. See [Output Contract](docs/configuration/output-contract.md) and [CI Output Emission](docs/configuration/ci-output-emission.md). Omitted values resolve under `outputs.root`, which defaults to `artifacts`.",
+      "$ref": "#/$defs/outputsConfig"
+    },
+    "runtime": {
+      "description": "Policy-declared runtime defaults. The repository config always wins.",
+      "markdownDescription": "Cross-cutting runtime policy configuration for output, push, and command delegation. See [Runtime Configuration](docs/configuration/runtime.md). This is where global defaults such as dry-run, push gating, and same-name command collision behavior live.",
+      "$ref": "#/$defs/runtime"
+    },
+    "secrets": {
+      "description": "Policy-declared secret definitions. The repository config always wins.",
+      "markdownDescription": "First-class secret resolution configuration. See [Secrets](docs/configuration/secrets.md). Use `defaults` for shared provider behavior, `providers` for reusable provider definitions, and `items` for named secrets exposed as `{{secrets.<name>}}`.",
+      "$ref": "#/$defs/secretsConfig"
+    },
+    "versioning": {
+      "description": "Policy-declared versioning defaults. The repository config always wins.",
+      "markdownDescription": "Version provider configuration used by `builtin:resolve-version`. See [Versioning Configuration](docs/configuration/versioning.md). When omitted, `auto` will choose `nbgv`, `gitversion`, `minver`, `git`, or `fixed` from repository evidence and fall back to `0.1.0-local`.",
+      "$ref": "#/$defs/versioning"
     }
   },
   "$defs": {
@@ -139,6 +185,10 @@
         "stepOps": {
           "description": "Legacy explicit step-level extension operations. Prefer merge.steps envelope.",
           "$ref": "#/$defs/commandStepOps"
+        },
+        "container": {
+          "$ref": "#/$defs/containerRef",
+          "description": "Default container for every run step in this command (steps can override, or opt out with false/'none'). Applies only to this command's own steps, not to delegated commands."
         }
       }
     },
@@ -230,7 +280,10 @@
     "stepReplace": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "step"],
+      "required": [
+        "id",
+        "step"
+      ],
       "properties": {
         "id": {
           "type": "string",
@@ -325,59 +378,8 @@
           ]
         },
         "container": {
-          "type": "object",
-          "description": "Optional run-step container wrapper. When set, the rendered run command executes inside the specified container image.",
-          "additionalProperties": false,
-          "required": [
-            "image"
-          ],
-          "properties": {
-            "image": {
-              "type": "string",
-              "description": "Container image used to execute the run command."
-            },
-            "env": {
-              "type": "object",
-              "description": "Additional environment variables injected into the container process.",
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "workingDirectory": {
-              "type": "string",
-              "description": "Working directory inside the container. Defaults to /work."
-            },
-            "entrypoint": {
-              "type": "string",
-              "description": "Optional container entrypoint override passed to docker run --entrypoint."
-            },
-            "dockerfile": {
-              "type": "string",
-              "description": "Optional Dockerfile path used to build container.image when missing or stale. Relative paths are resolved from repository root."
-            },
-            "context": {
-              "type": "string",
-              "description": "Optional docker build context directory used with container.dockerfile. Defaults to repository root."
-            },
-            "build": {
-              "type": "object",
-              "description": "Optional docker build options used when container.dockerfile is configured.",
-              "additionalProperties": false,
-              "properties": {
-                "target": {
-                  "type": "string",
-                  "description": "Optional docker build target stage passed as --target."
-                },
-                "args": {
-                  "type": "object",
-                  "description": "Optional docker build arguments passed as --build-arg key=value.",
-                  "additionalProperties": {
-                    "type": "string"
-                  }
-                }
-              }
-            }
-          }
+          "$ref": "#/$defs/containerRef",
+          "description": "Optional run-step container. A registry name, false/'none' for host execution, or an inline/override object. Overrides the command-level container."
         },
         "when": {
           "type": "string",
@@ -449,9 +451,21 @@
         }
       },
       "anyOf": [
-        { "required": ["run"] },
-        { "required": ["uses"] },
-        { "required": ["command"] }
+        {
+          "required": [
+            "run"
+          ]
+        },
+        {
+          "required": [
+            "uses"
+          ]
+        },
+        {
+          "required": [
+            "command"
+          ]
+        }
       ],
       "allOf": [
         {
@@ -471,7 +485,2538 @@
           ]
         }
       ]
+    },
+    "stepContainerSpec": {
+      "type": "object",
+      "description": "Container execution spec. Either an inline definition (image/dockerfile/...) or a reference to a named entry in the top-level 'containers' registry via 'use', optionally with inline overrides.",
+      "additionalProperties": false,
+      "properties": {
+        "use": {
+          "type": "string",
+          "description": "Name of a container defined in the top-level 'containers' registry. Template expressions are allowed (e.g. '{{vars.dotnet.container}}'). 'none', 'false', or an empty rendered value means run on the host.",
+          "examples": [
+            "dotnet-sdk",
+            "{{vars.dotnet.container}}",
+            "none"
+          ]
+        },
+        "extends": {
+          "type": "string",
+          "description": "Only valid inside the 'containers' registry: name of another registry entry whose fields this definition inherits and overrides."
+        },
+        "image": {
+          "type": "string",
+          "description": "Container image used to execute the run command."
+        },
+        "env": {
+          "type": "object",
+          "description": "Additional environment variables injected into the container process.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "workingDirectory": {
+          "type": "string",
+          "description": "Working directory inside the container. Defaults to /work."
+        },
+        "entrypoint": {
+          "type": "string",
+          "description": "Optional container entrypoint override passed to docker run --entrypoint."
+        },
+        "dockerfile": {
+          "type": "string",
+          "description": "Optional Dockerfile path used to build container.image when missing or stale. Relative paths are resolved from repository root."
+        },
+        "context": {
+          "type": "string",
+          "description": "Optional docker build context directory used with container.dockerfile. Defaults to repository root."
+        },
+        "build": {
+          "type": "object",
+          "description": "Optional docker build options used when container.dockerfile is configured.",
+          "additionalProperties": false,
+          "properties": {
+            "target": {
+              "type": "string",
+              "description": "Optional docker build target stage passed as --target."
+            },
+            "args": {
+              "type": "object",
+              "description": "Optional docker build arguments passed as --build-arg key=value.",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "markdownDescription": "Container execution spec. Either an inline definition (`image`, `dockerfile`, ...) or a reference to a named entry in the top-level `containers` registry via `use`, with optional inline overrides (env and build args merge; other fields replace). See [Containers](docs/configuration/containerized-run.md)."
+    },
+    "containerRef": {
+      "description": "Container reference: a registry name (string), false/'none' to force host execution, or an inline/override object.",
+      "markdownDescription": "Container reference: a registry name (string), `false` or `\"none\"` to force host execution, or an inline/override object (`{ \"use\": \"dotnet-sdk\", \"env\": { ... } }`).",
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "boolean",
+          "enum": [
+            false
+          ]
+        },
+        {
+          "$ref": "#/$defs/stepContainerSpec"
+        }
+      ]
+    },
+    "settings": {
+      "type": "object",
+      "description": "Free-form toolchain settings bag available as {{settings.*}} in templates.",
+      "markdownDescription": "Free-form toolchain settings bag available as `{{settings.*}}` in templates. Omit it to keep an empty settings map; runtime behavior stays unchanged.",
+      "additionalProperties": true
+    },
+    "vars": {
+      "type": "object",
+      "description": "Free-form template variable bag. Accessible as {{vars.*}} in step run strings. Values can be strings, numbers, booleans, or arbitrarily nested objects.",
+      "markdownDescription": "Free-form template variable bag available as `{{vars.*}}` in step `run` strings. Values can be strings, numbers, booleans, or arbitrarily nested objects, and missing entries simply render empty.",
+      "additionalProperties": true,
+      "properties": {
+        "dotnet": {
+          "$ref": "#/$defs/dotnetVars"
+        },
+        "node": {
+          "$ref": "#/$defs/nodeVars"
+        },
+        "gitTag": {
+          "$ref": "#/$defs/gitTagVars"
+        }
+      }
+    },
+    "secretCacheConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "markdownDescription": "Per-command in-memory cache for secret resolution. `enabled` toggles the cache and `ttlSeconds` sets the cache TTL in seconds.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable per-command in-memory cache for the secret or provider."
+        },
+        "ttlSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optional cache TTL in seconds."
+        }
+      }
+    },
+    "secretDefaultsConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "markdownDescription": "Shared defaults for named secrets. See [Secrets](docs/configuration/secrets.md).\n\n- `provider`: default provider type when a secret item does not specify one.\n- `providerChain`: ordered provider candidates evaluated before the default provider.\n- `fallbackToEnvironment`: default `true`; fall back to environment lookup after providers fail.\n- `stopOnFirstError`: stop on the first provider failure instead of trying the next candidate.\n- `cache`: per-command in-memory cache settings.\n- `required`: default required/optional behavior for secret items.",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "Default secret provider type (for example env, 1password, exec)."
+        },
+        "providerChain": {
+          "type": "array",
+          "description": "Ordered provider candidates evaluated at runtime until one resolves the secret.",
+          "items": {
+            "$ref": "#/$defs/secretProviderRouteConfig"
+          }
+        },
+        "fallbackToEnvironment": {
+          "type": "boolean",
+          "description": "When true (default), fall back to environment lookup after configured providers fail."
+        },
+        "stopOnFirstError": {
+          "type": "boolean",
+          "description": "When true, stop the chain on the first provider error instead of falling back to the next candidate."
+        },
+        "cache": {
+          "$ref": "#/$defs/secretCacheConfig"
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Default required behavior for secret entries."
+        }
+      }
+    },
+    "secretProviderConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "markdownDescription": "Reusable secret provider definition. `type` selects the implementation; `auth` and `settings` are provider-specific; `cache` can override the default cache behavior for that provider.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Provider type implementation key."
+        },
+        "auth": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Provider auth values or references interpreted by the provider implementation."
+        },
+        "settings": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Provider-specific settings."
+        },
+        "cache": {
+          "$ref": "#/$defs/secretCacheConfig"
+        }
+      }
+    },
+    "secretProviderRouteConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "markdownDescription": "One candidate in a secret provider chain. `runtime` can be `local`, `ci`, or a CI provider name; `selector` and `env` can be overridden per route.",
+      "properties": {
+        "providerRef": {
+          "type": "string",
+          "description": "Reference to a named provider declared under secrets.providers."
+        },
+        "provider": {
+          "type": "string",
+          "description": "Inline provider type override."
+        },
+        "selector": {
+          "type": "string",
+          "description": "Selector override for this route."
+        },
+        "env": {
+          "type": "string",
+          "description": "Environment variable override for this route."
+        },
+        "runtime": {
+          "type": "string",
+          "description": "Runtime filter for the candidate. Use local, ci, or a CI provider name such as github-actions."
+        }
+      }
+    },
+    "secretItemConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "markdownDescription": "Named secret item exposed as `{{secrets.<name>}}`. Item-level values override `secrets.defaults`; `fallbackToEnvironment` and `stopOnFirstError` control resolution fallback; `required` secrets fail preflight when unresolved; `exposeInTemplates` controls template visibility; `mapToEnv` and `mapToEnvs` inject runtime environment variables.",
+      "properties": {
+        "providerRef": {
+          "type": "string",
+          "description": "Reference to a named provider declared under secrets.providers."
+        },
+        "provider": {
+          "type": "string",
+          "description": "Inline provider type override."
+        },
+        "providerChain": {
+          "type": "array",
+          "description": "Ordered provider candidates evaluated at runtime until one resolves the secret.",
+          "items": {
+            "$ref": "#/$defs/secretProviderRouteConfig"
+          }
+        },
+        "fallbackToEnvironment": {
+          "type": "boolean",
+          "description": "When true (default), fall back to environment lookup after configured providers fail."
+        },
+        "stopOnFirstError": {
+          "type": "boolean",
+          "description": "When true, stop the chain on the first provider error instead of falling back to the next candidate."
+        },
+        "selector": {
+          "type": "string",
+          "description": "Provider selector/key/path used to resolve the secret."
+        },
+        "env": {
+          "type": "string",
+          "description": "Environment variable name used by env provider."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "When true (default), missing secret fails command execution."
+        },
+        "exposeInTemplates": {
+          "type": "boolean",
+          "description": "When true (default), expose resolved value in templates under secrets.*."
+        },
+        "mapToEnv": {
+          "type": "string",
+          "description": "Optional environment variable name to inject the resolved secret into at runtime."
+        },
+        "mapToEnvs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Optional additional environment variable names to inject the resolved secret into at runtime."
+        },
+        "cache": {
+          "$ref": "#/$defs/secretCacheConfig"
+        },
+        "settings": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Per-secret provider settings."
+        }
+      }
+    },
+    "secretsConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "markdownDescription": "Secret configuration root. See [Secrets](docs/configuration/secrets.md). Use `defaults` for shared secret resolution behavior, `providers` for reusable providers, and `items` for named secrets exposed as `{{secrets.<name>}}`. Omit the section entirely when the repo only needs ambient environment-based secret lookup.",
+      "properties": {
+        "defaults": {
+          "$ref": "#/$defs/secretDefaultsConfig"
+        },
+        "providers": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/secretProviderConfig"
+          }
+        },
+        "items": {
+          "type": "object",
+          "description": "Named secret entries exposed as {{secrets.<name>}}.",
+          "additionalProperties": {
+            "$ref": "#/$defs/secretItemConfig"
+          }
+        }
+      }
+    },
+    "versioning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider"
+      ],
+      "markdownDescription": "Version provider configuration used by `builtin:resolve-version`. See [Versioning Configuration](docs/configuration/versioning.md).\n\n- `provider`: chooses how Rexo resolves the version. Omit it to use `auto`.\n- `fallback`: version string used when resolution fails or is unavailable.\n- `settings`: provider-specific knobs such as `variable`, `tagPrefix`, or `minimumMajorMinor`.\n\nFor `gitversion`, `nbgv`, and `minver`, Docker fallback is enabled by default and `dockerImage` is template-rendered before use.",
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "Version provider to use. 'auto' (default) detects the right provider from config file evidence: version.json/nbgv.json → nbgv; GitVersion.yml → gitversion; .minverrc → minver; .git present → git; otherwise → fixed.",
+          "markdownDescription": "Version provider to use. `auto` is the default and scans for `version.json`/`nbgv.json`, `GitVersion.yml`, `.minverrc`, or `.git` before falling back to `fixed`.",
+          "enum": [
+            "auto",
+            "fixed",
+            "env",
+            "git",
+            "gitversion",
+            "minver",
+            "nbgv"
+          ],
+          "default": "auto"
+        },
+        "fallback": {
+          "type": "string",
+          "description": "Version string used when the provider cannot resolve a version (e.g. no tags yet).",
+          "markdownDescription": "Version string used when the provider cannot resolve a version. Default: `0.1.0-local`.",
+          "default": "0.1.0-local"
+        },
+        "settings": {
+          "type": "object",
+          "description": "Provider-specific settings. Common keys: variable (env), tagPrefix/minimumMajorMinor (minver). Docker fallback keys (all providers except fixed/env/git): useDocker (default true — set false to disable), dockerImage (override the default Docker image).",
+          "markdownDescription": "Provider-specific settings. Common keys include `variable` for `env`, `tagPrefix` and `minimumMajorMinor` for `minver`, and Docker fallback settings for `gitversion`/`nbgv`/`minver`. `useDocker` defaults to `true` for those providers, and `dockerImage` overrides the fallback container image.",
+          "additionalProperties": {
+            "$ref": "#/$defs/settingValue"
+          }
+        }
+      }
+    },
+    "artifact": {
+      "description": "Artifact declaration. Choose docker, nuget, helm-oci, npm, pypi, maven, gradle, rubygems, terraform, helm, docker-compose, or a custom provider type.",
+      "markdownDescription": "Artifact declaration. See [Artifact Providers](docs/artifacts/README.md). Choose one provider-specific shape per entry; omit the array entirely when the repo does not build or publish artifacts.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/dockerArtifact"
+        },
+        {
+          "$ref": "#/$defs/nugetArtifact"
+        },
+        {
+          "$ref": "#/$defs/helmOciArtifact"
+        },
+        {
+          "$ref": "#/$defs/npmArtifact"
+        },
+        {
+          "$ref": "#/$defs/pypiArtifact"
+        },
+        {
+          "$ref": "#/$defs/mavenArtifact"
+        },
+        {
+          "$ref": "#/$defs/gradleArtifact"
+        },
+        {
+          "$ref": "#/$defs/rubygemsArtifact"
+        },
+        {
+          "$ref": "#/$defs/terraformArtifact"
+        },
+        {
+          "$ref": "#/$defs/helmArtifact"
+        },
+        {
+          "$ref": "#/$defs/dockerComposeArtifact"
+        },
+        {
+          "$ref": "#/$defs/genericArtifact"
+        }
+      ]
+    },
+    "dockerArtifact": {
+      "type": "object",
+      "description": "Docker image artifact configuration.",
+      "markdownDescription": "Docker image artifact configuration. See [docker.md](docs/artifacts/docker.md). Use this when the repository builds or ships a container image; omit `settings` to keep provider defaults.",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "docker",
+          "description": "Selects the docker artifact provider."
+        },
+        "name": {
+          "type": "string",
+          "description": "Logical artifact name used in logs and manifests. When omitted, falls back to the root config name."
+        },
+        "settings": {
+          "description": "Provider-specific docker build, tag, and push settings.",
+          "$ref": "#/$defs/dockerArtifactSettings"
+        }
+      }
+    },
+    "nugetArtifact": {
+      "type": "object",
+      "description": "NuGet package artifact configuration.",
+      "markdownDescription": "NuGet package artifact configuration. See [nuget.md](docs/artifacts/nuget.md). Use this when the repository packs and optionally publishes NuGet packages.",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "nuget",
+          "description": "Selects the nuget artifact provider."
+        },
+        "name": {
+          "type": "string",
+          "description": "Logical artifact name used in logs and manifests. When omitted, falls back to the root config name."
+        },
+        "settings": {
+          "description": "Provider-specific nuget pack/push settings.",
+          "$ref": "#/$defs/nugetArtifactSettings"
+        }
+      }
+    },
+    "genericArtifact": {
+      "type": "object",
+      "description": "Fallback artifact shape for custom providers not explicitly modeled in this schema.",
+      "markdownDescription": "Fallback artifact shape for custom providers not explicitly modeled in this schema. See [generic.md](docs/artifacts/generic.md). Use this when you need arbitrary provider settings or a custom artifact type.",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Custom provider type key.",
+          "not": {
+            "enum": [
+              "docker",
+              "nuget",
+              "helm-oci",
+              "npm",
+              "pypi",
+              "maven",
+              "gradle",
+              "rubygems",
+              "terraform",
+              "helm",
+              "docker-compose"
+            ]
+          }
+        },
+        "name": {
+          "type": "string",
+          "description": "Logical artifact name used in logs and manifests. When omitted, falls back to the root config name."
+        },
+        "settings": {
+          "type": "object",
+          "description": "Provider-specific arbitrary settings for custom artifact providers.",
+          "additionalProperties": {
+            "$ref": "#/$defs/artifactSettingValue"
+          }
+        }
+      }
+    },
+    "helmOciArtifact": {
+      "type": "object",
+      "description": "Helm chart artifact pushed to OCI registry.",
+      "markdownDescription": "Helm chart artifact pushed to OCI registry. See [helm-oci.md](docs/artifacts/helm-oci.md). Use this when chart packaging should target an OCI destination.",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "helm-oci",
+          "description": "Selects the Helm OCI artifact provider."
+        },
+        "name": {
+          "type": "string",
+          "description": "Logical artifact name used in logs and manifests. When omitted, falls back to the root config name."
+        },
+        "settings": {
+          "description": "Provider-specific Helm package and OCI push settings.",
+          "$ref": "#/$defs/helmOciArtifactSettings"
+        }
+      }
+    },
+    "npmArtifact": {
+      "type": "object",
+      "description": "npm package artifact configuration.",
+      "markdownDescription": "npm package artifact configuration. See [npm.md](docs/artifacts/npm.md). Use this when the repository packs and publishes npm packages.",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "npm",
+          "description": "Selects the npm artifact provider."
+        },
+        "name": {
+          "type": "string",
+          "description": "Logical artifact name used in logs and manifests."
+        },
+        "settings": {
+          "type": "object",
+          "description": "npm pack/publish settings.",
+          "additionalProperties": false,
+          "properties": {
+            "directory": {
+              "type": "string",
+              "description": "Working directory containing package.json. Defaults to repo root."
+            },
+            "target": {
+              "type": "object",
+              "description": "Target settings for npm publish endpoint and credential env-name overrides.",
+              "additionalProperties": false,
+              "properties": {
+                "registry": {
+                  "type": "string",
+                  "description": "npm registry URL for publish."
+                },
+                "registryEnv": {
+                  "type": "string",
+                  "description": "Environment variable name containing target npm registry URL. Defaults to NPM_TARGET_REGISTRY."
+                },
+                "tokenEnv": {
+                  "type": "string",
+                  "description": "Environment variable name containing npm auth token. Defaults to NPM_TOKEN."
+                }
+              }
+            },
+            "access": {
+              "type": "string",
+              "description": "Package access level.",
+              "enum": [
+                "public",
+                "restricted"
+              ]
+            },
+            "tag": {
+              "type": "string",
+              "description": "Distribution tag to publish under. Defaults to version."
+            },
+            "useDocker": {
+              "type": "boolean",
+              "description": "Use a Docker container as a fallback runtime when npm is not installed on the host. Defaults to true."
+            },
+            "dockerImage": {
+              "type": "string",
+              "description": "Docker image used when falling back to the containerized npm runtime. Defaults to node:lts-alpine."
+            },
+            "extra-build-args": {
+              "type": "string",
+              "description": "Additional space-separated arguments appended to the npm pack command."
+            },
+            "extra-push-args": {
+              "type": "string",
+              "description": "Additional space-separated arguments appended to the npm publish command."
+            }
+          }
+        }
+      }
+    },
+    "pypiArtifact": {
+      "type": "object",
+      "description": "Python/PyPI package artifact configuration.",
+      "markdownDescription": "Python/PyPI package artifact configuration. See [pypi.md](docs/artifacts/pypi.md). Use this when the repository builds and publishes Python distributions.",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "pypi",
+          "description": "Selects the PyPI artifact provider."
+        },
+        "name": {
+          "type": "string",
+          "description": "Logical artifact name used in logs and manifests."
+        },
+        "settings": {
+          "type": "object",
+          "description": "python -m build / twine upload settings.",
+          "additionalProperties": false,
+          "properties": {
+            "directory": {
+              "type": "string",
+              "description": "Working directory. Defaults to repo root."
+            },
+            "target": {
+              "type": "object",
+              "description": "Target settings for twine endpoint and credential env-name overrides.",
+              "additionalProperties": false,
+              "properties": {
+                "repositoryUrl": {
+                  "type": "string",
+                  "description": "PyPI repository URL for twine upload."
+                },
+                "repositoryUrlEnv": {
+                  "type": "string",
+                  "description": "Environment variable name containing repository URL. Defaults to PYPI_TARGET_REPOSITORY_URL."
+                },
+                "apiTokenEnv": {
+                  "type": "string",
+                  "description": "Environment variable name containing API token. Defaults to TWINE_API_TOKEN."
+                },
+                "usernameEnv": {
+                  "type": "string",
+                  "description": "Environment variable name containing username. Defaults to TWINE_USERNAME."
+                },
+                "passwordEnv": {
+                  "type": "string",
+                  "description": "Environment variable name containing password. Defaults to TWINE_PASSWORD."
+                }
+              }
+            },
+            "dist-dir": {
+              "type": "string",
+              "description": "Distribution directory pattern. Defaults to 'dist/*'."
+            },
+            "useDocker": {
+              "type": "boolean",
+              "description": "Use a Docker container as a fallback runtime when python/python3 is not installed on the host. Defaults to true."
+            },
+            "dockerImage": {
+              "type": "string",
+              "description": "Docker image used when falling back to the containerized Python runtime. Defaults to python:3-slim. The default image does not include build or twine — provide a custom image if needed."
+            },
+            "extra-build-args": {
+              "type": "string",
+              "description": "Additional space-separated arguments appended to the python -m build command."
+            },
+            "extra-push-args": {
+              "type": "string",
+              "description": "Additional space-separated arguments appended to the python -m twine upload command."
+            }
+          }
+        }
+      }
+    },
+    "mavenArtifact": {
+      "type": "object",
+      "description": "Maven package/deploy artifact configuration.",
+      "markdownDescription": "Maven package/deploy artifact configuration. See [maven.md](docs/artifacts/maven.md). Use this when the repository packages or deploys Maven artifacts.",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "maven",
+          "description": "Selects the Maven artifact provider."
+        },
+        "name": {
+          "type": "string",
+          "description": "Logical artifact name used in logs and manifests."
+        },
+        "settings": {
+          "type": "object",
+          "description": "mvn package/deploy settings.",
+          "additionalProperties": false,
+          "properties": {
+            "project": {
+              "type": "string",
+              "description": "Path to the pom.xml file. Defaults to root pom.xml."
+            },
+            "profiles": {
+              "type": "string",
+              "description": "Comma-separated Maven profiles to activate."
+            },
+            "target": {
+              "type": "object",
+              "description": "Target credential env-name overrides for Maven publishing.",
+              "additionalProperties": false,
+              "properties": {
+                "usernameEnv": {
+                  "type": "string",
+                  "description": "Environment variable name containing Maven username. Defaults to MAVEN_REPO_USERNAME."
+                },
+                "passwordEnv": {
+                  "type": "string",
+                  "description": "Environment variable name containing Maven password/token. Defaults to MAVEN_REPO_PASSWORD."
+                }
+              }
+            },
+            "useDocker": {
+              "type": "boolean",
+              "description": "Use a Docker container as a fallback runtime when mvn is not installed on the host. Defaults to true."
+            },
+            "dockerImage": {
+              "type": "string",
+              "description": "Docker image used when falling back to the containerized Maven runtime. Defaults to maven:3-eclipse-temurin-21."
+            },
+            "extra-build-args": {
+              "type": "string",
+              "description": "Additional space-separated arguments appended to mvn package."
+            },
+            "extra-push-args": {
+              "type": "string",
+              "description": "Additional space-separated arguments appended to mvn deploy."
+            }
+          }
+        }
+      }
+    },
+    "gradleArtifact": {
+      "type": "object",
+      "description": "Gradle build/publish artifact configuration.",
+      "markdownDescription": "Gradle build/publish artifact configuration. See [gradle.md](docs/artifacts/gradle.md). Use this when the repository builds or publishes through Gradle.",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "gradle",
+          "description": "Selects the Gradle artifact provider."
+        },
+        "name": {
+          "type": "string",
+          "description": "Logical artifact name used in logs and manifests."
+        },
+        "settings": {
+          "type": "object",
+          "description": "Gradle build/publish settings.",
+          "additionalProperties": false,
+          "properties": {
+            "tasks": {
+              "type": "string",
+              "description": "Gradle tasks to run for build. Defaults to 'build'."
+            },
+            "wrapper": {
+              "type": "boolean",
+              "description": "Use Gradle wrapper (gradlew) if present. Defaults to true."
+            },
+            "directory": {
+              "type": "string",
+              "description": "Working directory containing build.gradle. Defaults to repo root."
+            },
+            "target": {
+              "type": "object",
+              "description": "Target credential env-name overrides for Gradle publish flows.",
+              "additionalProperties": false,
+              "properties": {
+                "usernameEnv": {
+                  "type": "string",
+                  "description": "Environment variable name containing Maven publish username. Defaults to ORG_GRADLE_PROJECT_mavenUsername."
+                },
+                "passwordEnv": {
+                  "type": "string",
+                  "description": "Environment variable name containing Maven publish password. Defaults to ORG_GRADLE_PROJECT_mavenPassword."
+                },
+                "publishKeyEnv": {
+                  "type": "string",
+                  "description": "Environment variable name containing Gradle Plugin Portal publish key. Defaults to GRADLE_PUBLISH_KEY."
+                },
+                "publishSecretEnv": {
+                  "type": "string",
+                  "description": "Environment variable name containing Gradle Plugin Portal publish secret. Defaults to GRADLE_PUBLISH_SECRET."
+                }
+              }
+            },
+            "useDocker": {
+              "type": "boolean",
+              "description": "Use a Docker container as a fallback runtime when gradle is not installed on the host. Defaults to true."
+            },
+            "dockerImage": {
+              "type": "string",
+              "description": "Docker image used when falling back to the containerized Gradle runtime. Defaults to gradle:8-jdk21."
+            },
+            "extra-build-args": {
+              "type": "string",
+              "description": "Additional space-separated arguments appended to the Gradle build task(s)."
+            },
+            "extra-push-args": {
+              "type": "string",
+              "description": "Additional space-separated arguments appended to the Gradle publish task."
+            }
+          }
+        }
+      }
+    },
+    "rubygemsArtifact": {
+      "type": "object",
+      "description": "RubyGems gem build/push artifact configuration.",
+      "markdownDescription": "RubyGems gem build/push artifact configuration. See [rubygems.md](docs/artifacts/rubygems.md). Use this when the repository builds and publishes Ruby gems.",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "rubygems",
+          "description": "Selects the RubyGems artifact provider."
+        },
+        "name": {
+          "type": "string",
+          "description": "Logical artifact name used in logs and manifests."
+        },
+        "settings": {
+          "type": "object",
+          "description": "gem build/push settings.",
+          "additionalProperties": false,
+          "properties": {
+            "gemspec": {
+              "type": "string",
+              "description": "Path or glob to the .gemspec file. Defaults to '*.gemspec'."
+            },
+            "target": {
+              "type": "object",
+              "description": "Target settings for RubyGems source and credential env-name overrides.",
+              "additionalProperties": false,
+              "properties": {
+                "source": {
+                  "type": "string",
+                  "description": "Gem server source URL for gem push."
+                },
+                "sourceEnv": {
+                  "type": "string",
+                  "description": "Environment variable name containing target source URL. Defaults to RUBYGEMS_TARGET_SOURCE."
+                },
+                "apiKeyEnv": {
+                  "type": "string",
+                  "description": "Environment variable name containing API key/token. Defaults to GEM_HOST_API_KEY."
+                }
+              }
+            },
+            "gem-pattern": {
+              "type": "string",
+              "description": "Glob pattern for the built gem file to push. Defaults to '*.gem'."
+            },
+            "directory": {
+              "type": "string",
+              "description": "Working directory. Defaults to repo root."
+            },
+            "useDocker": {
+              "type": "boolean",
+              "description": "Use a Docker container as a fallback runtime when gem is not installed on the host. Defaults to true."
+            },
+            "dockerImage": {
+              "type": "string",
+              "description": "Docker image used when falling back to the containerized Ruby runtime. Defaults to ruby:3-alpine."
+            },
+            "extra-build-args": {
+              "type": "string",
+              "description": "Additional space-separated arguments appended to gem build."
+            },
+            "extra-push-args": {
+              "type": "string",
+              "description": "Additional space-separated arguments appended to gem push."
+            }
+          }
+        }
+      }
+    },
+    "terraformArtifact": {
+      "type": "object",
+      "description": "Terraform plan/apply artifact configuration.",
+      "markdownDescription": "Terraform plan/apply artifact configuration. See [terraform.md](docs/artifacts/terraform.md). Use this when the repository packages and applies Terraform modules or plans.",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "terraform",
+          "description": "Selects the Terraform artifact provider."
+        },
+        "name": {
+          "type": "string",
+          "description": "Logical artifact name used in logs and manifests."
+        },
+        "settings": {
+          "type": "object",
+          "description": "terraform init/plan/apply settings.",
+          "additionalProperties": false,
+          "properties": {
+            "directory": {
+              "type": "string",
+              "description": "Directory containing Terraform configuration. Defaults to '.'."
+            },
+            "target": {
+              "type": "object",
+              "description": "Target settings for Terraform workspace and var-file env overrides.",
+              "additionalProperties": false,
+              "properties": {
+                "workspace": {
+                  "type": "string",
+                  "description": "Terraform workspace to select before apply."
+                },
+                "workspaceEnv": {
+                  "type": "string",
+                  "description": "Environment variable name containing Terraform workspace. Defaults to TERRAFORM_TARGET_WORKSPACE."
+                },
+                "varFile": {
+                  "type": "string",
+                  "description": "Path to a .tfvars file to pass to terraform plan."
+                },
+                "varFileEnv": {
+                  "type": "string",
+                  "description": "Environment variable name containing tfvars file path. Defaults to TERRAFORM_TARGET_VAR_FILE."
+                }
+              }
+            },
+            "useDocker": {
+              "type": "boolean",
+              "description": "Use a Docker container as a fallback runtime when terraform is not installed on the host. Defaults to true."
+            },
+            "dockerImage": {
+              "type": "string",
+              "description": "Docker image used when falling back to the containerized Terraform runtime. Defaults to hashicorp/terraform:1.9."
+            },
+            "extra-build-args": {
+              "type": "string",
+              "description": "Additional space-separated arguments appended to terraform plan."
+            },
+            "extra-push-args": {
+              "type": "string",
+              "description": "Additional space-separated arguments appended to terraform apply."
+            }
+          }
+        }
+      }
+    },
+    "helmArtifact": {
+      "type": "object",
+      "description": "Helm chart package/push artifact configuration (non-OCI).",
+      "markdownDescription": "Helm chart package/push artifact configuration (non-OCI). See [helm.md](docs/artifacts/helm.md). Use this when you package charts for a ChartMuseum-style repository or filesystem copy.",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "helm",
+          "description": "Selects the Helm (non-OCI) artifact provider."
+        },
+        "name": {
+          "type": "string",
+          "description": "Logical artifact name used in logs and manifests."
+        },
+        "settings": {
+          "type": "object",
+          "description": "helm package/push settings.",
+          "additionalProperties": false,
+          "properties": {
+            "chart": {
+              "type": "string",
+              "description": "Path to the chart directory. Defaults to '.'."
+            },
+            "chart-directory": {
+              "type": "string",
+              "description": "Path to the chart directory. Defaults to '.'."
+            },
+            "output-directory": {
+              "type": "string",
+              "description": "Directory where packaged .tgz files are written. Defaults to repo root."
+            },
+            "target": {
+              "type": "object",
+              "description": "Target settings for helm repository endpoint and credential env-name overrides.",
+              "additionalProperties": false,
+              "properties": {
+                "repository": {
+                  "type": "string",
+                  "description": "Chart Museum repo URL (https://…) for helm cm-push, or a local filesystem path for file copy."
+                },
+                "repositoryEnv": {
+                  "type": "string",
+                  "description": "Environment variable name containing target repository. Defaults to HELM_TARGET_REPOSITORY."
+                },
+                "usernameEnv": {
+                  "type": "string",
+                  "description": "Environment variable name containing repository username. Defaults to HELM_REPO_USERNAME."
+                },
+                "passwordEnv": {
+                  "type": "string",
+                  "description": "Environment variable name containing repository password/token. Defaults to HELM_REPO_PASSWORD."
+                }
+              }
+            },
+            "useDocker": {
+              "type": "boolean",
+              "description": "Use a Docker container as a fallback runtime when helm is not installed on the host. Defaults to true."
+            },
+            "dockerImage": {
+              "type": "string",
+              "description": "Docker image used when falling back to the containerized Helm runtime. Defaults to alpine/helm:3.17.3."
+            },
+            "extra-build-args": {
+              "type": "string",
+              "description": "Additional space-separated arguments appended to helm package."
+            },
+            "extra-push-args": {
+              "type": "string",
+              "description": "Additional space-separated arguments appended to helm cm-push."
+            }
+          }
+        }
+      }
+    },
+    "dockerComposeArtifact": {
+      "type": "object",
+      "description": "Docker Compose build/push artifact configuration.",
+      "markdownDescription": "Docker Compose build/push artifact configuration. See [docker-compose.md](docs/artifacts/docker-compose.md). Use this when the repository builds or pushes compose-defined services.",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "docker-compose",
+          "description": "Selects the Docker Compose artifact provider."
+        },
+        "name": {
+          "type": "string",
+          "description": "Logical artifact name used in logs and manifests."
+        },
+        "settings": {
+          "type": "object",
+          "description": "docker compose build/push settings.",
+          "additionalProperties": false,
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "Path to the docker-compose file. Defaults to docker-compose.yml."
+            },
+            "project-name": {
+              "type": "string",
+              "description": "Docker Compose project name (-p flag)."
+            },
+            "services": {
+              "type": "string",
+              "description": "Space-separated list of services to build/push. Defaults to all."
+            },
+            "target": {
+              "type": "object",
+              "description": "Target settings for compose registry and login env-name overrides.",
+              "additionalProperties": false,
+              "properties": {
+                "registry": {
+                  "type": "string",
+                  "description": "Container registry URL. When set, docker login is performed before push using resolved credentials."
+                },
+                "registryEnv": {
+                  "type": "string",
+                  "description": "Environment variable name containing target registry URL/host. Defaults to DOCKER_COMPOSE_TARGET_REGISTRY."
+                },
+                "usernameEnv": {
+                  "type": "string",
+                  "description": "Environment variable name containing docker login username. Defaults to DOCKER_LOGIN_USERNAME."
+                },
+                "passwordEnv": {
+                  "type": "string",
+                  "description": "Environment variable name containing docker login password/token. Defaults to DOCKER_LOGIN_PASSWORD."
+                },
+                "loginRegistryEnv": {
+                  "type": "string",
+                  "description": "Environment variable name containing docker login registry override. Defaults to DOCKER_LOGIN_REGISTRY."
+                }
+              }
+            },
+            "extra-build-args": {
+              "type": "string",
+              "description": "Additional space-separated arguments appended to docker compose build."
+            },
+            "extra-push-args": {
+              "type": "string",
+              "description": "Additional space-separated arguments appended to docker compose push."
+            }
+          }
+        }
+      }
+    },
+    "stringOrStringArray": {
+      "description": "Convenience type that accepts either a single string value or a string array.",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "tagKind": {
+      "type": "string",
+      "description": "Supported Docker tag strategy kind.",
+      "enum": [
+        "full",
+        "semver",
+        "majorMinor",
+        "majorminor",
+        "major-minor",
+        "major",
+        "branch",
+        "sha",
+        "latest-on-main"
+      ]
+    },
+    "tagKindOrTagKindArray": {
+      "description": "One Docker tag strategy kind or a list of tag strategy kinds.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/tagKind"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/tagKind"
+          }
+        }
+      ]
+    },
+    "buildArgValue": {
+      "description": "Supported primitive value for a single Docker build argument.",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "boolean"
+        }
+      ]
+    },
+    "buildArgsValue": {
+      "description": "Accepted forms for Docker build arguments: inline string, key/value object, or list.",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/buildArgValue"
+          }
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/buildArgValue"
+          }
+        }
+      ]
+    },
+    "secretSpec": {
+      "type": "object",
+      "description": "Docker build secret source. Provide either env or file.",
+      "additionalProperties": false,
+      "properties": {
+        "env": {
+          "type": "string",
+          "description": "Environment variable name that contains the secret value."
+        },
+        "file": {
+          "type": "string",
+          "description": "Path to a file containing the secret value."
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "env"
+          ]
+        },
+        {
+          "required": [
+            "file"
+          ]
+        }
+      ]
+    },
+    "aliasesRule": {
+      "type": "object",
+      "description": "Conditional docker alias tag rule applied to the current branch name.",
+      "additionalProperties": false,
+      "required": [
+        "match",
+        "template"
+      ],
+      "properties": {
+        "match": {
+          "type": "string",
+          "description": "Branch match expression (wildcard or regex:... syntax)."
+        },
+        "template": {
+          "type": "string",
+          "description": "Alias template supporting tokens such as $BRANCH and capture groups like $1."
+        },
+        "sanitize": {
+          "type": "string",
+          "description": "Optional alias sanitation mode.",
+          "enum": [
+            "sanitized"
+          ]
+        }
+      }
+    },
+    "dockerStage": {
+      "type": "object",
+      "description": "Named multi-stage docker build configuration entry.",
+      "additionalProperties": false,
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "Dockerfile stage target passed via --target."
+        },
+        "output": {
+          "description": "Build output destination(s) for this stage.",
+          "$ref": "#/$defs/stringOrStringArray"
+        },
+        "runner": {
+          "type": "string",
+          "description": "Docker runner to use for this stage (build, buildx, or auto-detect).",
+          "enum": [
+            "build",
+            "buildx",
+            "auto"
+          ]
+        },
+        "platform": {
+          "type": "string",
+          "description": "Target platform for the stage (for example linux/amd64)."
+        }
+      }
+    },
+    "dockerArtifactSettings": {
+      "type": "object",
+      "description": "Detailed docker provider settings covering image naming, build, tagging, aliases, and push behavior.",
+      "additionalProperties": false,
+      "properties": {
+        "image": {
+          "type": "string",
+          "description": "Final docker image repository name. If omitted, the artifact name is used."
+        },
+        "dockerfile": {
+          "type": "string",
+          "description": "Path to the Dockerfile."
+        },
+        "file": {
+          "type": "string",
+          "description": "Alias of dockerfile for compatibility."
+        },
+        "context": {
+          "type": "string",
+          "description": "Docker build context path."
+        },
+        "runner": {
+          "type": "string",
+          "description": "Docker command flavor to use for build operations.",
+          "enum": [
+            "build",
+            "buildx",
+            "auto"
+          ],
+          "default": "build"
+        },
+        "platform": {
+          "type": "string",
+          "description": "Build platform passed to docker via --platform."
+        },
+        "buildTarget": {
+          "type": "string",
+          "description": "Dockerfile target stage name.",
+          "examples": [
+            "build",
+            "publish"
+          ]
+        },
+        "buildOutput": {
+          "description": "Build output option(s) passed to docker --output.",
+          "$ref": "#/$defs/stringOrStringArray"
+        },
+        "buildArgs": {
+          "description": "Build arguments for docker --build-arg.",
+          "$ref": "#/$defs/buildArgsValue"
+        },
+        "secrets": {
+          "type": "object",
+          "description": "Named docker build secrets.",
+          "additionalProperties": {
+            "$ref": "#/$defs/secretSpec"
+          }
+        },
+        "registry": {
+          "type": "string",
+          "description": "Legacy shorthand for target registry host. Prefer target.registry."
+        },
+        "repository": {
+          "type": "string",
+          "description": "Legacy shorthand for target repository path. Prefer target.repository."
+        },
+        "target": {
+          "type": "object",
+          "description": "Target registry/repository destination used to compose the image name.",
+          "additionalProperties": false,
+          "properties": {
+            "registry": {
+              "type": "string",
+              "description": "Registry host, for example ghcr.io or myregistry.example.com:5000."
+            },
+            "repository": {
+              "type": "string",
+              "description": "Repository namespace/name within the registry."
+            }
+          }
+        },
+        "loginRegistry": {
+          "type": "string",
+          "description": "Registry host used for docker login when different from target registry."
+        },
+        "login": {
+          "type": "object",
+          "description": "Login override settings for docker authentication.",
+          "additionalProperties": false,
+          "properties": {
+            "registry": {
+              "type": "string",
+              "description": "Registry host used for login."
+            }
+          }
+        },
+        "cleanupLocal": {
+          "description": "Legacy cleanup switch. true/false or auto (auto cleans up in CI). Prefer cleanup.local.",
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "auto",
+                "true",
+                "false"
+              ]
+            }
+          ]
+        },
+        "cleanup": {
+          "type": "object",
+          "description": "Post-build local cleanup settings.",
+          "additionalProperties": false,
+          "properties": {
+            "local": {
+              "description": "Controls local image cleanup after build: true, false, or auto.",
+              "oneOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "enum": [
+                    "auto",
+                    "true",
+                    "false"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        "pushEnabled": {
+          "type": "boolean",
+          "description": "Legacy push enable flag. Prefer push.enabled.",
+          "default": true
+        },
+        "pushBranches": {
+          "description": "Legacy push branch allow-list. Prefer push.branches.",
+          "$ref": "#/$defs/stringOrStringArray"
+        },
+        "denyNonPublicPush": {
+          "type": "boolean",
+          "description": "Legacy switch to prevent pushes from non-public build classifications. Prefer push.denyNonPublicPush.",
+          "default": false
+        },
+        "push": {
+          "type": "object",
+          "description": "Push policy for this docker artifact.",
+          "examples": [
+            {
+              "enabled": true,
+              "branches": [
+                "main",
+                "release/*"
+              ],
+              "denyNonPublicPush": true
+            }
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enables docker push for this artifact.",
+              "default": true
+            },
+            "branches": {
+              "description": "Allowed branch patterns for pushing this artifact.",
+              "examples": [
+                [
+                  "main",
+                  "release/*"
+                ],
+                "main,release/*"
+              ],
+              "$ref": "#/$defs/stringOrStringArray"
+            },
+            "branchesShortcut": {
+              "type": "string",
+              "description": "Shortcut CSV/string form for branches; merged with push.branches."
+            },
+            "denyNonPublicPush": {
+              "type": "boolean",
+              "description": "Blocks push when build classification resolves to non-public.",
+              "default": false
+            }
+          }
+        },
+        "latest": {
+          "type": "boolean",
+          "description": "Legacy switch to emit latest tag. Prefer tags.latest via tag policy settings.",
+          "default": false
+        },
+        "tags": {
+          "description": "Tag strategy names (for example full, majorMinor, major, branch, sha) or a custom list.",
+          "examples": [
+            [
+              "full",
+              "majorMinor",
+              "major"
+            ],
+            [
+              "full",
+              "branch",
+              "sha"
+            ],
+            "full"
+          ],
+          "$ref": "#/$defs/tagKindOrTagKindArray"
+        },
+        "publicBuild": {
+          "type": "boolean",
+          "description": "Legacy explicit build classification as public/non-public. Prefer build.public."
+        },
+        "build": {
+          "type": "object",
+          "description": "Build classification controls.",
+          "additionalProperties": false,
+          "properties": {
+            "public": {
+              "type": "boolean",
+              "description": "When set, forces public/non-public build classification."
+            }
+          }
+        },
+        "publicBranches": {
+          "description": "Legacy branch patterns classified as public builds. Prefer classification.publicBranches.",
+          "$ref": "#/$defs/stringOrStringArray"
+        },
+        "publicBranchesShortcut": {
+          "type": "string",
+          "description": "Legacy shortcut string for publicBranches."
+        },
+        "nonPublicBranches": {
+          "description": "Legacy branch patterns classified as non-public builds. Prefer classification.nonPublicBranches.",
+          "$ref": "#/$defs/stringOrStringArray"
+        },
+        "nonPublicBranchesShortcut": {
+          "type": "string",
+          "description": "Legacy shortcut string for nonPublicBranches."
+        },
+        "classification": {
+          "type": "object",
+          "description": "Branch-based build classification rules.",
+          "additionalProperties": false,
+          "properties": {
+            "publicBranches": {
+              "description": "Branch patterns treated as public builds.",
+              "$ref": "#/$defs/stringOrStringArray"
+            },
+            "publicBranchesShortcut": {
+              "type": "string",
+              "description": "Shortcut string for publicBranches.",
+              "examples": [
+                "main,release/*"
+              ]
+            },
+            "nonPublicBranches": {
+              "description": "Branch patterns treated as non-public builds.",
+              "$ref": "#/$defs/stringOrStringArray"
+            },
+            "nonPublicBranchesShortcut": {
+              "type": "string",
+              "description": "Shortcut string for nonPublicBranches."
+            }
+          }
+        },
+        "tagPolicy": {
+          "type": "object",
+          "description": "Default tag kinds applied by build classification when explicit tags are not set.",
+          "additionalProperties": false,
+          "properties": {
+            "public": {
+              "description": "Tag kinds for public builds.",
+              "$ref": "#/$defs/tagKindOrTagKindArray"
+            },
+            "nonPublic": {
+              "description": "Tag kinds for non-public builds.",
+              "$ref": "#/$defs/tagKindOrTagKindArray"
+            }
+          }
+        },
+        "nonPublicMode": {
+          "type": "string",
+          "description": "Optional mode override for non-public tagging behavior.",
+          "enum": [
+            "full-only"
+          ]
+        },
+        "aliases": {
+          "type": "object",
+          "description": "Additional human-friendly alias tags generated from branch names.",
+          "additionalProperties": false,
+          "properties": {
+            "branch": {
+              "type": "boolean",
+              "description": "Emit alias from raw branch name."
+            },
+            "sanitizedBranch": {
+              "type": "boolean",
+              "description": "Emit alias from slug/sanitized branch name."
+            },
+            "sanitize": {
+              "type": "boolean",
+              "description": "Sanitize alias output strings by default."
+            },
+            "prefix": {
+              "type": "string",
+              "description": "Prefix added to generated aliases."
+            },
+            "suffix": {
+              "type": "string",
+              "description": "Suffix added to generated aliases."
+            },
+            "nonPublicPrefix": {
+              "type": "string",
+              "description": "Prefix used when build classification is non-public."
+            },
+            "rules": {
+              "type": "array",
+              "description": "Ordered alias mapping rules; first matching rule is applied.",
+              "items": {
+                "$ref": "#/$defs/aliasesRule"
+              }
+            }
+          }
+        },
+        "stages": {
+          "type": "object",
+          "description": "Named build stage definitions for multi-stage Dockerfile workflows.",
+          "additionalProperties": {
+            "$ref": "#/$defs/dockerStage"
+          }
+        },
+        "stageFallback": {
+          "type": "boolean",
+          "description": "When true, run a final full build after configured stages to produce final tags.",
+          "default": true
+        }
+      }
+    },
+    "nugetArtifactSettings": {
+      "type": "object",
+      "description": "Settings for dotnet pack and dotnet nuget push operations.",
+      "additionalProperties": false,
+      "properties": {
+        "project": {
+          "type": "string",
+          "description": "Path to the .csproj/.fsproj to pack."
+        },
+        "output": {
+          "type": "string",
+          "description": "Package output directory for generated .nupkg files."
+        },
+        "target": {
+          "type": "object",
+          "description": "Structured target settings for NuGet push.",
+          "additionalProperties": false,
+          "properties": {
+            "source": {
+              "type": "string",
+              "description": "NuGet source/feed URL or name used for push."
+            },
+            "sourceEnv": {
+              "type": "string",
+              "description": "Environment variable name containing target source/feed. Defaults to NUGET_TARGET_SOURCE."
+            },
+            "apiKeyEnv": {
+              "type": "string",
+              "description": "Environment variable name containing API key/token. Defaults to NUGET_API_KEY (fallback alias: NUGET_AUTH_TOKEN)."
+            }
+          }
+        },
+        "symbols": {
+          "type": "object",
+          "description": "Optional symbol package (.snupkg) push settings.",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "When true, pushes matching .snupkg files for this artifact.",
+              "default": false
+            },
+            "source": {
+              "type": "string",
+              "description": "Symbol server/feed URL or name used for symbol package push. Defaults to target.source when omitted."
+            },
+            "sourceEnv": {
+              "type": "string",
+              "description": "Environment variable name containing symbol target source/feed. Defaults to NUGET_SYMBOL_TARGET_SOURCE."
+            },
+            "apiKeyEnv": {
+              "type": "string",
+              "description": "Environment variable name containing symbol API key/token. Defaults to NUGET_SYMBOL_API_KEY (fallbacks: NUGET_API_KEY, NUGET_AUTH_TOKEN)."
+            },
+            "pattern": {
+              "type": "string",
+              "description": "Glob pattern for symbol package files to push (for example artifacts/packages/*.symbols.nupkg). Defaults to <output>/<artifact>.<version>.snupkg."
+            }
+          }
+        }
+      }
+    },
+    "helmOciArtifactSettings": {
+      "type": "object",
+      "description": "Settings for Helm chart packaging and OCI registry push. Auth env vars: HELM_REGISTRY_USERNAME, HELM_REGISTRY_PASSWORD, HELM_REGISTRY. For ghcr.io, GITHUB_ACTOR+GITHUB_TOKEN are used automatically in GitHub Actions (requires permissions: packages: write).",
+      "additionalProperties": false,
+      "properties": {
+        "chart": {
+          "type": "string",
+          "description": "Chart name used to resolve packaged file names. Defaults to artifact name."
+        },
+        "chartPath": {
+          "type": "string",
+          "description": "Path to the chart root that contains Chart.yaml.",
+          "default": "chart"
+        },
+        "output": {
+          "type": "string",
+          "description": "Output directory for generated .tgz chart packages.",
+          "default": "artifacts/charts"
+        },
+        "target": {
+          "type": "object",
+          "description": "Target settings for Helm OCI destination and login env-name overrides.",
+          "additionalProperties": false,
+          "properties": {
+            "oci": {
+              "type": "string",
+              "description": "Full OCI destination (for example oci://ghcr.io/org/charts)."
+            },
+            "ociEnv": {
+              "type": "string",
+              "description": "Environment variable name containing full OCI destination. Defaults to HELM_OCI_TARGET."
+            },
+            "registry": {
+              "type": "string",
+              "description": "OCI registry host used when composing destination from registry + repository."
+            },
+            "registryEnv": {
+              "type": "string",
+              "description": "Environment variable name containing OCI target registry. Defaults to HELM_OCI_TARGET_REGISTRY."
+            },
+            "repository": {
+              "type": "string",
+              "description": "OCI repository path used when composing destination from registry + repository."
+            },
+            "repositoryEnv": {
+              "type": "string",
+              "description": "Environment variable name containing OCI target repository. Defaults to HELM_OCI_TARGET_REPOSITORY."
+            },
+            "loginRegistry": {
+              "type": "string",
+              "description": "Optional registry host to use for helm registry login."
+            },
+            "loginRegistryEnv": {
+              "type": "string",
+              "description": "Environment variable name containing login registry override. Defaults to HELM_OCI_LOGIN_REGISTRY."
+            },
+            "usernameEnv": {
+              "type": "string",
+              "description": "Environment variable name containing registry username. Defaults to HELM_REGISTRY_USERNAME."
+            },
+            "passwordEnv": {
+              "type": "string",
+              "description": "Environment variable name containing registry password/token. Defaults to HELM_REGISTRY_PASSWORD."
+            }
+          }
+        },
+        "useDocker": {
+          "type": "boolean",
+          "description": "Set to false to disable the Docker fallback when the host helm CLI is unavailable. Defaults to true.",
+          "default": true
+        },
+        "dockerImage": {
+          "type": "string",
+          "description": "Override the Helm container image used when host helm CLI is unavailable. Resolution order: HELM_CONTAINER_IMAGE env, this setting, then alpine/helm:3.17.3."
+        }
+      }
+    },
+    "artifactSettingValue": {
+      "description": "Recursive value type for arbitrary custom artifact settings.",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/artifactSettingValue"
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/artifactSettingValue"
+          }
+        }
+      ]
+    },
+    "settingValue": {
+      "description": "Allowed primitive/array value types for generic settings maps.",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "outputsConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Output path contract. Paths default to subdirectories under the root output folder unless a plain relative path is provided, in which case the path is treated as repo-relative.",
+      "markdownDescription": "Output path contract. See [Output Contract](docs/configuration/output-contract.md) and [CI Output Emission](docs/configuration/ci-output-emission.md).\n\n- `emit`: master switch for runtime file emission.\n- `root`: base folder for all generated outputs, defaulting to `artifacts`.\n- `tests` / `analysis` / `security`: category-specific output trees whose values default under `outputs.root`.\n- `packages`, `manifests`, `logs`, `temp`: common output locations that inherit from `outputs.root` unless you provide a plain relative path.",
+      "properties": {
+        "emit": {
+          "type": "boolean",
+          "description": "When false, Rexo does not collect or write any output files (manifests, step file outputs). Well-known overlay commands also skip passing output path arguments to toolchain CLIs.",
+          "markdownDescription": "When `false`, Rexo does not collect or write runtime files such as manifests or step outputs. Default: `true`.",
+          "default": true
+        },
+        "command": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Defaults for command stdout and JSON output. CLI flags override these values.",
+          "markdownDescription": "Defaults for command stdout and JSON output. CLI flags still override these values. `stdout` defaults to `true`, `json` defaults to `false`, and `jsonFile` is optional.",
+          "properties": {
+            "stdout": {
+              "type": "boolean",
+              "description": "When true, command results are written to stdout by default.",
+              "default": true
+            },
+            "json": {
+              "type": "boolean",
+              "description": "When true, command results are rendered as JSON by default.",
+              "default": false
+            },
+            "jsonFile": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Optional default file path for machine-readable command results."
+            }
+          }
+        },
+        "ci": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "CI-native manifest emission settings.",
+          "markdownDescription": "CI-native manifest emission settings. See [CI Output Emission](docs/configuration/ci-output-emission.md). `provider` defaults to `auto`, `github-actions.scope` defaults to `env`, `prefix` defaults to `REXO_`, `keyCasing` defaults to `upperSnake`, and `redact` defaults to `true`.",
+          "properties": {
+            "emit": {
+              "type": "boolean",
+              "description": "When true, emit CI-native variables after command execution.",
+              "default": true
+            },
+            "provider": {
+              "type": "string",
+              "description": "CI provider selection. Use auto to detect from the runtime environment.",
+              "default": "auto",
+              "enum": [
+                "auto",
+                "github-actions",
+                "azure-devops",
+                "teamcity",
+                "generic"
+              ]
+            },
+            "github-actions": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Provider-specific GitHub Actions settings.",
+              "properties": {
+                "scope": {
+                  "type": "string",
+                  "description": "GitHub Actions file target. Use env for $GITHUB_ENV, output for $GITHUB_OUTPUT, or state for $GITHUB_STATE.",
+                  "default": "env",
+                  "enum": [
+                    "env",
+                    "output",
+                    "state"
+                  ]
+                }
+              }
+            },
+            "prefix": {
+              "type": "string",
+              "description": "Prefix applied to emitted variable names.",
+              "default": "REXO_"
+            },
+            "keyCasing": {
+              "type": "string",
+              "description": "Key casing format for emitted variables.",
+              "default": "upperSnake",
+              "enum": [
+                "upperSnake",
+                "lowerSnake",
+                "kebab",
+                "camel",
+                "pascal"
+              ]
+            },
+            "scope": {
+              "description": "Emission scope controls which manifest fields are exported. Use a preset or a structured selector with include/exclude masks.",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "default": "safe",
+                  "enum": [
+                    "safe",
+                    "full"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "mode": {
+                      "type": "string",
+                      "enum": [
+                        "safe",
+                        "full"
+                      ],
+                      "description": "Baseline scope to filter from. Defaults to safe unless include masks are present."
+                    },
+                    "include": {
+                      "type": "array",
+                      "description": "Masks that must match for a field to be emitted. Supports exact names, wildcard globs, and regex:... patterns.",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "exclude": {
+                      "type": "array",
+                      "description": "Masks that remove matching fields after include filtering.",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              ]
+            },
+            "includeStepOutputs": {
+              "type": "boolean",
+              "description": "When true, emit raw step outputs in addition to the safe summary payload.",
+              "default": false
+            },
+            "emitEmptyValues": {
+              "type": "boolean",
+              "description": "When true, emit variables even when values are empty or null.",
+              "default": false
+            },
+            "redact": {
+              "type": "boolean",
+              "description": "When true, redact sensitive values before emission.",
+              "default": true
+            },
+            "failOnError": {
+              "type": "boolean",
+              "description": "When true, CI emission errors fail the command.",
+              "default": false
+            },
+            "maxValueLength": {
+              "type": "integer",
+              "description": "Maximum emitted value length.",
+              "minimum": 1,
+              "default": 8192
+            },
+            "maxVariables": {
+              "type": "integer",
+              "description": "Maximum number of emitted variables.",
+              "minimum": 1,
+              "default": 1000
+            }
+          }
+        },
+        "root": {
+          "type": "string",
+          "description": "Root folder for all generated outputs.",
+          "markdownDescription": "Root folder for all generated outputs. Default: `artifacts`.",
+          "default": "artifacts"
+        },
+        "tests": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Paths for test-related outputs.",
+          "markdownDescription": "Paths for test-related outputs. Omitted values resolve beneath `outputs.root`.",
+          "properties": {
+            "results": {
+              "type": "string",
+              "description": "Directory for test result files (e.g. TRX, JUnit XML).",
+              "default": "~/tests"
+            },
+            "coverage": {
+              "type": "string",
+              "description": "Directory for coverage data files.",
+              "default": "~/tests/coverage"
+            },
+            "reports": {
+              "type": "string",
+              "description": "Directory for generated coverage reports (HTML, etc.).",
+              "default": "~/tests/reports"
+            }
+          }
+        },
+        "analysis": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Paths for analysis-related outputs.",
+          "markdownDescription": "Paths for analysis-related outputs. Omitted values resolve beneath `outputs.root`.",
+          "properties": {
+            "reports": {
+              "type": "string",
+              "description": "Directory for analysis report files.",
+              "default": "~/analysis"
+            },
+            "sarif": {
+              "type": "string",
+              "description": "SARIF output directory.",
+              "default": "~/analysis/sarif"
+            }
+          }
+        },
+        "security": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Paths for security audit outputs.",
+          "markdownDescription": "Paths for security audit outputs. Omitted values resolve beneath `outputs.root`.",
+          "properties": {
+            "audit": {
+              "type": "string",
+              "description": "Full file path for the npm/security audit JSON output.",
+              "default": "~/security/audit.json"
+            },
+            "reports": {
+              "type": "string",
+              "description": "Security report output directory.",
+              "default": "~/security"
+            },
+            "sarif": {
+              "type": "string",
+              "description": "SARIF output directory for security findings.",
+              "default": "~/security/sarif"
+            }
+          }
+        },
+        "packages": {
+          "type": "string",
+          "description": "Directory for built artifact packages (NuGet, npm, Helm charts, etc.).",
+          "markdownDescription": "Directory for built artifact packages. Default: `~/packages` under `outputs.root`.",
+          "default": "~/packages"
+        },
+        "manifests": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Manifest output settings.",
+          "markdownDescription": "Manifest output settings. Default path is `~/manifests`; `commandMode` defaults to `aggregate` (`single` is an alias); `commandDetail` defaults to `summary`.",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Directory for command/runtime manifest files. Use ~/... to resolve relative to outputs.root; plain relative paths are repo-relative.",
+              "markdownDescription": "Directory for command/runtime manifest files. `~/...` resolves under `outputs.root`; plain relative paths are repo-relative. Default: `~/manifests`.",
+              "default": "~/manifests"
+            },
+            "commandMode": {
+              "type": "string",
+              "description": "Command manifest file strategy. Use aggregate for one file containing all commands, perCommand for one file per command, or single as an alias for aggregate.",
+              "markdownDescription": "Command manifest file strategy. `aggregate` is the default; `single` is an alias for `aggregate`; `perCommand` writes one file per command.",
+              "default": "aggregate",
+              "enum": [
+                "single",
+                "perCommand",
+                "aggregate"
+              ]
+            },
+            "commandDetail": {
+              "type": "string",
+              "description": "Command manifest detail level. Use summary for concise output or verbose for full command result payload.",
+              "markdownDescription": "Command manifest detail level. `summary` is the default; `verbose` includes the full `CommandResult` payload.",
+              "default": "summary",
+              "enum": [
+                "summary",
+                "verbose"
+              ]
+            }
+          }
+        },
+        "logs": {
+          "type": "string",
+          "description": "Directory for CI log files.",
+          "markdownDescription": "Directory for CI log files. Default: `~/logs`.",
+          "default": "~/logs"
+        },
+        "temp": {
+          "type": "string",
+          "description": "Scratch directory for intermediate build artifacts.",
+          "markdownDescription": "Scratch directory for intermediate build artifacts. Default: `~/tmp`.",
+          "default": "~/tmp"
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "examples": [
+        {
+          "dryRun": true,
+          "push": {
+            "enabled": true,
+            "branches": [
+              "main",
+              "release/*"
+            ]
+          }
+        }
+      ],
+      "markdownDescription": "Cross-cutting runtime policy configuration for output, push, and command delegation. See [Runtime Configuration](docs/configuration/runtime.md).\n\n- `dryRun`: simulate actions instead of mutating external systems.\n- `push`: global push gate merged with per-artifact push rules.\n- `commands`: global command execution policy such as default merge mode and max depth.",
+      "properties": {
+        "dryRun": {
+          "type": "boolean",
+          "description": "Enables dry-run mode for the runtime. When true, external mutations are simulated instead of executed.",
+          "markdownDescription": "Enables dry-run mode for the runtime. When `true`, Rexo simulates actions instead of performing side effects where supported. Default: `false`.",
+          "default": false
+        },
+        "push": {
+          "description": "Global push policy merged with per-artifact push overrides.",
+          "markdownDescription": "Global push policy merged with per-artifact push overrides. See [Runtime Configuration](docs/configuration/runtime.md). `runtime.push.dryRun` can force push-related commands into simulation mode even when the global runtime flag is off.",
+          "$ref": "#/$defs/pushRules"
+        },
+        "commands": {
+          "type": "object",
+          "description": "Global command execution policy settings.",
+          "markdownDescription": "Global command execution policy settings. `defaultMergeMode` is the fallback when a child command does not specify merge mode; `maxDepth` defaults to `5`.",
+          "additionalProperties": false,
+          "properties": {
+            "defaultMergeMode": {
+              "$ref": "#/$defs/commandMergeMode",
+              "description": "Fallback command collision behavior when a child command omits merge.mode. Applied before the built-in replace fallback.",
+              "markdownDescription": "Fallback command collision behavior when a child command omits `merge.mode` or legacy `merge`. Accepts the same values as command-level merge modes.",
+              "examples": [
+                "append"
+              ]
+            },
+            "maxDepth": {
+              "type": "integer",
+              "description": "Default maximum delegated command call depth.",
+              "markdownDescription": "Default maximum delegated command call depth. Default: `5`.",
+              "default": 5,
+              "minimum": 1
+            }
+          }
+        }
+      }
+    },
+    "pushRules": {
+      "type": "object",
+      "additionalProperties": false,
+      "examples": [
+        {
+          "enabled": true,
+          "noPushInPullRequest": true,
+          "requireCleanWorkingTree": true,
+          "branches": [
+            "main",
+            "release/*"
+          ]
+        }
+      ],
+      "markdownDescription": "Global push policy merged with per-artifact push overrides. See [Runtime Configuration](docs/configuration/runtime.md).\n\n- `enabled`: global on/off switch for push operations.\n- `noPushInPullRequest`: blocks pushes in pull-request CI contexts.\n- `requireCleanWorkingTree`: blocks pushes when the git tree is dirty.\n- `branches`: allowed branch patterns; empty means no branch restriction.\n- `dryRun`: forces push into simulation mode without provider calls.",
+      "properties": {
+        "dryRun": {
+          "type": "boolean",
+          "description": "Enables dry-run mode for push operations. This can be used to simulate pushes while leaving the global runtime mode unchanged.",
+          "markdownDescription": "Enables dry-run mode for push operations. When `true`, push-related commands simulate success without calling artifact providers. Default: `false`.",
+          "default": false
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Enables or disables push globally.",
+          "markdownDescription": "Enables or disables push globally. Default: `true`.",
+          "default": true
+        },
+        "noPushInPullRequest": {
+          "type": "boolean",
+          "description": "Rejects push when CI context indicates a pull request build.",
+          "markdownDescription": "Rejects push when CI context indicates a pull request build. Default: `false`.",
+          "default": false
+        },
+        "requireCleanWorkingTree": {
+          "type": "boolean",
+          "description": "Rejects push when the git working tree has uncommitted changes.",
+          "markdownDescription": "Rejects push when the git working tree has uncommitted changes. Default: `false`.",
+          "default": false
+        },
+        "branches": {
+          "type": "array",
+          "description": "Allowed branch patterns for push. Empty means no branch restriction.",
+          "markdownDescription": "Allowed branch patterns for push. Empty means no branch restriction and the default is an empty allow-list.",
+          "examples": [
+            [
+              "main",
+              "release/*",
+              "hotfix/*"
+            ]
+          ],
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "dotnetVars": {
+      "type": "object",
+      "description": "Variables consumed by the embedded dotnet policy. Essential steps (restore/build/test/build-warnings) are on by default; format, SARIF and security are opt-in.",
+      "markdownDescription": "Variables consumed by the embedded `dotnet` policy. Essential steps (restore/build/test/build-warnings) are on by default; format, SARIF and security are opt-in.",
+      "properties": {
+        "solution": {
+          "type": "string",
+          "description": "Solution or project path passed to dotnet commands. Empty lets dotnet discover it.",
+          "markdownDescription": "Solution or project path passed to dotnet commands. Empty lets dotnet discover it.",
+          "default": ""
+        },
+        "configuration": {
+          "type": "string",
+          "description": "Build configuration (default Release).",
+          "markdownDescription": "Build configuration (default `Release`).",
+          "default": "Release"
+        },
+        "container": {
+          "type": "string",
+          "description": "Container to run dotnet steps in: a containers registry name (e.g. dotnet-sdk), or empty/none to run on the host (default).",
+          "markdownDescription": "Container to run dotnet steps in: a `containers` registry name (e.g. `dotnet-sdk`), or empty/`none` to run on the host (default).",
+          "default": ""
+        },
+        "restore": {
+          "type": "object",
+          "properties": {
+            "extraArgs": {
+              "type": "string",
+              "description": "Extra arguments appended to dotnet restore.",
+              "markdownDescription": "Extra arguments appended to `dotnet restore`.",
+              "default": ""
+            }
+          },
+          "additionalProperties": true
+        },
+        "build": {
+          "type": "object",
+          "properties": {
+            "extraArgs": {
+              "type": "string",
+              "description": "Extra arguments appended to dotnet build.",
+              "markdownDescription": "Extra arguments appended to `dotnet build`.",
+              "default": ""
+            }
+          },
+          "additionalProperties": true
+        },
+        "test": {
+          "type": "object",
+          "properties": {
+            "runsettings": {
+              "type": "string",
+              "description": "Path to a .runsettings file passed to dotnet test.",
+              "markdownDescription": "Path to a `.runsettings` file passed to `dotnet test`.",
+              "default": ""
+            },
+            "extraArgs": {
+              "type": "string",
+              "description": "Extra arguments appended to dotnet test.",
+              "markdownDescription": "Extra arguments appended to `dotnet test`.",
+              "default": ""
+            },
+            "coverage": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Collect code coverage (XPlat Code Coverage) during test. Default true.",
+                  "markdownDescription": "Collect code coverage (XPlat Code Coverage) during `test`. Default `true`.",
+                  "default": true
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        },
+        "analyze": {
+          "type": "object",
+          "properties": {
+            "build": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Run a warnings-as-errors build during analyze. Default true.",
+                  "markdownDescription": "Run a warnings-as-errors build during `analyze`. Default `true`.",
+                  "default": true
+                },
+                "extraArgs": {
+                  "type": "string",
+                  "description": "Extra arguments for the analyze build.",
+                  "markdownDescription": "Extra arguments for the analyze build.",
+                  "default": ""
+                }
+              },
+              "additionalProperties": true
+            },
+            "format": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Opt-in: run dotnet format --verify-no-changes during analyze. Default false.",
+                  "markdownDescription": "Opt-in: run `dotnet format --verify-no-changes` during `analyze`. Default `false`.",
+                  "default": false
+                },
+                "extraArgs": {
+                  "type": "string",
+                  "description": "Extra arguments for the format check.",
+                  "markdownDescription": "Extra arguments for the format check.",
+                  "default": ""
+                }
+              },
+              "additionalProperties": true
+            },
+            "sarif": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Opt-in: emit per-project SARIF and merge it into outputs.analysis.sarif. Default false.",
+                  "markdownDescription": "Opt-in: emit per-project SARIF and merge it into `outputs.analysis.sarif`. Default `false`.",
+                  "default": false
+                },
+                "version": {
+                  "type": "string",
+                  "description": "SARIF version for the compiler ErrorLog (default 2.1).",
+                  "markdownDescription": "SARIF version for the compiler `ErrorLog` (default `2.1`).",
+                  "default": "2.1"
+                },
+                "category": {
+                  "type": "string",
+                  "description": "Category stamped onto the merged SARIF run (default dotnet-build).",
+                  "markdownDescription": "Category stamped onto the merged SARIF run (default `dotnet-build`).",
+                  "default": "dotnet-build"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        },
+        "format": {
+          "type": "object",
+          "properties": {
+            "extraArgs": {
+              "type": "string",
+              "description": "Extra arguments for the format command.",
+              "markdownDescription": "Extra arguments for the `format` command.",
+              "default": ""
+            }
+          },
+          "additionalProperties": true
+        },
+        "security": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Opt-in: run dotnet list package --vulnerable --include-transitive in security. Default false.",
+              "markdownDescription": "Opt-in: run `dotnet list package --vulnerable --include-transitive` in `security`. Default `false`.",
+              "default": false
+            },
+            "extraArgs": {
+              "type": "string",
+              "description": "Extra arguments for the vulnerable-package scan.",
+              "markdownDescription": "Extra arguments for the vulnerable-package scan.",
+              "default": ""
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "nodeVars": {
+      "type": "object",
+      "description": "Variables consumed by the embedded node policy. Install/build/test/lint are on by default; format check, SARIF lint and audit are opt-in.",
+      "markdownDescription": "Variables consumed by the embedded `node` policy. Install/build/test/lint are on by default; format check, SARIF lint and audit are opt-in.",
+      "properties": {
+        "packageManager": {
+          "type": "string",
+          "enum": [
+            "npm",
+            "pnpm",
+            "yarn",
+            "bun"
+          ],
+          "description": "Package manager: npm (default), pnpm, yarn or bun.",
+          "markdownDescription": "Package manager: `npm` (default), `pnpm`, `yarn` or `bun`.",
+          "default": "npm"
+        },
+        "container": {
+          "type": "string",
+          "description": "Container to run node steps in: a containers registry name (e.g. node), or empty/none for host (default).",
+          "markdownDescription": "Container to run node steps in: a `containers` registry name (e.g. `node`), or empty/`none` for host (default).",
+          "default": ""
+        },
+        "restore": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "Custom install command that replaces the package-manager default.",
+              "markdownDescription": "Custom install command that replaces the package-manager default.",
+              "default": ""
+            }
+          },
+          "additionalProperties": true
+        },
+        "build": {
+          "type": "object",
+          "properties": {
+            "script": {
+              "type": "string",
+              "description": "package.json script run by build (default build).",
+              "markdownDescription": "package.json script run by `build` (default `build`).",
+              "default": "build"
+            }
+          },
+          "additionalProperties": true
+        },
+        "test": {
+          "type": "object",
+          "properties": {
+            "script": {
+              "type": "string",
+              "description": "package.json script run by test (default test).",
+              "markdownDescription": "package.json script run by `test` (default `test`).",
+              "default": "test"
+            }
+          },
+          "additionalProperties": true
+        },
+        "lint": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Run the lint script during analyze. Default true.",
+              "markdownDescription": "Run the lint script during `analyze`. Default `true`.",
+              "default": true
+            },
+            "script": {
+              "type": "string",
+              "description": "Lint script name (default lint).",
+              "markdownDescription": "Lint script name (default `lint`).",
+              "default": "lint"
+            }
+          },
+          "additionalProperties": true
+        },
+        "format": {
+          "type": "object",
+          "properties": {
+            "script": {
+              "type": "string",
+              "description": "Script run by the format command (default format).",
+              "markdownDescription": "Script run by the `format` command (default `format`).",
+              "default": "format"
+            },
+            "check": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Opt-in: run the format check script during analyze. Default false.",
+                  "markdownDescription": "Opt-in: run the format check script during `analyze`. Default `false`.",
+                  "default": false
+                },
+                "script": {
+                  "type": "string",
+                  "description": "Format check script name (default format:check).",
+                  "markdownDescription": "Format check script name (default `format:check`).",
+                  "default": "format:check"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        },
+        "sarif": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Opt-in: run the SARIF lint script during analyze. Default false.",
+              "markdownDescription": "Opt-in: run the SARIF lint script during `analyze`. Default `false`.",
+              "default": false
+            },
+            "script": {
+              "type": "string",
+              "description": "SARIF lint script name (default lint:sarif).",
+              "markdownDescription": "SARIF lint script name (default `lint:sarif`).",
+              "default": "lint:sarif"
+            }
+          },
+          "additionalProperties": true
+        },
+        "audit": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Opt-in: run the package manager audit in security. Default false.",
+              "markdownDescription": "Opt-in: run the package manager audit in `security`. Default `false`.",
+              "default": false
+            },
+            "level": {
+              "type": "string",
+              "enum": [
+                "low",
+                "moderate",
+                "high",
+                "critical"
+              ],
+              "description": "Minimum audit severity that fails the build (default high).",
+              "markdownDescription": "Minimum audit severity that fails the build (default `high`).",
+              "default": "high"
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "gitTagVars": {
+      "type": "object",
+      "description": "Variables consumed by the embedded git-tag policy.",
+      "markdownDescription": "Variables consumed by the embedded `git-tag` policy.",
+      "properties": {
+        "prefix": {
+          "type": "string",
+          "description": "Prefix prepended to the tag name (e.g. v). Default empty.",
+          "markdownDescription": "Prefix prepended to the tag name (e.g. `v`). Default empty.",
+          "default": ""
+        },
+        "remote": {
+          "type": "string",
+          "description": "Remote to push tags to when --remote is not given (default origin).",
+          "markdownDescription": "Remote to push tags to when `--remote` is not given (default `origin`).",
+          "default": "origin"
+        },
+        "container": {
+          "type": "string",
+          "description": "Container for git steps: registry name (default git) or none to use host git.",
+          "markdownDescription": "Container for git steps: registry name (default `git`) or `none` to use host git.",
+          "default": "git"
+        }
+      },
+      "additionalProperties": true
     }
   }
 }
-

@@ -228,8 +228,39 @@ public sealed class ConfigCommandLoader
             var firstFailureStepId = string.Empty;
             var firstFailureExitCode = 0;
 
+            // Resolve container references (named registry, command default, 'none') once per invocation
+            List<RepoStepConfig> resolvedSteps;
+            try
+            {
+                resolvedSteps = normalizedCommandConfig.Steps
+                    .Select(step => step.Run is null && step.Container is null
+                        ? step
+                        : step with
+                        {
+                            Container = Rexo.Configuration.ContainerResolver.ResolveForStep(
+                                step,
+                                commandConfig.Container,
+                                config.Containers,
+                                name => _templateRenderer.Render(name, context)),
+                        })
+                    .ToList();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return new CommandResult(
+                    commandName,
+                    false,
+                    9,
+                    ex.Message,
+                    new Dictionary<string, object?>
+                    {
+                        ["error"] = ex.Message,
+                        ["errorCode"] = ErrorCodes.ConfigSchemaInvalid,
+                    });
+            }
+
             // Group consecutive parallel steps; sequential steps are singleton groups
-            var stepGroups = GroupSteps(normalizedCommandConfig.Steps);
+            var stepGroups = GroupSteps(resolvedSteps);
 
             foreach (var group in stepGroups)
             {
@@ -1131,6 +1162,7 @@ public sealed class ConfigCommandLoader
             Merge = commandConfig.Merge,
             MaxParallel = commandConfig.MaxParallel,
             MaxDepth = commandConfig.MaxDepth,
+            Container = commandConfig.Container,
         };
 
     private static List<RepoStepConfig> BuildCommandSteps(RepoCommandConfig commandConfig)
@@ -1803,7 +1835,7 @@ public sealed class ConfigCommandLoader
         ExecutionContext context,
         ITemplateRenderer templateRenderer) =>
         new(
-            templateRenderer.Render(container.Image, context),
+            templateRenderer.Render(container.Image ?? string.Empty, context),
             RenderStringDictionary(container.Env, context, templateRenderer),
             container.WorkingDirectory is null ? null : templateRenderer.Render(container.WorkingDirectory, context),
             container.Entrypoint is null ? null : templateRenderer.Render(container.Entrypoint, context),

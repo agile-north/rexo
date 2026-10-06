@@ -111,6 +111,14 @@
       "markdownDescription": "Free-form template variable bag available as `{{vars.*}}` in step `run` strings. See [Template Variables](docs/configuration/templates.md) for rendering rules and filter support.",
       "$ref": "#/$defs/vars"
     },
+    "containers": {
+      "type": "object",
+      "description": "Named container registry. Steps and commands reference entries by name via 'container: <name>' or 'container: { use: <name>, ... }'. Entries can inherit from each other with 'extends'. Merged across extends/policy layers by name (field-level overlay).",
+      "markdownDescription": "Named container registry. Steps and commands reference entries by name via `container: <name>` or `container: { use: <name>, ... }`. Entries can inherit from each other with `extends`. Registries merge across `extends`/policy layers by name with field-level overlay; the repository config always wins. See [Containers](docs/configuration/containerized-run.md).",
+      "additionalProperties": {
+        "$ref": "#/$defs/stepContainerSpec"
+      }
+    },
     "secrets": {
       "description": "First-class secret configuration for runtime resolution and template access under {{secrets.*}}.",
       "markdownDescription": "First-class secret resolution configuration. See [Secrets](docs/configuration/secrets.md). Use `defaults` for shared provider behavior, `providers` for reusable provider definitions, and `items` for named secrets exposed as `{{secrets.<name>}}`.",
@@ -133,7 +141,18 @@
       "type": "object",
       "description": "Free-form template variable bag. Accessible as {{vars.*}} in step run strings. Values can be strings, numbers, booleans, or arbitrarily nested objects.",
       "markdownDescription": "Free-form template variable bag available as `{{vars.*}}` in step `run` strings. Values can be strings, numbers, booleans, or arbitrarily nested objects, and missing entries simply render empty.",
-      "additionalProperties": true
+      "additionalProperties": true,
+      "properties": {
+        "dotnet": {
+          "$ref": "#/$defs/dotnetVars"
+        },
+        "node": {
+          "$ref": "#/$defs/nodeVars"
+        },
+        "gitTag": {
+          "$ref": "#/$defs/gitTagVars"
+        }
+      }
     },
     "secretCacheConfig": {
       "type": "object",
@@ -410,6 +429,10 @@
         "stepOps": {
           "description": "Legacy explicit step-level extension operations. Prefer merge.steps envelope.",
           "$ref": "#/$defs/commandStepOps"
+        },
+        "container": {
+          "$ref": "#/$defs/containerRef",
+          "description": "Default container for every run step in this command (steps can override, or opt out with false/'none'). Applies only to this command's own steps, not to delegated commands."
         }
       }
     },
@@ -506,7 +529,10 @@
     "stepReplace": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "step"],
+      "required": [
+        "id",
+        "step"
+      ],
       "properties": {
         "id": {
           "type": "string",
@@ -604,60 +630,8 @@
           ]
         },
         "container": {
-          "type": "object",
-          "description": "Optional run-step container wrapper. When set, the rendered run command executes inside the specified container image.",
-          "markdownDescription": "Optional Docker wrapper for `run` steps. See [Containerized Run Steps](docs/configuration/containerized-run.md). `image` is required; `workingDirectory` defaults to `/work`; `dockerfile` and `context` let Rexo build the image when needed.",
-          "additionalProperties": false,
-          "required": [
-            "image"
-          ],
-          "properties": {
-            "image": {
-              "type": "string",
-              "description": "Container image used to execute the run command."
-            },
-            "env": {
-              "type": "object",
-              "description": "Additional environment variables injected into the container process.",
-              "additionalProperties": {
-                "type": "string"
-              }
-            },
-            "workingDirectory": {
-              "type": "string",
-              "description": "Working directory inside the container. Defaults to /work."
-            },
-            "entrypoint": {
-              "type": "string",
-              "description": "Optional container entrypoint override passed to docker run --entrypoint."
-            },
-            "dockerfile": {
-              "type": "string",
-              "description": "Optional Dockerfile path used to build container.image when missing or stale. Relative paths are resolved from repository root."
-            },
-            "context": {
-              "type": "string",
-              "description": "Optional docker build context directory used with container.dockerfile. Defaults to repository root."
-            },
-            "build": {
-              "type": "object",
-              "description": "Optional docker build options used when container.dockerfile is configured.",
-              "additionalProperties": false,
-              "properties": {
-                "target": {
-                  "type": "string",
-                  "description": "Optional docker build target stage passed as --target."
-                },
-                "args": {
-                  "type": "object",
-                  "description": "Optional docker build arguments passed as --build-arg key=value.",
-                  "additionalProperties": {
-                    "type": "string"
-                  }
-                }
-              }
-            }
-          }
+          "$ref": "#/$defs/containerRef",
+          "description": "Optional run-step container. A registry name, false/'none' for host execution, or an inline/override object. Overrides the command-level container."
         },
         "when": {
           "type": "string",
@@ -729,15 +703,37 @@
         }
       },
       "anyOf": [
-        { "required": ["run"] },
-        { "required": ["uses"] },
-        { "required": ["command"] }
+        {
+          "required": [
+            "run"
+          ]
+        },
+        {
+          "required": [
+            "uses"
+          ]
+        },
+        {
+          "required": [
+            "command"
+          ]
+        }
       ],
       "allOf": [
         {
           "anyOf": [
-            { "not": { "required": ["container"] } },
-            { "required": ["run"] }
+            {
+              "not": {
+                "required": [
+                  "container"
+                ]
+              }
+            },
+            {
+              "required": [
+                "run"
+              ]
+            }
           ]
         }
       ]
@@ -1837,7 +1833,10 @@
           "examples": [
             {
               "enabled": true,
-              "branches": ["main", "release/*"],
+              "branches": [
+                "main",
+                "release/*"
+              ],
               "denyNonPublicPush": true
             }
           ],
@@ -1851,7 +1850,10 @@
             "branches": {
               "description": "Allowed branch patterns for pushing this artifact.",
               "examples": [
-                ["main", "release/*"],
+                [
+                  "main",
+                  "release/*"
+                ],
                 "main,release/*"
               ],
               "$ref": "#/$defs/stringOrStringArray"
@@ -1875,8 +1877,16 @@
         "tags": {
           "description": "Tag strategy names (for example full, majorMinor, major, branch, sha) or a custom list.",
           "examples": [
-            ["full", "majorMinor", "major"],
-            ["full", "branch", "sha"],
+            [
+              "full",
+              "majorMinor",
+              "major"
+            ],
+            [
+              "full",
+              "branch",
+              "sha"
+            ],
             "full"
           ],
           "$ref": "#/$defs/tagKindOrTagKindArray"
@@ -2183,13 +2193,23 @@
     "settingValue": {
       "description": "Allowed primitive/array value types for generic settings maps.",
       "oneOf": [
-        { "type": "string" },
-        { "type": "number" },
-        { "type": "integer" },
-        { "type": "boolean" },
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "boolean"
+        },
         {
           "type": "array",
-          "items": { "type": "string" }
+          "items": {
+            "type": "string"
+          }
         }
       ]
     },
@@ -2495,7 +2515,10 @@
           "dryRun": true,
           "push": {
             "enabled": true,
-            "branches": ["main", "release/*"]
+            "branches": [
+              "main",
+              "release/*"
+            ]
           }
         }
       ],
@@ -2545,7 +2568,10 @@
           "enabled": true,
           "noPushInPullRequest": true,
           "requireCleanWorkingTree": true,
-          "branches": ["main", "release/*"]
+          "branches": [
+            "main",
+            "release/*"
+          ]
         }
       ],
       "markdownDescription": "Global push policy merged with per-artifact push overrides. See [Runtime Configuration](docs/configuration/runtime.md).\n\n- `enabled`: global on/off switch for push operations.\n- `noPushInPullRequest`: blocks pushes in pull-request CI contexts.\n- `requireCleanWorkingTree`: blocks pushes when the git tree is dirty.\n- `branches`: allowed branch patterns; empty means no branch restriction.\n- `dryRun`: forces push into simulation mode without provider calls.",
@@ -2579,7 +2605,11 @@
           "description": "Allowed branch patterns for push. Empty means no branch restriction.",
           "markdownDescription": "Allowed branch patterns for push. Empty means no branch restriction and the default is an empty allow-list.",
           "examples": [
-            ["main", "release/*", "hotfix/*"]
+            [
+              "main",
+              "release/*",
+              "hotfix/*"
+            ]
           ],
           "default": [],
           "items": {
@@ -2587,7 +2617,445 @@
           }
         }
       }
+    },
+    "stepContainerSpec": {
+      "type": "object",
+      "description": "Container execution spec. Either an inline definition (image/dockerfile/...) or a reference to a named entry in the top-level 'containers' registry via 'use', optionally with inline overrides.",
+      "markdownDescription": "Container execution spec. Either an inline definition (`image`, `dockerfile`, ...) or a reference to a named entry in the top-level `containers` registry via `use`, with optional inline overrides (env and build args merge; other fields replace). See [Containers](docs/configuration/containerized-run.md).",
+      "additionalProperties": false,
+      "properties": {
+        "use": {
+          "type": "string",
+          "description": "Name of a container defined in the top-level 'containers' registry. Template expressions are allowed (e.g. '{{vars.dotnet.container}}'). 'none', 'false', or an empty rendered value means run on the host.",
+          "examples": [
+            "dotnet-sdk",
+            "{{vars.dotnet.container}}",
+            "none"
+          ]
+        },
+        "extends": {
+          "type": "string",
+          "description": "Only valid inside the 'containers' registry: name of another registry entry whose fields this definition inherits and overrides."
+        },
+        "image": {
+          "type": "string",
+          "description": "Container image used to execute the run command."
+        },
+        "env": {
+          "type": "object",
+          "description": "Additional environment variables injected into the container process.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "workingDirectory": {
+          "type": "string",
+          "description": "Working directory inside the container. Defaults to /work."
+        },
+        "entrypoint": {
+          "type": "string",
+          "description": "Optional container entrypoint override passed to docker run --entrypoint."
+        },
+        "dockerfile": {
+          "type": "string",
+          "description": "Optional Dockerfile path used to build container.image when missing or stale. Relative paths are resolved from repository root."
+        },
+        "context": {
+          "type": "string",
+          "description": "Optional docker build context directory used with container.dockerfile. Defaults to repository root."
+        },
+        "build": {
+          "type": "object",
+          "description": "Optional docker build options used when container.dockerfile is configured.",
+          "additionalProperties": false,
+          "properties": {
+            "target": {
+              "type": "string",
+              "description": "Optional docker build target stage passed as --target."
+            },
+            "args": {
+              "type": "object",
+              "description": "Optional docker build arguments passed as --build-arg key=value.",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "containerRef": {
+      "description": "Container reference: a registry name (string), false/'none' to force host execution, or an inline/override object.",
+      "markdownDescription": "Container reference: a registry name (string), `false` or `\"none\"` to force host execution, or an inline/override object (`{ \"use\": \"dotnet-sdk\", \"env\": { ... } }`).",
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "boolean",
+          "enum": [
+            false
+          ]
+        },
+        {
+          "$ref": "#/$defs/stepContainerSpec"
+        }
+      ]
+    },
+    "dotnetVars": {
+      "type": "object",
+      "description": "Variables consumed by the embedded dotnet policy. Essential steps (restore/build/test/build-warnings) are on by default; format, SARIF and security are opt-in.",
+      "markdownDescription": "Variables consumed by the embedded `dotnet` policy. Essential steps (restore/build/test/build-warnings) are on by default; format, SARIF and security are opt-in.",
+      "properties": {
+        "solution": {
+          "type": "string",
+          "description": "Solution or project path passed to dotnet commands. Empty lets dotnet discover it.",
+          "markdownDescription": "Solution or project path passed to dotnet commands. Empty lets dotnet discover it.",
+          "default": ""
+        },
+        "configuration": {
+          "type": "string",
+          "description": "Build configuration (default Release).",
+          "markdownDescription": "Build configuration (default `Release`).",
+          "default": "Release"
+        },
+        "container": {
+          "type": "string",
+          "description": "Container to run dotnet steps in: a containers registry name (e.g. dotnet-sdk), or empty/none to run on the host (default).",
+          "markdownDescription": "Container to run dotnet steps in: a `containers` registry name (e.g. `dotnet-sdk`), or empty/`none` to run on the host (default).",
+          "default": ""
+        },
+        "restore": {
+          "type": "object",
+          "properties": {
+            "extraArgs": {
+              "type": "string",
+              "description": "Extra arguments appended to dotnet restore.",
+              "markdownDescription": "Extra arguments appended to `dotnet restore`.",
+              "default": ""
+            }
+          },
+          "additionalProperties": true
+        },
+        "build": {
+          "type": "object",
+          "properties": {
+            "extraArgs": {
+              "type": "string",
+              "description": "Extra arguments appended to dotnet build.",
+              "markdownDescription": "Extra arguments appended to `dotnet build`.",
+              "default": ""
+            }
+          },
+          "additionalProperties": true
+        },
+        "test": {
+          "type": "object",
+          "properties": {
+            "runsettings": {
+              "type": "string",
+              "description": "Path to a .runsettings file passed to dotnet test.",
+              "markdownDescription": "Path to a `.runsettings` file passed to `dotnet test`.",
+              "default": ""
+            },
+            "extraArgs": {
+              "type": "string",
+              "description": "Extra arguments appended to dotnet test.",
+              "markdownDescription": "Extra arguments appended to `dotnet test`.",
+              "default": ""
+            },
+            "coverage": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Collect code coverage (XPlat Code Coverage) during test. Default true.",
+                  "markdownDescription": "Collect code coverage (XPlat Code Coverage) during `test`. Default `true`.",
+                  "default": true
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        },
+        "analyze": {
+          "type": "object",
+          "properties": {
+            "build": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Run a warnings-as-errors build during analyze. Default true.",
+                  "markdownDescription": "Run a warnings-as-errors build during `analyze`. Default `true`.",
+                  "default": true
+                },
+                "extraArgs": {
+                  "type": "string",
+                  "description": "Extra arguments for the analyze build.",
+                  "markdownDescription": "Extra arguments for the analyze build.",
+                  "default": ""
+                }
+              },
+              "additionalProperties": true
+            },
+            "format": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Opt-in: run dotnet format --verify-no-changes during analyze. Default false.",
+                  "markdownDescription": "Opt-in: run `dotnet format --verify-no-changes` during `analyze`. Default `false`.",
+                  "default": false
+                },
+                "extraArgs": {
+                  "type": "string",
+                  "description": "Extra arguments for the format check.",
+                  "markdownDescription": "Extra arguments for the format check.",
+                  "default": ""
+                }
+              },
+              "additionalProperties": true
+            },
+            "sarif": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Opt-in: emit per-project SARIF and merge it into outputs.analysis.sarif. Default false.",
+                  "markdownDescription": "Opt-in: emit per-project SARIF and merge it into `outputs.analysis.sarif`. Default `false`.",
+                  "default": false
+                },
+                "version": {
+                  "type": "string",
+                  "description": "SARIF version for the compiler ErrorLog (default 2.1).",
+                  "markdownDescription": "SARIF version for the compiler `ErrorLog` (default `2.1`).",
+                  "default": "2.1"
+                },
+                "category": {
+                  "type": "string",
+                  "description": "Category stamped onto the merged SARIF run (default dotnet-build).",
+                  "markdownDescription": "Category stamped onto the merged SARIF run (default `dotnet-build`).",
+                  "default": "dotnet-build"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        },
+        "format": {
+          "type": "object",
+          "properties": {
+            "extraArgs": {
+              "type": "string",
+              "description": "Extra arguments for the format command.",
+              "markdownDescription": "Extra arguments for the `format` command.",
+              "default": ""
+            }
+          },
+          "additionalProperties": true
+        },
+        "security": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Opt-in: run dotnet list package --vulnerable --include-transitive in security. Default false.",
+              "markdownDescription": "Opt-in: run `dotnet list package --vulnerable --include-transitive` in `security`. Default `false`.",
+              "default": false
+            },
+            "extraArgs": {
+              "type": "string",
+              "description": "Extra arguments for the vulnerable-package scan.",
+              "markdownDescription": "Extra arguments for the vulnerable-package scan.",
+              "default": ""
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "nodeVars": {
+      "type": "object",
+      "description": "Variables consumed by the embedded node policy. Install/build/test/lint are on by default; format check, SARIF lint and audit are opt-in.",
+      "markdownDescription": "Variables consumed by the embedded `node` policy. Install/build/test/lint are on by default; format check, SARIF lint and audit are opt-in.",
+      "properties": {
+        "packageManager": {
+          "type": "string",
+          "enum": [
+            "npm",
+            "pnpm",
+            "yarn",
+            "bun"
+          ],
+          "description": "Package manager: npm (default), pnpm, yarn or bun.",
+          "markdownDescription": "Package manager: `npm` (default), `pnpm`, `yarn` or `bun`.",
+          "default": "npm"
+        },
+        "container": {
+          "type": "string",
+          "description": "Container to run node steps in: a containers registry name (e.g. node), or empty/none for host (default).",
+          "markdownDescription": "Container to run node steps in: a `containers` registry name (e.g. `node`), or empty/`none` for host (default).",
+          "default": ""
+        },
+        "restore": {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "Custom install command that replaces the package-manager default.",
+              "markdownDescription": "Custom install command that replaces the package-manager default.",
+              "default": ""
+            }
+          },
+          "additionalProperties": true
+        },
+        "build": {
+          "type": "object",
+          "properties": {
+            "script": {
+              "type": "string",
+              "description": "package.json script run by build (default build).",
+              "markdownDescription": "package.json script run by `build` (default `build`).",
+              "default": "build"
+            }
+          },
+          "additionalProperties": true
+        },
+        "test": {
+          "type": "object",
+          "properties": {
+            "script": {
+              "type": "string",
+              "description": "package.json script run by test (default test).",
+              "markdownDescription": "package.json script run by `test` (default `test`).",
+              "default": "test"
+            }
+          },
+          "additionalProperties": true
+        },
+        "lint": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Run the lint script during analyze. Default true.",
+              "markdownDescription": "Run the lint script during `analyze`. Default `true`.",
+              "default": true
+            },
+            "script": {
+              "type": "string",
+              "description": "Lint script name (default lint).",
+              "markdownDescription": "Lint script name (default `lint`).",
+              "default": "lint"
+            }
+          },
+          "additionalProperties": true
+        },
+        "format": {
+          "type": "object",
+          "properties": {
+            "script": {
+              "type": "string",
+              "description": "Script run by the format command (default format).",
+              "markdownDescription": "Script run by the `format` command (default `format`).",
+              "default": "format"
+            },
+            "check": {
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "type": "boolean",
+                  "description": "Opt-in: run the format check script during analyze. Default false.",
+                  "markdownDescription": "Opt-in: run the format check script during `analyze`. Default `false`.",
+                  "default": false
+                },
+                "script": {
+                  "type": "string",
+                  "description": "Format check script name (default format:check).",
+                  "markdownDescription": "Format check script name (default `format:check`).",
+                  "default": "format:check"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": true
+        },
+        "sarif": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Opt-in: run the SARIF lint script during analyze. Default false.",
+              "markdownDescription": "Opt-in: run the SARIF lint script during `analyze`. Default `false`.",
+              "default": false
+            },
+            "script": {
+              "type": "string",
+              "description": "SARIF lint script name (default lint:sarif).",
+              "markdownDescription": "SARIF lint script name (default `lint:sarif`).",
+              "default": "lint:sarif"
+            }
+          },
+          "additionalProperties": true
+        },
+        "audit": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Opt-in: run the package manager audit in security. Default false.",
+              "markdownDescription": "Opt-in: run the package manager audit in `security`. Default `false`.",
+              "default": false
+            },
+            "level": {
+              "type": "string",
+              "enum": [
+                "low",
+                "moderate",
+                "high",
+                "critical"
+              ],
+              "description": "Minimum audit severity that fails the build (default high).",
+              "markdownDescription": "Minimum audit severity that fails the build (default `high`).",
+              "default": "high"
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "gitTagVars": {
+      "type": "object",
+      "description": "Variables consumed by the embedded git-tag policy.",
+      "markdownDescription": "Variables consumed by the embedded `git-tag` policy.",
+      "properties": {
+        "prefix": {
+          "type": "string",
+          "description": "Prefix prepended to the tag name (e.g. v). Default empty.",
+          "markdownDescription": "Prefix prepended to the tag name (e.g. `v`). Default empty.",
+          "default": ""
+        },
+        "remote": {
+          "type": "string",
+          "description": "Remote to push tags to when --remote is not given (default origin).",
+          "markdownDescription": "Remote to push tags to when `--remote` is not given (default `origin`).",
+          "default": "origin"
+        },
+        "container": {
+          "type": "string",
+          "description": "Container for git steps: registry name (default git) or none to use host git.",
+          "markdownDescription": "Container for git steps: registry name (default `git`) or `none` to use host git.",
+          "default": "git"
+        }
+      },
+      "additionalProperties": true
     }
   }
 }
-

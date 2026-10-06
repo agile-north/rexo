@@ -2,7 +2,7 @@
 
 `embedded:git-tag` provides reusable git tag creation for versioned repositories.
 
-This policy ships a single command override:
+This policy ships a single command:
 
 - `post-push` — resolves the version, checks whether the tag already exists, and creates/pushes the tag only when needed.
 
@@ -10,25 +10,13 @@ This policy ships a single command override:
 
 Stack this policy on top of `embedded:standard`:
 
-```json
-{
-  "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
-  "schemaVersion": "1.0",
-  "name": "my-repo",
-  "extends": [
-    "embedded:standard",
-    "embedded:git-tag"
-  ],
-  "artifacts": [
-    {
-      "type": "docker",
-      "name": "app",
-      "settings": {
-        "image": "ghcr.io/example/app"
-      }
-    }
-  ]
-}
+```yaml
+extends:
+  - embedded:standard
+  - embedded:git-tag
+vars:
+  gitTag:
+    prefix: v          # tags become v1.2.3
 ```
 
 Then run:
@@ -37,22 +25,33 @@ Then run:
 rx release --push
 ```
 
+## vars.gitTag reference
+
+| Var | Default | Description |
+| --- | --- | --- |
+| `prefix` | `""` | Prefix prepended to the tag name (e.g. `v` → `v1.2.3`). |
+| `remote` | `origin` | Remote to fetch/push tags when `--remote` is not given. |
+| `container` | `git` | Container registry name for the git steps; set to `none` (or `""`) to use host git. |
+
+The policy registers a `git` container (`docker.io/alpine/git:latest`, working directory `/work`).
+Override it under `containers.git` in your config to change the image.
+
 ## Behavior
 
-- `git tag` is created only if the tag does not already exist.
-- `--force` can be used to recreate the tag.
-- The tag step runs inside a container image (`docker.io/alpine/git:latest`) so host git is not required.
-- When `--dry-run` is enabled, the tag creation steps are skipped so no remote mutation occurs.
+- The tag is `{{vars.gitTag.prefix}}{{version.SemVer}}`.
+- The tag is created only if it does not already exist on the remote.
+- `--force` deletes and recreates the tag.
+- `--dry-run` skips every git step, so no remote mutation occurs.
 
 ## Lifecycle usage
 
-- If you use `embedded:standard`, `post-push` runs automatically as part of `rx release --push`.
-- If you do not use `embedded:standard`, you can still use this policy directly by running `rx post-push` or by composing it into your own command flow.
+- With `embedded:standard`, `post-push` runs automatically as part of `rx release --push`.
+- Without it, run `rx post-push` directly or compose it into your own command flow.
 
 When stacked with other `post-push` policies, this template uses `merge: append` so the
 tagging steps stay in the composed release-hook chain.
 
 ## Options
 
-- `--remote` — Git remote to push the tag to. Defaults to `origin`.
+- `--remote` — Git remote to push the tag to. Defaults to `vars.gitTag.remote` (`origin`).
 - `--force` — Recreate the tag if it already exists. Defaults to `false`.

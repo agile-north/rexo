@@ -2,14 +2,27 @@
   "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/policy.schema.json",
   "schemaVersion": "1.0",
   "name": "git-tag-policy",
-  "description": "Generic git tagging automation for versioned repositories.",
+  "description": "Generic git tagging automation for versioned repositories. Configure via vars.gitTag.* (prefix, remote, container).",
+  "vars": {
+    "gitTag": {
+      "prefix": "",
+      "remote": "origin",
+      "container": "git"
+    }
+  },
+  "containers": {
+    "git": {
+      "image": "docker.io/alpine/git:latest",
+      "workingDirectory": "/work"
+    }
+  },
   "commands": {
     "post-push": {
       "description": "Create and push a git tag for the resolved version if it does not already exist.",
       "options": {
         "remote": {
           "type": "string",
-          "default": "origin"
+          "default": ""
         },
         "force": {
           "type": "bool",
@@ -17,6 +30,7 @@
         }
       },
       "merge": "append",
+      "container": "{{vars.gitTag.container}}",
       "before": [
         {
           "id": "resolve-version",
@@ -26,32 +40,20 @@
       "steps": [
         {
           "id": "tag-exists",
-          "run": "git fetch --tags {{options.remote}} && if git rev-parse --verify --quiet \"refs/tags/{{version.SemVer}}\" >/dev/null 2>&1; then echo TAG_EXISTS; fi",
-          "outputPattern": "TAG_EXISTS",
+          "run": "git fetch --tags {{options.remote | default(vars.gitTag.remote, 'origin')}} && if git rev-parse --verify --quiet \"refs/tags/{{vars.gitTag.prefix}}{{version.SemVer}}\" >/dev/null 2>&1; then echo TAG_EXISTS; fi",
+          "outputPattern": "(?<tagExists>TAG_EXISTS)",
           "continueOnError": true,
-          "when": "{{options.dry-run}} != 'true'",
-          "container": {
-            "image": "docker.io/alpine/git:latest",
-            "workingDirectory": "/work"
-          }
+          "when": "{{!options.dry-run}}"
         },
         {
           "id": "delete-existing-tag",
-          "run": "git push {{options.remote}} --delete \"refs/tags/{{version.SemVer}}\" || true && git tag -d \"{{version.SemVer}}\" || true",
-          "when": "{{options.force}} == 'true' && {{options.dry-run}} != 'true'",
-          "container": {
-            "image": "docker.io/alpine/git:latest",
-            "workingDirectory": "/work"
-          }
+          "run": "git push {{options.remote | default(vars.gitTag.remote, 'origin')}} --delete \"refs/tags/{{vars.gitTag.prefix}}{{version.SemVer}}\" || true && git tag -d \"{{vars.gitTag.prefix}}{{version.SemVer}}\" || true",
+          "when": "{{options.force && !options.dry-run}}"
         },
         {
           "id": "create-tag",
-          "run": "git tag \"{{version.SemVer}}\" && git push {{options.remote}} \"{{version.SemVer}}\"",
-          "when": "{{options.dry-run}} != 'true' && ({{options.force}} == 'true' || {{steps.tag-exists.outputs.TAG_EXISTS}} != 'TAG_EXISTS')",
-          "container": {
-            "image": "docker.io/alpine/git:latest",
-            "workingDirectory": "/work"
-          }
+          "run": "git tag \"{{vars.gitTag.prefix}}{{version.SemVer}}\" && git push {{options.remote | default(vars.gitTag.remote, 'origin')}} \"{{vars.gitTag.prefix}}{{version.SemVer}}\"",
+          "when": "{{!options.dry-run && (options.force || steps.tag-exists.outputs.tagExists != 'TAG_EXISTS')}}"
         }
       ]
     }

@@ -310,6 +310,24 @@ public sealed class TemplateRendererTests
         Assert.Equal("false", result);
     }
 
+    [Theory]
+    [InlineData("{{options.a && options.b}}", "true", "true", "true")]
+    [InlineData("{{options.a && options.b}}", "true", "false", "false")]
+    [InlineData("{{options.a || options.b}}", "false", "true", "true")]
+    [InlineData("{{options.a || options.b}}", "false", "", "false")]
+    [InlineData("{{!options.a}}", "false", "", "true")]
+    [InlineData("{{!options.a}}", "true", "", "false")]
+    [InlineData("{{options.a == 'x' && options.b != 'true'}}", "x", "false", "true")]
+    [InlineData("{{!(options.a == 'x') || options.b}}", "x", "", "false")]
+    [InlineData("{{(options.a || options.b) && options.a != 'no'}}", "", "yes", "true")]
+    [InlineData("{{options.a == 'a&&b'}}", "a&&b", "", "true")]
+    public void LogicalOperatorsCombineConditions(string template, string a, string b, string expected)
+    {
+        var renderer = new TemplateRenderer();
+        var ctx = MakeContext(options: new Dictionary<string, string?> { ["a"] = a, ["b"] = b });
+        Assert.Equal(expected, renderer.Render(template, ctx));
+    }
+
     [Fact]
     public void EqualityExpressionReturnsFalseWhenVariableIsMissing()
     {

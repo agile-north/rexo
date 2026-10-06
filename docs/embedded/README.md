@@ -20,8 +20,26 @@ Rexo ships lifecycle policies as embedded resources in the CLI assembly
 Current embedded policies:
 
 - [standard](standard.md) — General lifecycle commands (`build`, `test`, `verify`, `release`, `push`, etc.)
-- [dotnet](dotnet.md) — Dotnet-focused command surface with `restore`, `build`, `test`, `analyze`, `format`, `release` helpers
+- [dotnet](dotnet.md) — .NET toolchain overlay: `restore`, `build`, `test`, `analyze`, `format`, `security`
+- [node](node.md) — Node.js toolchain overlay: `restore`, `build`, `test`, `analyze`, `format`, `security`
 - [git-tag](git-tag.md) — Generic git tag creation for versioned repositories
+
+## Essential-by-default, opt-in extras
+
+Stack policies enable only essential behavior by default. Non-essential features are switched on
+through documented `vars`, without overriding the policy's commands:
+
+| Policy | On by default | Opt-in via vars |
+| --- | --- | --- |
+| dotnet | restore, build, test + coverage, analyzer build | `analyze.format.enabled`, `analyze.sarif.enabled`, `security.enabled`, `container` |
+| node | lockfile install, build, test, lint | `format.check.enabled`, `sarif.enabled`, `audit.enabled`, `container` |
+| git-tag | create/push missing tag (containerized git) | `prefix`, `remote`, `container: none` for host git |
+
+Policies declare their defaults in their own `vars` (and `containers`) sections. These are
+deep-merged **underneath** your repository config, so you only set the keys you want to change and
+your repository always wins. A policy may define any section a repository config can (`vars`,
+`settings`, `containers`, `outputs`, `runtime`, `versioning`, `secrets`, `extends`, …); policy values
+are only ever defaults.
 
 The `post-push` template in this family is intentionally composable by name. It uses
 `merge: append`, so the `extends` order determines the final step sequence and merged
@@ -77,7 +95,8 @@ Choose `embedded:dotnet` when:
 ## Policy Details
 
 - [standard](standard.md) — lifecycle commands, plan/verify/build/release/push
-- [dotnet](dotnet.md) — dotnet-specific commands, restore/format/ci/pack with optional var-driven customization
+- [dotnet](dotnet.md) — .NET overlay with opt-in format check, SARIF and vulnerability scan
+- [node](node.md) — Node.js overlay with opt-in format check, SARIF lint and audit
 - [git-tag](git-tag.md) — generic git tag creation for versioned repositories
 
 ## Builtins Used By Embedded Templates
@@ -189,12 +208,12 @@ Common flow:
 
 ```bash
 rx restore
-rx ci
-rx format --fix
+rx verify
+rx format
 rx release --push
 ```
 
-See [dotnet policy](dotnet.md#customization-via-varsdotnet) for var-driven customization.
+See [dotnet policy](dotnet.md#varsdotnet-reference) for var-driven customization.
 
 ## Option Mapping With Step with
 

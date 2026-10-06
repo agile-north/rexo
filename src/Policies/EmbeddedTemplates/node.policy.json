@@ -2,32 +2,96 @@
   "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/policy.schema.json",
   "schemaVersion": "1.0",
   "name": "node-policy",
-  "description": "Node.js toolchain command contributions. Usable standalone or overlaid with embedded:standard.",
+  "description": "Node.js toolchain command contributions. Essential steps (install, build, test, lint) are on by default; format check, lint SARIF, and dependency audit are opt-in via vars.node.*. Usable standalone or overlaid with embedded:standard.",
+  "vars": {
+    "node": {
+      "packageManager": "npm",
+      "container": "",
+      "restore": {
+        "command": ""
+      },
+      "build": {
+        "script": "build"
+      },
+      "test": {
+        "script": "test"
+      },
+      "lint": {
+        "enabled": true,
+        "script": "lint"
+      },
+      "format": {
+        "script": "format",
+        "check": {
+          "enabled": false,
+          "script": "format:check"
+        }
+      },
+      "sarif": {
+        "enabled": false,
+        "script": "lint:sarif"
+      },
+      "audit": {
+        "enabled": false,
+        "level": "high"
+      }
+    }
+  },
+  "containers": {
+    "node": {
+      "image": "docker.io/library/node:lts",
+      "workingDirectory": "/work"
+    }
+  },
   "commands": {
     "restore": {
-      "description": "Install Node.js dependencies.",
+      "description": "Install Node.js dependencies using the lockfile (npm ci / pnpm|yarn|bun install --frozen-lockfile).",
+      "container": "{{vars.node.container}}",
       "steps": [
         {
+          "id": "node-install-custom",
+          "when": "{{vars.node.restore.command != ''}}",
+          "run": "{{vars.node.restore.command}}"
+        },
+        {
           "id": "node-install",
-          "run": "{{vars.node.packageManager | default('npm')}} ci"
+          "when": "{{vars.node.restore.command == '' && (vars.node.packageManager == 'npm' || vars.node.packageManager == '')}}",
+          "run": "npm ci"
+        },
+        {
+          "id": "node-install-pnpm",
+          "when": "{{vars.node.restore.command == '' && vars.node.packageManager == 'pnpm'}}",
+          "run": "pnpm install --frozen-lockfile"
+        },
+        {
+          "id": "node-install-yarn",
+          "when": "{{vars.node.restore.command == '' && vars.node.packageManager == 'yarn'}}",
+          "run": "yarn install --frozen-lockfile"
+        },
+        {
+          "id": "node-install-bun",
+          "when": "{{vars.node.restore.command == '' && vars.node.packageManager == 'bun'}}",
+          "run": "bun install --frozen-lockfile"
         }
       ]
     },
     "build": {
       "description": "Build Node.js project.",
+      "container": "{{vars.node.container}}",
       "steps": [
         {
           "id": "node-build",
-          "run": "{{vars.node.packageManager | default('npm')}} run build --if-present"
+          "run": "{{vars.node.packageManager | default('npm')}} run {{vars.node.build.script | default('build')}} --if-present"
         }
       ]
     },
     "test": {
       "description": "Run Node.js tests.",
+      "container": "{{vars.node.container}}",
       "steps": [
         {
           "id": "node-test",
-          "run": "{{vars.node.packageManager | default('npm')}} test --if-present",
+          "run": "{{vars.node.packageManager | default('npm')}} run {{vars.node.test.script | default('test')}} --if-present",
           "outputs": {
             "testResults": [
               "{{outputs.tests.results}}/**/*.xml",
@@ -41,11 +105,13 @@
       ]
     },
     "analyze": {
-      "description": "Lint Node.js source files.",
+      "description": "Lint Node.js source files (lint on by default; format check and SARIF are opt-in).",
+      "container": "{{vars.node.container}}",
       "steps": [
         {
           "id": "node-lint",
-          "run": "{{vars.node.packageManager | default('npm')}} run lint --if-present",
+          "when": "{{vars.node.lint.enabled}}",
+          "run": "{{vars.node.packageManager | default('npm')}} run {{vars.node.lint.script | default('lint')}} --if-present",
           "outputs": {
             "analysisReports": [
               "{{outputs.analysis.reports}}/**/*"
@@ -53,8 +119,14 @@
           }
         },
         {
+          "id": "node-format-check",
+          "when": "{{vars.node.format.check.enabled}}",
+          "run": "{{vars.node.packageManager | default('npm')}} run {{vars.node.format.check.script | default('format:check')}} --if-present"
+        },
+        {
           "id": "node-lint-sarif",
-          "run": "{{vars.node.packageManager | default('npm')}} run lint:sarif --if-present",
+          "when": "{{vars.node.sarif.enabled}}",
+          "run": "{{vars.node.packageManager | default('npm')}} run {{vars.node.sarif.script | default('lint:sarif')}} --if-present",
           "outputs": {
             "sarifReports": [
               "{{outputs.analysis.sarif}}/**/*.sarif"
@@ -63,12 +135,24 @@
         }
       ]
     },
+    "format": {
+      "description": "Auto-format Node.js source files.",
+      "container": "{{vars.node.container}}",
+      "steps": [
+        {
+          "id": "node-format",
+          "run": "{{vars.node.packageManager | default('npm')}} run {{vars.node.format.script | default('format')}} --if-present"
+        }
+      ]
+    },
     "security": {
-      "description": "Audit Node.js dependencies for known vulnerabilities.",
+      "description": "Audit Node.js dependencies for known vulnerabilities (opt-in: vars.node.audit.enabled=true).",
+      "container": "{{vars.node.container}}",
       "steps": [
         {
           "id": "node-audit",
-          "run": "{{vars.node.packageManager | default('npm')}} audit --json --audit-level=high{{outputs.security.audit | prefix(' > ')}}",
+          "when": "{{vars.node.audit.enabled}}",
+          "run": "{{vars.node.packageManager | default('npm')}} audit --json --audit-level={{vars.node.audit.level | default('high')}}{{outputs.security.audit | prefix(' > ')}}",
           "outputs": {
             "securityReports": [
               "{{outputs.security.audit}}"
@@ -79,5 +163,3 @@
     }
   }
 }
-
-

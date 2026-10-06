@@ -1942,6 +1942,12 @@ public static class BuiltinCommandRegistration
             doc["extends"] = extendsValue;
         }
 
+        var optInVars = BuildPolicyOptInVars(policyTemplate);
+        if (optInVars is not null)
+        {
+            doc["vars"] = optInVars;
+        }
+
         // Collect artifacts to scaffold based on what was detected and what was requested.
         // blank template intentionally omits artifacts — the user adds them explicitly.
         if (!isBlank)
@@ -1990,6 +1996,40 @@ public static class BuiltinCommandRegistration
         }
 
         return JsonSerializer.Serialize(doc, IndentedJsonOptions);
+    }
+
+    /// <summary>
+    /// Scaffolds the opt-in toggles of a stack policy (all <c>false</c>, matching the policy defaults)
+    /// so they are discoverable in the generated config.
+    /// </summary>
+    private static Dictionary<string, object>? BuildPolicyOptInVars(string? policyTemplate)
+    {
+        if (string.Equals(policyTemplate, "dotnet", StringComparison.OrdinalIgnoreCase))
+        {
+            return new Dictionary<string, object>
+            {
+                ["dotnet"] = new
+                {
+                    analyze = new { format = new { enabled = false }, sarif = new { enabled = false } },
+                    security = new { enabled = false },
+                },
+            };
+        }
+
+        if (string.Equals(policyTemplate, "node", StringComparison.OrdinalIgnoreCase))
+        {
+            return new Dictionary<string, object>
+            {
+                ["node"] = new
+                {
+                    format = new { check = new { enabled = false } },
+                    sarif = new { enabled = false },
+                    audit = new { enabled = false },
+                },
+            };
+        }
+
+        return null;
     }
 
     private static Dictionary<string, object> RenameCollidingStarterCommands(

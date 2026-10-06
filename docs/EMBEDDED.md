@@ -6,7 +6,9 @@ This content has been reorganized for clarity.
 
 - [Embedded Policies](embedded/README.md) — Overview and index
 - [standard policy](embedded/standard.md) — General lifecycle commands
-- [dotnet policy](embedded/dotnet.md) — Dotnet-focused command surface
+- [dotnet policy](embedded/dotnet.md) — .NET toolchain overlay
+- [node policy](embedded/node.md) — Node.js toolchain overlay
+- [git-tag policy](embedded/git-tag.md) — Version tag creation
 
 These pages contain the same information, organized by policy for easier navigation.
 
@@ -19,6 +21,8 @@ Current embedded policies:
 
 - `standard`
 - `dotnet`
+- `node`
+- `git-tag`
 
 Embedded policies are never applied implicitly.
 
@@ -224,63 +228,20 @@ Behavior notes:
 
 ## Embedded Policy: dotnet
 
-Purpose:
+.NET toolchain overlay providing `restore`, `build`, `test`, `analyze`, `format` and `security`.
+Essential behavior (restore, build, test with coverage, analyzer build) is on by default; the format
+check, SARIF output and vulnerable-package scan are opt-in via `vars.dotnet.*`.
+See [dotnet policy](embedded/dotnet.md) for the full vars reference.
 
-- Dotnet-focused command surface.
-- Adds restore/format/pack-centric workflows.
+## Embedded Policy: node
 
-### Commands
+Node.js toolchain overlay. Install, build, test and lint are on by default; the format check, SARIF
+lint and dependency audit are opt-in via `vars.node.*`. See [node policy](embedded/node.md).
 
-#### ci
+## Embedded Policy: git-tag
 
-Description: Validate, resolve version, test, analyze, and build configured artifacts.
-
-Options: none.
-
-#### release
-
-Description: Run CI flow, tag artifacts, optionally push.
-
-Options:
-
-- `--push` (`bool`, default `false`)
-
-Behavior notes:
-
-- Push step is guarded by a `when` expression.
-- Push intent is forwarded into the builtin via `with.confirm = {{options.push}}`.
-
-#### restore
-
-Description: Run `dotnet restore`.
-
-Options: none.
-
-#### format
-
-Description: Verify or apply `dotnet format`.
-
-Options:
-
-- `--fix` (`bool`, default `false`)
-
-Behavior notes:
-
-- `--fix` false: `dotnet format --verify-no-changes`
-- `--fix` true: `dotnet format`
-
-#### pack
-
-Description: Resolve version and build artifacts intended for package workflows.
-
-Options:
-
-- `--configuration` (`string`, default `"Release"`)
-
-### Aliases
-
-- `r` -> `restore`
-- `f` -> `format`
+Creates and pushes a version tag in `post-push`. Configure via `vars.gitTag.*` (`prefix`, `remote`,
+`container`). See [git-tag policy](embedded/git-tag.md).
 
 ## Builtins Used By Embedded Templates
 
@@ -392,67 +353,31 @@ Common flow:
 
 ```bash
 rx restore
-rx ci
-rx format --fix
+rx verify
+rx format
 rx release --push
 ```
 
-Recommended customization path for `embedded:dotnet` is the `vars.dotnet.*` bag rather than overriding commands.
-
-Example:
+Recommended customization path for `embedded:dotnet` is the `vars.dotnet.*` bag rather than overriding commands:
 
 ```json
 {
-  "extends": ["embedded:dotnet"],
+  "extends": ["embedded:dotnet", "embedded:standard"],
   "vars": {
     "dotnet": {
       "solution": "solution.slnx",
-      "configuration": "Release",
-      "restore": {
-        "extraArgs": "--locked-mode"
-      },
-      "build": {
-        "extraArgs": "/p:ContinuousIntegrationBuild=true"
-      },
-      "test": {
-        "runsettings": "eng/test.runsettings",
-        "extraArgs": "--filter Category!=Slow",
-        "coverage": {
-          "mode": "xplat"
-        }
-      },
-      "format": {
-        "extraArgs": "--severity error"
-      },
       "analyze": {
-        "formatExtraArgs": "--severity warn",
-        "buildExtraArgs": "/p:TreatWarningsAsErrors=true"
+        "format": { "enabled": true },
+        "sarif": { "enabled": true },
+        "build": { "extraArgs": "/p:TreatWarningsAsErrors=true" }
       }
     }
   }
 }
 ```
 
-Supported optional vars for `embedded:dotnet`:
-
-- `vars.dotnet.solution`: solution or project path passed to dotnet commands.
-- `vars.dotnet.configuration`: build/test configuration. Default: `Release`.
-- `vars.dotnet.restore.extraArgs`: appended to `dotnet restore`.
-- `vars.dotnet.build.extraArgs`: appended to `dotnet build`.
-- `vars.dotnet.test.runsettings`: passed as `--settings <path>`.
-- `vars.dotnet.test.extraArgs`: appended to `dotnet test`.
-- `vars.dotnet.test.coverage.mode`: `xplat` (default) or `none`.
-- `vars.dotnet.format.extraArgs`: appended to `dotnet format`.
-- `vars.dotnet.analyze.formatExtraArgs`: appended to `dotnet format --verify-no-changes`.
-- `vars.dotnet.analyze.buildExtraArgs`: appended to the analysis `dotnet build` step.
-
-Behavior notes:
-
-- Coverage is enabled by default for the dotnet overlay using `--collect:"XPlat Code Coverage"`.
-- Set `vars.dotnet.test.coverage.mode` to `none` to disable coverage without overriding the `test` command.
-- If you need a non-standard collector or a completely custom test invocation, overriding the `test` command is still the fallback.
-- The analysis `dotnet build` step does not force warnings as errors by default; use `vars.dotnet.analyze.buildExtraArgs` to opt in.
-- Configured output directories are materialized before command steps run and cleaned up after the command if they stay empty.
+Policy vars are deep-merged underneath the repository's vars, so only the keys you set change.
+See [dotnet policy](embedded/dotnet.md#varsdotnet-reference) for every supported var and default.
 
 ## Option Mapping With Step with
 
@@ -484,7 +409,7 @@ Choose `embedded:standard` when:
 
 Choose `embedded:dotnet` when:
 
-- You want restore/format/ci convenience commands out of the box.
+- You want restore/build/test/analyze/format commands for .NET out of the box.
 - You want additive dotnet-specific commands on top of the standard lifecycle baseline.
 - You want the dotnet `test` command to emit TRX results and collect XPlat coverage into the configured `outputs.tests.*` locations.
 

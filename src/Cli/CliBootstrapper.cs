@@ -40,6 +40,9 @@ internal static class CliBootstrapper
         if (config is not null)
         {
             policyConfig = await ConfigBuilder.LoadAndMergePoliciesAsync(config, workingDir, debug, cancellationToken);
+
+            // Policy defaults (vars, settings, containers, ...) sit underneath the repo config; the repo always wins.
+            config = RepoConfigurationLoader.ApplyPolicyDefaults(config, policyConfig);
         }
 
         var effectiveConfig = ConfigBuilder.MergePolicyIntoEffectiveConfig(config, policyConfig);

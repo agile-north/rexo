@@ -2,10 +2,59 @@
   "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/policy.schema.json",
   "schemaVersion": "1.0",
   "name": "dotnet-policy",
-  "description": ".NET toolchain command contributions. Usable standalone or overlaid with embedded:standard.",
+  "description": ".NET toolchain command contributions. Essential steps (restore, build, test with coverage, analyzer build) are on by default; format checks, SARIF, and vulnerability audit are opt-in via vars.dotnet.*. Usable standalone or overlaid with embedded:standard.",
+  "vars": {
+    "dotnet": {
+      "solution": "",
+      "configuration": "Release",
+      "container": "",
+      "restore": {
+        "extraArgs": ""
+      },
+      "build": {
+        "extraArgs": ""
+      },
+      "test": {
+        "runsettings": "",
+        "extraArgs": "",
+        "coverage": {
+          "enabled": true
+        }
+      },
+      "analyze": {
+        "build": {
+          "enabled": true,
+          "extraArgs": ""
+        },
+        "format": {
+          "enabled": false,
+          "extraArgs": ""
+        },
+        "sarif": {
+          "enabled": false,
+          "version": "2.1",
+          "category": "dotnet-build"
+        }
+      },
+      "format": {
+        "extraArgs": ""
+      },
+      "security": {
+        "enabled": false,
+        "extraArgs": ""
+      }
+    }
+  },
+  "containers": {
+    "dotnet-sdk": {
+      "image": "mcr.microsoft.com/dotnet/sdk:10.0",
+      "workingDirectory": "/work"
+    }
+  },
   "commands": {
     "restore": {
       "description": "Restore .NET dependencies.",
+      "container": "{{vars.dotnet.container}}",
       "steps": [
         {
           "id": "dotnet-restore",
@@ -15,6 +64,7 @@
     },
     "build": {
       "description": "Build .NET projects.",
+      "container": "{{vars.dotnet.container}}",
       "steps": [
         {
           "id": "dotnet-build",
@@ -23,11 +73,12 @@
       ]
     },
     "test": {
-      "description": "Run .NET tests.",
+      "description": "Run .NET tests (coverage on by default; set vars.dotnet.test.coverage.enabled=false to disable).",
+      "container": "{{vars.dotnet.container}}",
       "steps": [
         {
           "id": "dotnet-test-no-coverage",
-          "when": "{{vars.dotnet.test.coverage.mode == 'none'}}",
+          "when": "{{!(vars.dotnet.test.coverage.enabled && vars.dotnet.test.coverage.mode != 'none')}}",
           "run": "dotnet test{{vars.dotnet.solution | prefix(' ')}} -c {{vars.dotnet.configuration | default('Release')}} --logger trx{{outputs.tests.results | prefix(' --results-directory ')}}{{vars.dotnet.test.runsettings | prefix(' --settings ')}}{{vars.dotnet.test.extraArgs | prefix(' ')}}",
           "outputs": {
             "testResults": [
@@ -38,7 +89,7 @@
         },
         {
           "id": "dotnet-test",
-          "when": "{{vars.dotnet.test.coverage.mode != 'none'}}",
+          "when": "{{vars.dotnet.test.coverage.enabled && vars.dotnet.test.coverage.mode != 'none'}}",
           "run": "dotnet test{{vars.dotnet.solution | prefix(' ')}} -c {{vars.dotnet.configuration | default('Release')}} --logger trx{{outputs.tests.results | prefix(' --results-directory ')}}{{vars.dotnet.test.runsettings | prefix(' --settings ')}}{{vars.dotnet.test.extraArgs | prefix(' ')}} --collect \"XPlat Code Coverage\" -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.OutputDirectory={{outputs.tests.coverage}}",
           "outputs": {
             "testResults": [
@@ -54,11 +105,13 @@
       ]
     },
     "analyze": {
-      "description": "Run .NET code analysis.",
+      "description": "Run .NET code analysis (analyzer build by default; format check and SARIF are opt-in).",
+      "container": "{{vars.dotnet.container}}",
       "steps": [
         {
           "id": "dotnet-format-check",
-          "run": "dotnet format{{vars.dotnet.solution | prefix(' ')}} --verify-no-changes{{outputs.analysis.reports | prefix(' --report ')}}{{vars.dotnet.analyze.formatExtraArgs | prefix(' ')}}",
+          "when": "{{vars.dotnet.analyze.format.enabled}}",
+          "run": "dotnet format{{vars.dotnet.solution | prefix(' ')}} --verify-no-changes{{outputs.analysis.reports | prefix(' --report ')}}{{vars.dotnet.analyze.formatExtraArgs | default(vars.dotnet.analyze.format.extraArgs) | prefix(' ')}}",
           "outputs": {
             "analysisReports": [
               "{{outputs.analysis.reports}}/**/*.json"
@@ -67,7 +120,7 @@
         },
         {
           "id": "dotnet-sarif-targets",
-          "when": "{{outputs.analysis.sarif != ''}}",
+          "when": "{{vars.dotnet.analyze.sarif.enabled && outputs.analysis.sarif != ''}}",
           "uses": "builtin:dotnet-sarif-targets",
           "with": {
             "path": "{{outputs.temp}}/msbuild/Rexo.Sarif.targets",
@@ -76,23 +129,23 @@
         },
         {
           "id": "dotnet-build-warnings",
-          "when": "{{outputs.analysis.sarif != ''}}",
-          "run": "dotnet build{{vars.dotnet.solution | prefix(' ')}} -c {{vars.dotnet.configuration | default('Release')}} --no-restore --no-incremental \"-p:CustomAfterMicrosoftCommonTargets={{outputs.temp | suffix('/msbuild/Rexo.Sarif.targets') | abspath}}\" \"-p:RexoSarifDirectory={{outputs.temp | suffix('/sarif/dotnet') | abspath}}\" -p:RexoSarifVersion={{vars.dotnet.analyze.sarifVersion | default('2.1')}}{{vars.dotnet.analyze.buildExtraArgs | prefix(' ')}}"
+          "when": "{{vars.dotnet.analyze.sarif.enabled && outputs.analysis.sarif != ''}}",
+          "run": "dotnet build{{vars.dotnet.solution | prefix(' ')}} -c {{vars.dotnet.configuration | default('Release')}} --no-restore --no-incremental \"-p:CustomAfterMicrosoftCommonTargets={{outputs.temp | suffix('/msbuild/Rexo.Sarif.targets') | abspath}}\" \"-p:RexoSarifDirectory={{outputs.temp | suffix('/sarif/dotnet') | abspath}}\" -p:RexoSarifVersion={{vars.dotnet.analyze.sarifVersion | default(vars.dotnet.analyze.sarif.version, '2.1')}}{{vars.dotnet.analyze.buildExtraArgs | default(vars.dotnet.analyze.build.extraArgs) | prefix(' ')}}"
         },
         {
           "id": "dotnet-build-warnings-no-sarif",
-          "when": "{{outputs.analysis.sarif == ''}}",
-          "run": "dotnet build{{vars.dotnet.solution | prefix(' ')}} -c {{vars.dotnet.configuration | default('Release')}} --no-restore{{vars.dotnet.analyze.buildExtraArgs | prefix(' ')}}"
+          "when": "{{vars.dotnet.analyze.build.enabled && !(vars.dotnet.analyze.sarif.enabled && outputs.analysis.sarif != '')}}",
+          "run": "dotnet build{{vars.dotnet.solution | prefix(' ')}} -c {{vars.dotnet.configuration | default('Release')}} --no-restore{{vars.dotnet.analyze.buildExtraArgs | default(vars.dotnet.analyze.build.extraArgs) | prefix(' ')}}"
         },
         {
           "id": "dotnet-sarif-merge",
-          "when": "{{outputs.analysis.sarif != ''}}",
+          "when": "{{vars.dotnet.analyze.sarif.enabled && outputs.analysis.sarif != ''}}",
           "alwaysRun": true,
           "uses": "builtin:sarif-merge",
           "with": {
             "input": "{{outputs.temp}}/sarif/dotnet",
             "output": "{{outputs.analysis.sarif}}/dotnet-build.sarif",
-            "category": "{{vars.dotnet.analyze.sarifCategory | default('dotnet-build')}}"
+            "category": "{{vars.dotnet.analyze.sarifCategory | default(vars.dotnet.analyze.sarif.category, 'dotnet-build')}}"
           },
           "outputs": {
             "sarifReports": [
@@ -104,14 +157,24 @@
     },
     "format": {
       "description": "Auto-format .NET source files.",
+      "container": "{{vars.dotnet.container}}",
       "steps": [
         {
           "id": "dotnet-format",
           "run": "dotnet format{{vars.dotnet.solution | prefix(' ')}}{{vars.dotnet.format.extraArgs | prefix(' ')}}"
         }
       ]
+    },
+    "security": {
+      "description": "Report vulnerable NuGet packages (opt-in: vars.dotnet.security.enabled=true).",
+      "container": "{{vars.dotnet.container}}",
+      "steps": [
+        {
+          "id": "dotnet-vulnerable-packages",
+          "when": "{{vars.dotnet.security.enabled}}",
+          "run": "dotnet list{{vars.dotnet.solution | prefix(' ')}} package --vulnerable --include-transitive{{vars.dotnet.security.extraArgs | prefix(' ')}}"
+        }
+      ]
     }
   }
 }
-
-

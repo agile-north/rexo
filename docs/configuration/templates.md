@@ -157,6 +157,30 @@ When a variable is missing/undefined:
 
 This design enables policy-layer branching with missing vars defaulting gracefully.
 
+## Logical Operators
+
+Conditions can be combined with `&&`, `||`, unary `!` and parentheses. Each operand is a path,
+a comparison, or a quoted literal; truthiness treats empty, `false`, `0` and `no` as false.
+The result renders as `true` or `false`.
+
+```text
+{{vars.dotnet.analyze.sarif.enabled && outputs.analysis.sarif != ''}}
+{{!options.dry-run && (options.force || steps.tag-exists.outputs.tagExists != 'TAG_EXISTS')}}
+{{!(vars.dotnet.test.coverage.enabled)}}
+```
+
+Operators inside quoted literals are ignored (`{{options.a == 'a&&b'}}`).
+
+## `??` vs `default(...)` precedence
+
+`??` is evaluated before filters, so in `{{a ?? b | prefix(' ')}}` the filter applies only to `b`.
+To apply a filter to the coalesced result, use `default` (or `coalesce`) instead, which accepts
+several fallbacks resolved as paths or literals:
+
+```text
+{{vars.legacyKey | default(vars.newKey, '2.1') | prefix(' -p:Version=')}}
+```
+
 ---
 
 ## Common Patterns

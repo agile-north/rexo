@@ -90,16 +90,7 @@ public sealed partial class RepoConfigurationLoader
             // Handle embedded: URI scheme — loads a named embedded policy template as a base config
             if (extendPath.StartsWith("embedded:", StringComparison.OrdinalIgnoreCase))
             {
-                var templateName = extendPath["embedded:".Length..];
-                var templateJson = EmbeddedPolicyTemplates.ReadTemplate(templateName);
-                var policyConfig = JsonSerializer.Deserialize<PolicyConfig>(templateJson, JsonOptions)
-                    ?? throw new InvalidOperationException($"Embedded template '{templateName}' is empty or invalid.");
-
-                var embeddedBase = new RepoConfig(
-                    Name: templateName,
-                    Commands: policyConfig.Commands is { Count: > 0 } ? policyConfig.Commands : null,
-                    Aliases: policyConfig.Aliases is { Count: > 0 } ? policyConfig.Aliases : null);
-
+                var embeddedBase = await LoadPolicyLayerAsync(extendPath, configDir, [], cancellationToken);
                 merged = merged is null ? embeddedBase : MergeConfigs(merged, embeddedBase, policyMerge: true);
                 continue;
             }
@@ -143,6 +134,18 @@ public sealed partial class RepoConfigurationLoader
 
     public static async Task<PolicyConfig?> LoadPolicyAsync(string policyPath, CancellationToken cancellationToken)
     {
+        var policyConfig = await ReadPolicyFileAsync(policyPath, cancellationToken);
+        if (policyConfig?.Extends is not { Count: > 0 })
+        {
+            return policyConfig;
+        }
+
+        var layer = await LoadPolicyLayerAsync(Path.GetFullPath(policyPath), null, [], cancellationToken);
+        return FromRepoConfigLayer(layer, policyConfig.Capabilities);
+    }
+
+    private static async Task<PolicyConfig?> ReadPolicyFileAsync(string policyPath, CancellationToken cancellationToken)
+    {
         if (!File.Exists(policyPath))
         {
             throw new FileNotFoundException("Policy file was not found.", policyPath);
@@ -158,6 +161,150 @@ public sealed partial class RepoConfigurationLoader
         }
 
         return policyConfig;
+    }
+
+    /// <summary>Loads an embedded policy template (with its <c>extends</c> chain resolved).</summary>
+    public static async Task<PolicyConfig> LoadEmbeddedPolicyAsync(string templateName, CancellationToken cancellationToken)
+    {
+        var layer = await LoadPolicyLayerAsync("embedded:" + templateName, null, [], cancellationToken);
+        return FromRepoConfigLayer(layer, null);
+    }
+
+    /// <summary>
+    /// Loads a policy (<c>embedded:&lt;name&gt;</c> or a file path) as a <see cref="RepoConfig"/> layer,
+    /// resolving the policy's own <c>extends</c> chain first (base policies have lower priority).
+    /// </summary>
+    private static async Task<RepoConfig> LoadPolicyLayerAsync(
+        string reference,
+        string? baseDirectory,
+        HashSet<string> visiting,
+        CancellationToken cancellationToken)
+    {
+        PolicyConfig policy;
+        string key;
+        string? policyDirectory;
+        string fallbackName;
+
+        if (reference.StartsWith("embedded:", StringComparison.OrdinalIgnoreCase))
+        {
+            var templateName = reference["embedded:".Length..];
+            key = "embedded:" + templateName.ToUpperInvariant();
+            fallbackName = templateName;
+            policyDirectory = null;
+            var templateJson = EmbeddedPolicyTemplates.ReadTemplate(templateName);
+            policy = JsonSerializer.Deserialize<PolicyConfig>(templateJson, JsonOptions)
+                ?? throw new InvalidOperationException($"Embedded template '{templateName}' is empty or invalid.");
+        }
+        else
+        {
+            if (!Path.IsPathRooted(reference) && baseDirectory is null)
+            {
+                throw new InvalidOperationException(
+                    $"Policy reference '{reference}' must be 'embedded:<name>' or an absolute path when extended from an embedded policy.");
+            }
+
+            var path = Path.IsPathRooted(reference)
+                ? reference
+                : Path.GetFullPath(Path.Combine(baseDirectory!, reference));
+            key = path;
+            fallbackName = Path.GetFileNameWithoutExtension(path);
+            policyDirectory = Path.GetDirectoryName(path);
+            policy = await ReadPolicyFileAsync(path, cancellationToken)
+                ?? throw new InvalidOperationException($"Policy '{path}' is empty or invalid.");
+        }
+
+        if (!visiting.Add(key))
+        {
+            throw new InvalidOperationException($"Circular policy 'extends' reference detected for '{reference}'.");
+        }
+
+        try
+        {
+            var layer = policy.ToRepoConfigLayer(fallbackName);
+            if (policy.Extends is not { Count: > 0 })
+            {
+                return layer;
+            }
+
+            RepoConfig? merged = null;
+            foreach (var parent in policy.Extends)
+            {
+                var parentLayer = await LoadPolicyLayerAsync(parent, policyDirectory, visiting, cancellationToken);
+                merged = merged is null ? parentLayer : MergeConfigs(merged, parentLayer, policyMerge: true);
+            }
+
+            return MergeConfigs(merged!, layer);
+        }
+        finally
+        {
+            _ = visiting.Remove(key);
+        }
+    }
+
+    private static PolicyConfig FromRepoConfigLayer(RepoConfig layer, RepoCapabilityConfig? capabilities) =>
+        new(layer.Commands, layer.Aliases)
+        {
+            Name = layer.Name,
+            Description = layer.Description,
+            Capabilities = capabilities ?? layer.Capabilities,
+            Vars = layer.Vars,
+            Settings = layer.Settings,
+            Containers = layer.Containers,
+            Outputs = layer.Outputs,
+            Runtime = layer.Runtime,
+            Secrets = layer.Secrets,
+            Versioning = layer.Versioning,
+        };
+
+    /// <summary>
+    /// Merges two policies. Commands and aliases from <paramref name="override"/> replace those in
+    /// <paramref name="baseline"/> by name; vars/settings deep-merge; other sections follow config merge rules.
+    /// </summary>
+    public static PolicyConfig MergePolicies(PolicyConfig? baseline, PolicyConfig? @override)
+    {
+        if (baseline is null) return @override ?? new PolicyConfig();
+        if (@override is null) return baseline;
+
+        var defaults = MergeConfigs(
+            baseline.ToRepoConfigLayer() with { Commands = null, Aliases = null },
+            @override.ToRepoConfigLayer() with { Commands = null, Aliases = null });
+
+        var commands = new Dictionary<string, RepoCommandConfig>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, command) in baseline.Commands ?? []) commands[name] = command;
+        foreach (var (name, command) in @override.Commands ?? []) commands[name] = command;
+
+        var aliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (alias, target) in baseline.Aliases ?? []) aliases[alias] = target;
+        foreach (var (alias, target) in @override.Aliases ?? []) aliases[alias] = target;
+
+        return FromRepoConfigLayer(defaults with { Commands = commands, Aliases = aliases }, null) with
+        {
+            Capabilities = MergeCapabilities(baseline.Capabilities, @override.Capabilities, null),
+        };
+    }
+
+    /// <summary>
+    /// Applies a policy's non-command sections (vars, settings, containers, outputs, runtime, secrets,
+    /// versioning) underneath <paramref name="config"/>. The repository config always wins.
+    /// Commands and aliases are left untouched (policy commands are registered separately).
+    /// </summary>
+    public static RepoConfig ApplyPolicyDefaults(RepoConfig config, PolicyConfig? policy)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        if (policy is null)
+        {
+            return config;
+        }
+
+        var policyLayer = policy.ToRepoConfigLayer() with { Commands = null, Aliases = null, Capabilities = null, Description = null };
+        var merged = MergeConfigs(policyLayer, config with { Commands = null, Aliases = null });
+        return merged with
+        {
+            Name = config.Name,
+            Commands = config.Commands,
+            Aliases = config.Aliases,
+            Capabilities = config.Capabilities,
+        };
     }
 
     public static async Task<string> ReadEmbeddedRexoSchemaJsonAsync(CancellationToken cancellationToken)
@@ -204,8 +351,9 @@ public sealed partial class RepoConfigurationLoader
             Artifacts = MergeLists(@base.Artifacts, child.Artifacts, child.MergeStrategy),
             Runtime = child.Runtime ?? @base.Runtime,
             Outputs = MergeOutputsConfig(@base.Outputs, child.Outputs),
-            Settings = MergeDictionaries(@base.Settings, child.Settings),
-            Vars = MergeDictionaries(@base.Vars, child.Vars),
+            Settings = DeepMergeJsonMaps(@base.Settings, child.Settings),
+            Vars = DeepMergeJsonMaps(@base.Vars, child.Vars),
+            Containers = ContainerResolver.MergeRegistries(@base.Containers, child.Containers),
             Secrets = MergeSecretsConfig(@base.Secrets, child.Secrets),
             Capabilities = MergeCapabilities(@base.Capabilities, child.Capabilities, child.MergeStrategy),
             MergeStrategy = child.MergeStrategy ?? @base.MergeStrategy,
@@ -598,7 +746,7 @@ public sealed partial class RepoConfigurationLoader
         return new RepoCommandConfig(
             Description: childCmd.Description ?? baseCmd.Description,
             Options: MergeDictionaries(baseCmd.Options, childCmd.Options) ?? [],
-            Steps: baseCmd.Steps ?? [])
+            Steps: PushDownCommandContainer([.. baseCmd.Steps ?? []], baseCmd.Container))
         {
             Hidden = childCmd.Hidden ?? baseCmd.Hidden,
             Args = MergeDictionaries(baseCmd.Args, childCmd.Args),
@@ -606,6 +754,10 @@ public sealed partial class RepoConfigurationLoader
             Merge = effectiveMode,
             MaxParallel = childCmd.MaxParallel ?? baseCmd.MaxParallel,
             StepOps = effectiveStepOps,
+            Before = baseCmd.Before is null ? null : PushDownCommandContainer([.. baseCmd.Before], baseCmd.Container),
+            After = baseCmd.After is null ? null : PushDownCommandContainer([.. baseCmd.After], baseCmd.Container),
+            MaxDepth = childCmd.MaxDepth ?? baseCmd.MaxDepth,
+            Container = childCmd.Container,
         };
     }
 
@@ -785,7 +937,72 @@ public sealed partial class RepoConfigurationLoader
             steps.AddRange(commandConfig.After);
         }
 
+        return PushDownCommandContainer(steps, commandConfig.Container);
+    }
+
+    /// <summary>
+    /// Copies a command-level container default onto its own run steps so that the default keeps
+    /// applying only to the steps it was declared for once commands from different layers are combined.
+    /// </summary>
+    private static List<RepoStepConfig> PushDownCommandContainer(List<RepoStepConfig> steps, RepoStepContainerConfig? container)
+    {
+        if (container is null)
+        {
+            return steps;
+        }
+
+        for (var i = 0; i < steps.Count; i++)
+        {
+            if (steps[i].Run is not null && steps[i].Container is null)
+            {
+                steps[i] = steps[i] with { Container = container };
+            }
+        }
+
         return steps;
+    }
+
+    /// <summary>
+    /// Deep-merges two JSON maps: nested objects merge recursively; scalars and arrays in
+    /// <paramref name="child"/> replace those in <paramref name="base"/>.
+    /// </summary>
+    internal static Dictionary<string, JsonElement>? DeepMergeJsonMaps(
+        Dictionary<string, JsonElement>? @base,
+        Dictionary<string, JsonElement>? child)
+    {
+        if (@base is null or { Count: 0 }) return child;
+        if (child is null or { Count: 0 }) return @base;
+
+        var result = new Dictionary<string, JsonElement>(@base, StringComparer.Ordinal);
+        foreach (var (key, value) in child)
+        {
+            result[key] = result.TryGetValue(key, out var existing) ? DeepMergeJson(existing, value) : value;
+        }
+
+        return result;
+    }
+
+    private static JsonElement DeepMergeJson(JsonElement @base, JsonElement child)
+    {
+        if (@base.ValueKind != JsonValueKind.Object || child.ValueKind != JsonValueKind.Object)
+        {
+            return child;
+        }
+
+        var merged = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        foreach (var property in @base.EnumerateObject())
+        {
+            merged[property.Name] = property.Value;
+        }
+
+        foreach (var property in child.EnumerateObject())
+        {
+            merged[property.Name] = merged.TryGetValue(property.Name, out var existing)
+                ? DeepMergeJson(existing, property.Value)
+                : property.Value;
+        }
+
+        return JsonSerializer.SerializeToElement(merged);
     }
 
     private static RepoCommandConfig CreateMergedCommand(

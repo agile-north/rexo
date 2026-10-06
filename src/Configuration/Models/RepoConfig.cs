@@ -36,6 +36,12 @@ public sealed record RepoConfig(
     public Dictionary<string, JsonElement>? Vars { get; init; }
 
     /// <summary>
+    /// Named, reusable container definitions referenced from steps or commands via <c>container: "&lt;name&gt;"</c>
+    /// or <c>container: { use: "&lt;name&gt;", ...overrides }</c>.
+    /// </summary>
+    public Dictionary<string, RepoStepContainerConfig>? Containers { get; init; }
+
+    /// <summary>
     /// First-class secret configuration. Resolved secrets are available as <c>{{secrets.*}}</c>
     /// during command execution.
     /// </summary>
@@ -94,6 +100,12 @@ public sealed record RepoCommandConfig(
 
     /// <summary>Maximum command delegation depth allowed for this command invocation chain.</summary>
     public int? MaxDepth { get; init; }
+
+    /// <summary>
+    /// Default container for every <c>run</c> step (including hooks) in this command.
+    /// Steps can override it with their own <c>container</c>, or opt out with <c>container: none</c>.
+    /// </summary>
+    public RepoStepContainerConfig? Container { get; init; }
 }
 
 public sealed record RepoArgConfig(
@@ -123,14 +135,33 @@ public sealed record RepoStepConfig(
     Dictionary<string, string[]>? Outputs = null,
     RepoStepContainerConfig? Container = null);
 
+/// <summary>
+/// Container definition used by run steps, command-level defaults, and the named <c>containers</c> registry.
+/// In JSON a step/command container may also be a string (named reference, or <c>none</c>) or <c>false</c> (no container).
+/// </summary>
+[JsonConverter(typeof(RepoStepContainerConfigJsonConverter))]
 public sealed record RepoStepContainerConfig(
-    string Image,
+    string? Image = null,
     Dictionary<string, string>? Env = null,
     string? WorkingDirectory = null,
     string? Entrypoint = null,
     string? Dockerfile = null,
     string? Context = null,
-    RepoStepContainerBuildConfig? Build = null);
+    RepoStepContainerBuildConfig? Build = null)
+{
+    /// <summary>Value of <see cref="Use"/> that disables containerization for a step.</summary>
+    public const string NoneReference = "none";
+
+    /// <summary>
+    /// Name of a container in the top-level <c>containers</c> registry (template-rendered).
+    /// Inline fields on the same object override the referenced definition.
+    /// <c>none</c> or an empty rendered value means "run on the host".
+    /// </summary>
+    public string? Use { get; init; }
+
+    /// <summary>Registry entries only: name of another registry container to inherit from.</summary>
+    public string? Extends { get; init; }
+}
 
 public sealed record RepoStepContainerBuildConfig(
     string? Target = null,
@@ -439,13 +470,51 @@ public sealed record RepoCapabilityConfig(
     string[]? Required = null);
 
 /// <summary>
-/// A partial config document used to inject commands and aliases from a policy file
-/// (e.g. <c>policy.json</c>) after policy schema validation.
+/// A partial config document provided by a policy (embedded template, <c>policy.json</c>, or policy source).
+/// Every value is a default: the repository config always wins on conflict.
 /// </summary>
 public sealed record PolicyConfig(
     Dictionary<string, RepoCommandConfig>? Commands = null,
     Dictionary<string, string>? Aliases = null)
 {
+    public string? Name { get; init; }
+    public string? Description { get; init; }
+
+    /// <summary>Other policies to layer underneath this one (<c>embedded:&lt;name&gt;</c> or relative paths).</summary>
+    public List<string>? Extends { get; init; }
+
     /// <summary>Declares runtime capability requirements for this policy.</summary>
     public RepoCapabilityConfig? Capabilities { get; init; }
+
+    /// <summary>Default <c>{{vars.*}}</c> values. Deep-merged underneath repository vars.</summary>
+    public Dictionary<string, JsonElement>? Vars { get; init; }
+
+    /// <summary>Default <c>{{settings.*}}</c> values. Deep-merged underneath repository settings.</summary>
+    public Dictionary<string, JsonElement>? Settings { get; init; }
+
+    /// <summary>Default named containers. Repository entries with the same name win.</summary>
+    public Dictionary<string, RepoStepContainerConfig>? Containers { get; init; }
+
+    public RepoOutputsConfig? Outputs { get; init; }
+    public RepoRuntimeConfig? Runtime { get; init; }
+    public RepoSecretsConfig? Secrets { get; init; }
+    public RepoVersioningConfig? Versioning { get; init; }
+
+    /// <summary>Projects this policy onto a <see cref="RepoConfig"/> layer so it can be merged with the standard config merge rules.</summary>
+    public RepoConfig ToRepoConfigLayer(string? fallbackName = null) =>
+        new(
+            Name: Name ?? fallbackName ?? string.Empty,
+            Commands: Commands is { Count: > 0 } ? Commands : null,
+            Aliases: Aliases is { Count: > 0 } ? Aliases : null)
+        {
+            Description = Description,
+            Capabilities = Capabilities,
+            Vars = Vars,
+            Settings = Settings,
+            Containers = Containers,
+            Outputs = Outputs,
+            Runtime = Runtime,
+            Secrets = Secrets,
+            Versioning = Versioning,
+        };
 }

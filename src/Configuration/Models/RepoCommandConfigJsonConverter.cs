@@ -23,6 +23,7 @@ internal sealed class RepoCommandConfigJsonConverter : JsonConverter<RepoCommand
             Before = ReadOptionalHookSteps(root, "before", options),
             After = ReadOptionalHookSteps(root, "after", options),
             MaxDepth = ReadOptionalInt(root, "maxDepth"),
+            Container = ReadOptionalObject<RepoStepContainerConfig>(root, "container", options),
         };
 
         if (!root.TryGetProperty("merge", out var mergeElement))
@@ -104,6 +105,12 @@ internal sealed class RepoCommandConfigJsonConverter : JsonConverter<RepoCommand
         if (value.MaxDepth.HasValue)
         {
             writer.WriteNumber("maxDepth", value.MaxDepth.Value);
+        }
+
+        if (value.Container is not null)
+        {
+            writer.WritePropertyName("container");
+            JsonSerializer.Serialize(writer, value.Container, options);
         }
 
         writer.WriteEndObject();

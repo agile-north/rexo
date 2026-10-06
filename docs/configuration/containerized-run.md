@@ -181,7 +181,60 @@ Schema rules enforce that container requires run.
 - Invalid: uses + container
 - Invalid: command + container
 
-Invalid combinations fail config validation during load.
+Invalid combinations fail config validation during load. A command-level `container` default is
+allowed and only applies to the command's `run` steps.
+
+---
+
+## Reusable Containers (`containers` registry)
+
+Define containers once at the top level and reference them by name:
+
+```yaml
+containers:
+  sdk:
+    image: mcr.microsoft.com/dotnet/sdk:10.0
+    workingDirectory: /work
+    env: { DOTNET_CLI_TELEMETRY_OPTOUT: "1" }
+  sdk-nuget:
+    extends: sdk                 # inherit from another registry entry
+    env: { NUGET_PACKAGES: /work/.nuget/packages }
+
+commands:
+  ci:
+    container: sdk               # default for every run step in this command
+    steps:
+      - id: build
+        run: dotnet build
+      - id: pack
+        run: dotnet pack
+        container: { use: sdk-nuget, env: { EXTRA: "1" } }   # reference + inline overrides
+      - id: host-only
+        run: ./scripts/notify.sh
+        container: false         # run this step on the host
+```
+
+A `container` value (on a step or a command) can be:
+
+| Form | Meaning |
+| --- | --- |
+| `"name"` | Use the registry entry `name`. The name is template-rendered, e.g. `"{{vars.dotnet.container}}"`. |
+| `{ use: "name", ...fields }` | Use the registry entry and override individual fields (`env` maps are merged). |
+| `{ image: ..., ... }` | Inline definition (no registry). |
+| `false`, `"none"`, or a name that renders empty | Run on the host. |
+
+Resolution rules:
+
+- A step `container` wins over the command `container`.
+- `extends` chains are followed; unknown names and cycles fail the command with a config error.
+- Registries merge across `extends` layers and policies by name, field by field; the repository wins.
+  Embedded policies ship entries such as `dotnet-sdk`, `node` and `git` that you can override partially:
+
+```yaml
+containers:
+  dotnet-sdk:
+    image: mcr.microsoft.com/dotnet/sdk:9.0   # keeps the policy's workingDirectory
+```
 
 ---
 

@@ -34,15 +34,19 @@ internal static class CliBootstrapper
 
         // Load config
         RepoConfig? config = await ConfigBuilder.LoadConfigAsync(workingDir, debug, cancellationToken);
+        var configBeforePolicyDefaults = config;
 
         // Load and merge policies
         PolicyConfig? policyConfig = null;
         if (config is not null)
         {
             policyConfig = await ConfigBuilder.LoadAndMergePoliciesAsync(config, workingDir, debug, cancellationToken);
+
+            // Policy defaults (vars, settings, containers, ...) sit underneath the repo config; the repo always wins.
+            config = RepoConfigurationLoader.ApplyPolicyDefaults(config, policyConfig);
         }
 
-        var effectiveConfig = ConfigBuilder.MergePolicyIntoEffectiveConfig(config, policyConfig);
+        var effectiveConfig = ConfigBuilder.MergePolicyIntoEffectiveConfig(configBeforePolicyDefaults, policyConfig);
 
         // Apply CLI --set overrides (highest-priority layer in the merge pipeline)
         if (setOverrides is { Count: > 0 })

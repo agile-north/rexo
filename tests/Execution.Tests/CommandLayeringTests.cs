@@ -214,7 +214,7 @@ public sealed class CommandLayeringTests
             var sarifBuild = Assert.Single(analyzeSteps, s => s.Id == "dotnet-build-warnings");
             Assert.Contains("--no-incremental", sarifBuild.Run, StringComparison.Ordinal);
             Assert.Contains("CustomAfterMicrosoftCommonTargets", sarifBuild.Run, StringComparison.Ordinal);
-            Assert.Contains("RexoSarifVersion={{vars.dotnet.analyze.sarifVersion | default('2.1')}}", sarifBuild.Run, StringComparison.Ordinal);
+            Assert.Contains("RexoSarifVersion={{vars.dotnet.analyze.sarifVersion | default(vars.dotnet.analyze.sarif.version, '2.1')}}", sarifBuild.Run, StringComparison.Ordinal);
             Assert.DoesNotContain("ErrorLog", sarifBuild.Run, StringComparison.Ordinal);
 
             var targets = Assert.Single(analyzeSteps, s => s.Id == "dotnet-sarif-targets");
@@ -254,14 +254,14 @@ public sealed class CommandLayeringTests
 
             var noCoverageStep = Assert.Single(testSteps, step =>
                 string.Equals(step.Id, "dotnet-test-no-coverage", StringComparison.Ordinal));
-            Assert.Equal("{{vars.dotnet.test.coverage.mode == 'none'}}", noCoverageStep.When);
+            Assert.Equal("{{!(vars.dotnet.test.coverage.enabled && vars.dotnet.test.coverage.mode != 'none')}}", noCoverageStep.When);
             Assert.Contains("vars.dotnet.test.runsettings", noCoverageStep.Run ?? string.Empty, StringComparison.Ordinal);
             Assert.Contains("vars.dotnet.test.extraArgs", noCoverageStep.Run ?? string.Empty, StringComparison.Ordinal);
             Assert.DoesNotContain("XPlat Code Coverage", noCoverageStep.Run ?? string.Empty, StringComparison.Ordinal);
 
             var coverageStep = Assert.Single(testSteps, step =>
                 string.Equals(step.Id, "dotnet-test", StringComparison.Ordinal));
-            Assert.Equal("{{vars.dotnet.test.coverage.mode != 'none'}}", coverageStep.When);
+            Assert.Equal("{{vars.dotnet.test.coverage.enabled && vars.dotnet.test.coverage.mode != 'none'}}", coverageStep.When);
             Assert.Contains("vars.dotnet.test.runsettings", coverageStep.Run ?? string.Empty, StringComparison.Ordinal);
             Assert.Contains("vars.dotnet.test.extraArgs", coverageStep.Run ?? string.Empty, StringComparison.Ordinal);
             Assert.Contains("XPlat Code Coverage", coverageStep.Run ?? string.Empty, StringComparison.Ordinal);

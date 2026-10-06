@@ -198,7 +198,7 @@ public sealed class CliSmokeTests
                 .Select(layer => layer.GetString())
                 .ToArray();
             Assert.Contains(sourceLayers, layer => layer?.Contains("base.yaml", StringComparison.Ordinal) == true);
-            Assert.Contains(sourceLayers, layer => layer?.Contains(".rexo\\rexo.yaml", StringComparison.Ordinal) == true);
+            Assert.Contains(sourceLayers, layer => layer?.Contains(Path.Combine(".rexo", "rexo.yaml"), StringComparison.Ordinal) == true);
             Assert.Contains(sourceLayers, layer => layer?.Contains("overlay.yaml", StringComparison.Ordinal) == true);
             Assert.Contains("CLI --set override", sourceLayers);
 
@@ -222,7 +222,7 @@ public sealed class CliSmokeTests
                 .Select(file => file.GetString())
                 .ToArray();
             Assert.Contains(repositoryFiles, file => file?.Contains("base.yaml", StringComparison.Ordinal) == true);
-            Assert.Contains(repositoryFiles, file => file?.Contains(".rexo\\rexo.yaml", StringComparison.Ordinal) == true);
+            Assert.Contains(repositoryFiles, file => file?.Contains(Path.Combine(".rexo", "rexo.yaml"), StringComparison.Ordinal) == true);
             Assert.Contains(repositoryFiles, file => file?.Contains("overlay.yaml", StringComparison.Ordinal) == true);
         }
         finally

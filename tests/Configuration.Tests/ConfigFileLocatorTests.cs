@@ -71,7 +71,7 @@ public sealed class ConfigFileLocatorTests
             var warnings = ConfigFileLocator.GetShadowedFileWarnings(dir);
             var warning = Assert.Single(warnings);
             Assert.Contains(Path.Join(".rexo", "rexo.yaml"), warning, StringComparison.Ordinal);
-            Assert.Contains(Path.Combine(".rexo", "rexo.json"), warning, StringComparison.Ordinal);
+            Assert.Contains(Path.Join(".rexo", "rexo.json"), warning, StringComparison.Ordinal);
             Assert.Contains("rexo.json", warning, StringComparison.Ordinal);
         }
         finally
@@ -83,12 +83,12 @@ public sealed class ConfigFileLocatorTests
     [Fact]
     public void FindConfigPathPrefersRootYamlOverRootJson()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-locator-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-locator-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         try
         {
-            File.WriteAllText(Path.Combine(dir, "rexo.json"), "{}");
-            var ymlPath = Path.Combine(dir, "rexo.yml");
+            File.WriteAllText(Path.Join(dir, "rexo.json"), "{}");
+            var ymlPath = Path.Join(dir, "rexo.yml");
             File.WriteAllText(ymlPath, "{}");
 
             Assert.Equal(ymlPath, ConfigFileLocator.FindConfigPath(dir));
@@ -102,11 +102,11 @@ public sealed class ConfigFileLocatorTests
     [Fact]
     public void GetShadowedFileWarningsIsEmptyForSingleConfig()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-locator-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-locator-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         try
         {
-            File.WriteAllText(Path.Combine(dir, "rexo.yaml"), "{}");
+            File.WriteAllText(Path.Join(dir, "rexo.yaml"), "{}");
             Assert.Empty(ConfigFileLocator.GetShadowedFileWarnings(dir));
         }
         finally
@@ -119,7 +119,7 @@ public sealed class ConfigFileLocatorTests
     public void GetDefaultConfigPathIsDotRexoYaml()
     {
         var dir = Path.GetTempPath();
-        Assert.Equal(Path.Combine(dir, ".rexo", "rexo.yaml"), ConfigFileLocator.GetDefaultConfigPath(dir));
+        Assert.Equal(Path.Join(dir, ".rexo", "rexo.yaml"), ConfigFileLocator.GetDefaultConfigPath(dir));
     }
 
     [Fact]

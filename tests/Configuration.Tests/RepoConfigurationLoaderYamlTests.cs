@@ -106,10 +106,10 @@ public sealed class RepoConfigurationLoaderYamlTests
     var originalOverlay = Environment.GetEnvironmentVariable("REXO_OVERLAY");
     Environment.SetEnvironmentVariable("REXO_OVERLAY", null);
 
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-yaml-modeline-{Guid.NewGuid():N}");
-    var dotRexo = Path.Combine(dir, ".rexo");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-yaml-modeline-{Guid.NewGuid():N}");
+    var dotRexo = Path.Join(dir, ".rexo");
     Directory.CreateDirectory(dotRexo);
-    var configPath = Path.Combine(dotRexo, "rexo.yaml");
+    var configPath = Path.Join(dotRexo, "rexo.yaml");
 
     await File.WriteAllTextAsync(
         configPath,

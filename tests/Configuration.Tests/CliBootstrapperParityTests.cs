@@ -45,7 +45,7 @@ public sealed class CliBootstrapperParityTests
         }
         """);
 
-            var (_, _, effectiveConfig) = await CliBootstrapper.BuildServicesAsync(
+            var (_, _, effectiveConfig, _) = await CliBootstrapper.BuildServicesAsync(
                 dir, debug: false, setOverrides: null, CancellationToken.None);
 
             Assert.NotNull(effectiveConfig?.Secrets?.Defaults?.ProviderChain);

@@ -1,6 +1,8 @@
 namespace Rexo.Execution.Tests;
 
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 using Rexo.Artifacts;
 using Rexo.Configuration.Models;
 using Rexo.Core.Abstractions;
@@ -98,6 +100,43 @@ public sealed class ArtifactWorkflowBuiltinTests
 
         Assert.True(result.Success);
         Assert.Equal(["repo-root-name"], dockerProvider.BuildCalls);
+    }
+
+    [Fact]
+    public async Task BuildManifestCapturesHashAndLocationForLocalArtifactFiles()
+    {
+        var repositoryRoot = Path.Combine(Path.GetTempPath(), $"rexo-artifact-manifest-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(repositoryRoot);
+        var artifactPath = Path.Combine(repositoryRoot, "package.zip");
+        const string artifactContent = "immutable artifact bytes";
+        await File.WriteAllTextAsync(artifactPath, artifactContent);
+
+        try
+        {
+            var provider = new RecordingArtifactProvider("generic", artifactPath);
+            var executor = CreateBuildExecutor(repositoryRoot, provider);
+            var result = await executor.ExecuteAsync(
+                "build",
+                new CommandInvocation(
+                    new Dictionary<string, string>(),
+                    new Dictionary<string, string?>(),
+                    Json: false,
+                    JsonFile: null,
+                    WorkingDirectory: repositoryRoot),
+                CancellationToken.None);
+
+            Assert.True(result.Success, result.Message);
+            var artifact = Assert.Single(result.Artifacts);
+            Assert.Equal("generic", artifact.Type);
+            Assert.Equal(artifactPath, artifact.Location);
+            Assert.Equal(
+                Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(artifactContent))).ToLowerInvariant(),
+                artifact.ContentSha256);
+        }
+        finally
+        {
+            if (Directory.Exists(repositoryRoot)) Directory.Delete(repositoryRoot, true);
+        }
     }
 
     [Fact]
@@ -272,6 +311,35 @@ public sealed class ArtifactWorkflowBuiltinTests
         return executor;
     }
 
+    private static DefaultCommandExecutor CreateBuildExecutor(string repositoryRoot, IArtifactProvider provider)
+    {
+        var builtins = new BuiltinRegistry();
+        var providerRegistry = new ArtifactProviderRegistry();
+        providerRegistry.Register(provider.Type, provider);
+        var loader = new ConfigCommandLoader(
+            builtins,
+            new TemplateRenderer(),
+            VersionProviderRegistry.CreateDefault(),
+            providerRegistry);
+        var config = new RepoConfig(
+            Name: "artifact-manifest",
+            Commands: new Dictionary<string, RepoCommandConfig>
+            {
+                ["build"] = new RepoCommandConfig(
+                    Description: "build",
+                    Options: new Dictionary<string, RepoOptionConfig>(),
+                    Steps: [new RepoStepConfig(Id: "build", Uses: "builtin:build-artifacts")]),
+            },
+            Aliases: new Dictionary<string, string>())
+        {
+            Artifacts = [new RepoArtifactConfig("generic", "package")],
+        };
+        var registry = new CommandRegistry();
+        var executor = new DefaultCommandExecutor(registry);
+        loader.LoadInto(registry, config, repositoryRoot, executor);
+        return executor;
+    }
+
     private static Task<CommandResult> ExecuteAsync(DefaultCommandExecutor executor, string commandName) =>
         executor.ExecuteAsync(
             commandName,
@@ -294,7 +362,7 @@ public sealed class ArtifactWorkflowBuiltinTests
         return Assert.IsType<PlanPayload>(parsed);
     }
 
-    private sealed class RecordingArtifactProvider(string type) : IArtifactProvider
+    private sealed class RecordingArtifactProvider(string type, string? buildLocation = null) : IArtifactProvider
     {
         public string Type { get; } = type;
         public List<string> BuildCalls { get; } = [];
@@ -304,7 +372,7 @@ public sealed class ArtifactWorkflowBuiltinTests
         public Task<ArtifactBuildResult> BuildAsync(ArtifactConfig artifact, ExecutionContext context, CancellationToken cancellationToken)
         {
             BuildCalls.Add(artifact.Name);
-            return Task.FromResult(new ArtifactBuildResult(artifact.Name, true, null));
+            return Task.FromResult(new ArtifactBuildResult(artifact.Name, true, buildLocation));
         }
 
         public Task<ArtifactTagResult> TagAsync(ArtifactConfig artifact, ExecutionContext context, CancellationToken cancellationToken)

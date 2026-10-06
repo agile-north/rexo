@@ -125,13 +125,15 @@ rx init --with-policy --policy dotnet
 ```bash
 rx list                      # list all available commands (config + policy + built-ins)
 rx explain <command>         # show description, args, options, and steps
+rx graph <command>           # inspect effective steps as text, JSON, or Mermaid
+rx completion <shell>        # generate bash, zsh, fish, or PowerShell command completions
 rx config sources            # show which config files were loaded
 rx config resolved           # show the final merged config as JSON
 rx doctor                    # check tool and provider availability
+rx check [--strict]          # inspect config/tool readiness; warnings fail only with --strict
 rx secrets doctor            # validate configured secret resolution safely
 ```
 
-
-
-
+`rx check` does not build, publish, deploy, or resolve secret values. Use `rx secrets preflight`
+when you need to verify that required secret providers can currently resolve their values.
 

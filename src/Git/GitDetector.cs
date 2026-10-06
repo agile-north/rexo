@@ -12,7 +12,7 @@ public static class GitDetector
         var shortSha = await RunGitAsync("rev-parse --short HEAD", workingDirectory, cancellationToken);
         var remoteUrl = await RunGitAsync("remote get-url origin", workingDirectory, cancellationToken);
         var statusOutput = await RunGitAsync("status --porcelain", workingDirectory, cancellationToken);
-        var isClean = string.IsNullOrWhiteSpace(statusOutput);
+        var isClean = statusOutput is not null && string.IsNullOrWhiteSpace(statusOutput);
 
         return new GitInfo(
             Branch: branch?.Trim(),

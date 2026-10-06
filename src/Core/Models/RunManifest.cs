@@ -32,8 +32,11 @@ public sealed record RunManifest
     public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> Errors { get; init; } = Array.Empty<string>();
 
-    /// <summary>SHA-256 hash of the resolved rexo config content at run time.</summary>
+    /// <summary>Deterministic SHA-256 hash of the effective, secret-redacted rexo configuration.</summary>
     public string? ConfigHash { get; init; }
+
+    /// <summary>SHA-256 of the verified local policy lockfile, when one is present.</summary>
+    public string? PolicyLockHash { get; init; }
 
     /// <summary>Assembly version derived from the resolved version.</summary>
     public string? AssemblyVersion { get; init; }
@@ -68,6 +71,12 @@ public sealed record StepManifestEntry(
     /// <summary>Working directory used inside the container when applicable.</summary>
     public string? ContainerWorkingDirectory { get; init; }
 
+    /// <summary>Configured policy for falling back from the requested container runtime.</summary>
+    public string? ContainerFallbackPolicy { get; init; }
+
+    /// <summary>True when the configured policy explicitly permits host fallback.</summary>
+    public bool? ContainerFallbackAllowed { get; init; }
+
     /// <summary>True when container execution was requested but native execution was used instead.</summary>
     public bool? ContainerFallbackUsed { get; init; }
 
@@ -80,11 +89,17 @@ public sealed record ArtifactManifestEntry(
     string Name,
     bool Built,
     bool Pushed,
-    IReadOnlyList<string> Tags);
+    IReadOnlyList<string> Tags)
+{
+    /// <summary>SHA-256 of a locally produced file when its bytes are available.</summary>
+    public string? ContentSha256 { get; init; }
+
+    /// <summary>Provider-reported build output location, when available.</summary>
+    public string? Location { get; init; }
+}
 
 /// <summary>Records why an artifact push was allowed or denied.</summary>
 public sealed record PushDecision(
     string ArtifactName,
     bool Allowed,
     string Reason);
-

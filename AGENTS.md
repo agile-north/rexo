@@ -256,10 +256,25 @@ IPolicySource             // LoadAsync(root, ct)
 
 ---
 
-## What Is Not Yet Implemented
+## Current Roadmap Status
 
-See `docs/todo.md` for the full checklist. The implementation is feature-complete per `docs/scope.md`.
-No known gaps remain at this time.
+`docs/scope.md` and the historical checklist in `docs/todo.md` describe the broad product scope,
+not a claim that every production-hardening item is finished. Current behavior and limits are
+documented in the relevant configuration, artifact, and output-contract pages. In particular,
+`rx promote` currently supports only one SHA-256-verified local file artifact; it does not deploy
+remotely or promote registry tags, and run manifests do not yet generate SBOMs or signed
+attestations. `rx config explain` lists repository config files declaring a property, but policy
+source files remain grouped and repository attribution does not resolve field-level merge behavior.
+NuGet push masks API keys in Rexo output,
+but `dotnet nuget push` still receives the key as a process argument.
+
+Do not infer completion from older counts or checklist entries. Run the current Release build and
+all tests before handing off changes:
+
+```powershell
+dotnet build solution.slnx -c Release
+dotnet test solution.slnx -c Release --no-build
+```
 
 ---
 
@@ -289,4 +304,3 @@ No known gaps remain at this time.
 | Template rendering | `src/Templating/TemplateRenderer.cs` |
 | Version resolution | `src/Versioning/` |
 | Artifact build/push | `src/Artifacts.Docker/`, `src/Artifacts.NuGet/` |
-

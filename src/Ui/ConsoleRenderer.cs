@@ -5,6 +5,22 @@ using Rexo.Core.Models;
 
 public static class ConsoleRenderer
 {
+    public static void ConfigureColors(bool? enabled)
+    {
+        var colorSystem = enabled switch
+        {
+            true => ColorSystemSupport.TrueColor,
+            false => ColorSystemSupport.NoColors,
+            null when !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NO_COLOR")) =>
+                ColorSystemSupport.NoColors,
+            _ => ColorSystemSupport.Detect,
+        };
+        AnsiConsole.Console = AnsiConsole.Create(new AnsiConsoleSettings
+        {
+            ColorSystem = colorSystem,
+        });
+    }
+
     public static void RenderCommandResult(CommandResult result)
     {
         if (result.Success)

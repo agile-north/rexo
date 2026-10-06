@@ -93,12 +93,13 @@ public sealed class StepExecutor : IStepExecutor
         var secrets = SecretMasker.CollectSecretValues(runtimeSecrets);
         var env = BuildNativeRunEnvironment(context);
         ShellRunResult shellResult;
-        var executionMetadata = new RunExecutionMetadata("native", "native", null, null, false, null);
+        var executionMetadata = new RunExecutionMetadata("native", "native", null, null, false, null, false, null);
         var debugEnabled = IsDebugEnabled(context);
 
         if (stepDefinition.Container is { Image.Length: > 0 } container)
         {
             var containerResult = await ExecuteContainerizedRunWithFallbackAsync(
+                stepId,
                 command,
                 container,
                 context,
@@ -110,7 +111,7 @@ public sealed class StepExecutor : IStepExecutor
         }
         else
         {
-            Console.WriteLine($"  > [native] {command}");
+            Console.WriteLine($"  > [native] {SecretMasker.Mask(command, secrets)}");
 
             shellResult = await ShellRunner.RunAsync(
                 command,
@@ -136,6 +137,8 @@ public sealed class StepExecutor : IStepExecutor
             ["__requestedExecutionMode"] = executionMetadata.RequestedExecutionMode,
             ["__containerImage"] = executionMetadata.ContainerImage,
             ["__containerWorkingDirectory"] = executionMetadata.ContainerWorkingDirectory,
+            ["__containerFallbackPolicy"] = executionMetadata.FallbackPolicy,
+            ["__containerFallbackAllowed"] = executionMetadata.FallbackAllowed,
             ["__containerFallbackUsed"] = executionMetadata.FallbackUsed,
             ["__containerFallbackReason"] = executionMetadata.FallbackReason,
         };
@@ -186,6 +189,7 @@ public sealed class StepExecutor : IStepExecutor
     }
 
     private static async Task<ContainerRunResult> ExecuteContainerizedRunWithFallbackAsync(
+        string stepId,
         string command,
         StepContainerDefinition container,
         ExecutionContext context,
@@ -198,7 +202,7 @@ public sealed class StepExecutor : IStepExecutor
             : container.WorkingDirectory;
 
         Console.WriteLine($"  > [container] image={container.Image} workdir={containerWorkingDirectory} mount=/work");
-        Console.WriteLine($"  > [container:{container.Image}] {command}");
+        Console.WriteLine($"  > [container:{container.Image}] {SecretMasker.Mask(command, secrets)}");
 
         try
         {
@@ -211,6 +215,20 @@ public sealed class StepExecutor : IStepExecutor
 
             if (prepareResult is not null)
             {
+                if (IsDockerRuntimeUnavailable(prepareResult.Stderr))
+                {
+                    return await HandleContainerRuntimeUnavailableAsync(
+                        stepId,
+                        command,
+                        container,
+                        context,
+                        secrets,
+                        containerWorkingDirectory,
+                        "docker-daemon-unavailable",
+                        prepareResult.Stderr,
+                        cancellationToken);
+                }
+
                 return new ContainerRunResult(
                     prepareResult,
                     new RunExecutionMetadata(
@@ -218,6 +236,8 @@ public sealed class StepExecutor : IStepExecutor
                         "container",
                         container.Image,
                         containerWorkingDirectory,
+                        container.Fallback == "host",
+                        container.Fallback,
                         false,
                         "container-image-prepare-failed"));
             }
@@ -226,7 +246,7 @@ public sealed class StepExecutor : IStepExecutor
             var dockerArgs = BuildContainerRunArgs(command, container, context, containerEnvironment);
             if (debugEnabled)
             {
-                Console.WriteLine($"[debug] Container invocation: docker {string.Join(" ", dockerArgs.Select(QuoteForDebug))}");
+                Console.WriteLine($"[debug] Container invocation: docker {string.Join(" ", dockerArgs.Select(arg => QuoteForDebug(SecretMasker.Mask(arg, secrets))))}");
                 Console.WriteLine($"[debug] Container env materialization: host+file+runtime+container.env (effective={containerEnvironment.Count}, file={context.FileEnvironment.Count}, containerOverrides={(container.Env?.Count ?? 0)})");
             }
 
@@ -237,6 +257,20 @@ public sealed class StepExecutor : IStepExecutor
                 onStdout: line => Console.WriteLine($"    {SecretMasker.Mask(line, secrets)}"),
                 cancellationToken: cancellationToken);
 
+            if (result.ExitCode != 0 && IsDockerRuntimeUnavailable(result.Stderr))
+            {
+                return await HandleContainerRuntimeUnavailableAsync(
+                    stepId,
+                    command,
+                    container,
+                    context,
+                    secrets,
+                    containerWorkingDirectory,
+                    "docker-daemon-unavailable",
+                    result.Stderr,
+                    cancellationToken);
+            }
+
             return new ContainerRunResult(
                 result,
                 new RunExecutionMetadata(
@@ -244,31 +278,92 @@ public sealed class StepExecutor : IStepExecutor
                     "container",
                     container.Image,
                     containerWorkingDirectory,
+                    container.Fallback == "host",
+                    container.Fallback,
                     false,
                     null));
         }
         catch (FileNotFoundException)
         {
-            Console.WriteLine("  ! [container] Docker runtime not found; falling back to native execution.");
-            Console.WriteLine($"  > [native:fallback] {command}");
-            var env = BuildNativeRunEnvironment(context);
-            var fallbackResult = await ShellRunner.RunAsync(
+            return await HandleContainerRuntimeUnavailableAsync(
+                stepId,
                 command,
-                context.RepositoryRoot,
-                environment: env,
-                onStdout: line => Console.WriteLine($"    {SecretMasker.Mask(line, secrets)}"),
-                cancellationToken: cancellationToken);
+                container,
+                context,
+                secrets,
+                containerWorkingDirectory,
+                "docker-not-found",
+                "Docker executable was not found.",
+                cancellationToken);
+        }
+    }
 
+    private static async Task<ContainerRunResult> HandleContainerRuntimeUnavailableAsync(
+        string stepId,
+        string command,
+        StepContainerDefinition container,
+        ExecutionContext context,
+        IReadOnlySet<string> secrets,
+        string containerWorkingDirectory,
+        string reason,
+        string runtimeError,
+        CancellationToken cancellationToken)
+    {
+        Console.Error.WriteLine("[container] Docker runtime unavailable.");
+        Console.Error.WriteLine($"[container] fallback policy: {container.Fallback}");
+        if (container.Fallback != "host")
+        {
+            var message =
+                $"Container execution is required for step '{stepId}' (image '{container.Image}'). " +
+                $"{SecretMasker.Mask(runtimeError, secrets)} " +
+                "Install or start Docker, or explicitly set fallback: host.";
+            Console.Error.WriteLine($"[error] {message}");
             return new ContainerRunResult(
-                fallbackResult,
+                new ShellRunResult(127, string.Empty, message),
                 new RunExecutionMetadata(
-                    "native",
+                    "container",
                     "container",
                     container.Image,
                     containerWorkingDirectory,
-                    true,
-                    "docker-not-found"));
+                    false,
+                    container.Fallback,
+                    false,
+                    reason));
         }
+
+        Console.WriteLine($"  > [native:fallback] {SecretMasker.Mask(command, secrets)}");
+        var env = BuildNativeRunEnvironment(context);
+        var fallbackResult = await ShellRunner.RunAsync(
+            command,
+            context.RepositoryRoot,
+            environment: env,
+            onStdout: line => Console.WriteLine($"    {SecretMasker.Mask(line, secrets)}"),
+            cancellationToken: cancellationToken);
+
+        return new ContainerRunResult(
+            fallbackResult,
+            new RunExecutionMetadata(
+                "native",
+                "container",
+                container.Image,
+                containerWorkingDirectory,
+                true,
+                container.Fallback,
+                true,
+                reason));
+    }
+
+    private static bool IsDockerRuntimeUnavailable(string? error)
+    {
+        if (string.IsNullOrWhiteSpace(error))
+        {
+            return false;
+        }
+
+        return error.StartsWith("Cannot connect to the Docker daemon", StringComparison.OrdinalIgnoreCase)
+            || error.StartsWith("error during connect:", StringComparison.OrdinalIgnoreCase)
+            || (error.Contains("docker_engine", StringComparison.OrdinalIgnoreCase)
+                && error.Contains("The system cannot find the file specified", StringComparison.OrdinalIgnoreCase));
     }
 
     private static IReadOnlyList<string> BuildContainerRunArgs(
@@ -370,7 +465,7 @@ public sealed class StepExecutor : IStepExecutor
 
         if (debugEnabled)
         {
-            Console.WriteLine($"[debug] Container image inspect: docker {string.Join(" ", inspectArgs.Select(QuoteForDebug))}");
+            Console.WriteLine($"[debug] Container image inspect: docker {string.Join(" ", inspectArgs.Select(arg => QuoteForDebug(SecretMasker.Mask(arg, secrets))))}");
         }
 
         var inspectResult = await ShellRunner.RunProcessAsync(
@@ -429,7 +524,7 @@ public sealed class StepExecutor : IStepExecutor
 
         if (debugEnabled)
         {
-            Console.WriteLine($"[debug] Container image build: docker {string.Join(" ", buildArgs.Select(QuoteForDebug))}");
+            Console.WriteLine($"[debug] Container image build: docker {string.Join(" ", buildArgs.Select(arg => QuoteForDebug(SecretMasker.Mask(arg, secrets))))}");
         }
 
         var buildResult = await ShellRunner.RunProcessAsync(
@@ -633,7 +728,24 @@ public sealed class StepExecutor : IStepExecutor
             {
                 foreach (var artifact in stepArtifacts)
                 {
-                    artifacts.Add(artifact);
+                    var existingIndex = artifacts.FindIndex(existing =>
+                        existing.Type.Equals(artifact.Type, StringComparison.OrdinalIgnoreCase) &&
+                        existing.Name.Equals(artifact.Name, StringComparison.OrdinalIgnoreCase));
+                    if (existingIndex < 0)
+                    {
+                        artifacts.Add(artifact);
+                        continue;
+                    }
+
+                    var existing = artifacts[existingIndex];
+                    artifacts[existingIndex] = existing with
+                    {
+                        Built = existing.Built || artifact.Built,
+                        Pushed = existing.Pushed || artifact.Pushed,
+                        Tags = artifact.Tags.Count > 0 ? artifact.Tags : existing.Tags,
+                        ContentSha256 = artifact.ContentSha256 ?? existing.ContentSha256,
+                        Location = artifact.Location ?? existing.Location,
+                    };
                 }
             }
         }
@@ -912,6 +1024,8 @@ public sealed class StepExecutor : IStepExecutor
         string RequestedExecutionMode,
         string? ContainerImage,
         string? ContainerWorkingDirectory,
+        bool FallbackAllowed,
+        string? FallbackPolicy,
         bool FallbackUsed,
         string? FallbackReason);
 }

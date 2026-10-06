@@ -118,13 +118,30 @@ These are available in both native and container-wrapped run steps.
 
 ## Fallback Semantics
 
-If Docker is unavailable on the host:
+Container execution is required when a step or command names a container. If Docker is unavailable,
+Rexo fails the step by default and does not run the command on the host:
 
-- Rexo logs a warning
-- Rexo executes the run step natively
-- Step output capture behavior remains unchanged
+```yaml
+steps:
+  - id: build
+    run: dotnet build
+    container: dotnet-sdk
+```
 
-This fallback is step-local. Other steps continue with their configured behavior.
+Host fallback must be explicitly enabled on the inline container spec or inherited registry
+definition:
+
+```yaml
+containers:
+  sdk:
+    image: mcr.microsoft.com/dotnet/sdk:10.0
+    fallback: host
+```
+
+Only `error` and `host` are supported. `error` is the default. `host` applies only when the
+Docker runtime is not found; it does not turn image-build or container-command failures into
+successful host executions. The existing `container: false` and `container: none` forms remain
+explicit ways to request host execution.
 
 ---
 
@@ -137,6 +154,7 @@ Normal output includes:
 - container intent line (image, in-container working directory, mount root)
 - container command line marker
 - explicit native fallback marker when Docker is unavailable
+- the configured fallback policy and whether host fallback was permitted
 
 Example markers:
 
@@ -153,6 +171,8 @@ Run manifests include per-step execution metadata:
 - `requestedExecutionMode`
 - `containerImage`
 - `containerWorkingDirectory`
+- `containerFallbackPolicy`
+- `containerFallbackAllowed`
 - `containerFallbackUsed`
 - `containerFallbackReason`
 

@@ -581,6 +581,92 @@ public sealed class StepExecutorWhenConditionTests
     }
 
     [Fact]
+    public async Task ContainerRunFailsClosedWhenDockerIsMissing()
+    {
+        await ContainerEnvMutationGate.WaitAsync();
+        var originalDockerCommand = Environment.GetEnvironmentVariable("REXO_DOCKER_COMMAND");
+        var repositoryRoot = Path.Combine(Path.GetTempPath(), $"rexo-missing-docker-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(repositoryRoot);
+
+        try
+        {
+            Environment.SetEnvironmentVariable(
+                "REXO_DOCKER_COMMAND",
+                Path.Combine(repositoryRoot, "missing-docker.exe"));
+            var step = new StepDefinition(
+                Id: "required-container",
+                Run: "echo must-not-run-on-host",
+                Uses: null,
+                Command: null,
+                When: null)
+            {
+                Container = new StepContainerDefinition("rexo/test:latest"),
+            };
+
+            var result = await CreateExecutor().ExecuteAsync(
+                step,
+                ExecutionContext.Empty(repositoryRoot),
+                CancellationToken.None);
+
+            Assert.False(result.Success);
+            Assert.Equal(127, result.ExitCode);
+            Assert.Contains("Container execution is required", result.Outputs["stderr"]?.ToString(), StringComparison.Ordinal);
+            Assert.DoesNotContain("must-not-run-on-host", result.Outputs["stdout"]?.ToString(), StringComparison.Ordinal);
+            Assert.Equal("error", result.Outputs["__containerFallbackPolicy"]);
+            Assert.Equal("False", result.Outputs["__containerFallbackAllowed"]?.ToString());
+            Assert.Equal("False", result.Outputs["__containerFallbackUsed"]?.ToString());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("REXO_DOCKER_COMMAND", originalDockerCommand);
+            if (Directory.Exists(repositoryRoot)) Directory.Delete(repositoryRoot, true);
+            ContainerEnvMutationGate.Release();
+        }
+    }
+
+    [Fact]
+    public async Task ContainerRunUsesHostOnlyWhenFallbackIsExplicitlyAllowed()
+    {
+        await ContainerEnvMutationGate.WaitAsync();
+        var originalDockerCommand = Environment.GetEnvironmentVariable("REXO_DOCKER_COMMAND");
+        var repositoryRoot = Path.Combine(Path.GetTempPath(), $"rexo-host-fallback-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(repositoryRoot);
+
+        try
+        {
+            Environment.SetEnvironmentVariable(
+                "REXO_DOCKER_COMMAND",
+                Path.Combine(repositoryRoot, "missing-docker.exe"));
+            var step = new StepDefinition(
+                Id: "host-fallback",
+                Run: "echo host-fallback-ran",
+                Uses: null,
+                Command: null,
+                When: null)
+            {
+                Container = new StepContainerDefinition("rexo/test:latest", Fallback: "host"),
+            };
+
+            var result = await CreateExecutor().ExecuteAsync(
+                step,
+                ExecutionContext.Empty(repositoryRoot),
+                CancellationToken.None);
+
+            Assert.True(result.Success);
+            Assert.Contains("host-fallback-ran", result.Outputs["stdout"]?.ToString(), StringComparison.Ordinal);
+            Assert.Equal("host", result.Outputs["__containerFallbackPolicy"]);
+            Assert.Equal("True", result.Outputs["__containerFallbackAllowed"]?.ToString());
+            Assert.Equal("True", result.Outputs["__containerFallbackUsed"]?.ToString());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("REXO_DOCKER_COMMAND", originalDockerCommand);
+            if (Directory.Exists(repositoryRoot)) Directory.Delete(repositoryRoot, true);
+            ContainerEnvMutationGate.Release();
+        }
+    }
+
+    [Fact]
     public async Task ContainerRunBuildsImageWhenMissingAndUsesConfiguredEntrypoint()
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))

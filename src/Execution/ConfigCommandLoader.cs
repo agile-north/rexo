@@ -2,6 +2,7 @@ namespace Rexo.Execution;
 
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Security.Cryptography;
 using Rexo.Ci;
 using Rexo.Configuration.Models;
 using Rexo.Core.Abstractions;
@@ -398,6 +399,7 @@ public sealed class ConfigCommandLoader
                 new Dictionary<string, object?> { ["message"] = emptyMessage });
         }
 
+        var manifestEntries = new List<Core.Models.ArtifactManifestEntry>();
         foreach (var artifactCfg in artifacts)
         {
             var provider = _artifactProviders.Resolve(artifactCfg.Type);
@@ -415,10 +417,53 @@ public sealed class ConfigCommandLoader
                 return new StepResult(stepId, false, 5, TimeSpan.Zero,
                     new Dictionary<string, object?> { ["error"] = $"Failed to build artifact '{artifactName}'." });
             }
+
+            var artifactLocation = result.Location;
+            var contentSha256 = artifactLocation is null
+                ? null
+                : await HashArtifactFileAsync(artifactLocation, ctx.RepositoryRoot, cancellationToken);
+            manifestEntries.Add(new Core.Models.ArtifactManifestEntry(
+                artifactCfg.Type,
+                ResolveArtifactName(artifactCfg, config),
+                Built: true,
+                Pushed: false,
+                Tags: Array.Empty<string>())
+            {
+                Location = artifactLocation,
+                ContentSha256 = contentSha256,
+            });
         }
 
         return new StepResult(stepId, true, 0, TimeSpan.Zero,
-            new Dictionary<string, object?> { ["message"] = successMessage });
+            new Dictionary<string, object?>
+            {
+                ["message"] = successMessage,
+                ["__artifacts"] = manifestEntries,
+            });
+    }
+
+    private static async Task<string?> HashArtifactFileAsync(
+        string path,
+        string repositoryRoot,
+        CancellationToken cancellationToken)
+    {
+        var resolvedPath = Path.IsPathRooted(path)
+            ? path
+            : Path.GetFullPath(Path.Combine(repositoryRoot, path));
+        if (!File.Exists(resolvedPath))
+        {
+            return null;
+        }
+
+        await using var stream = new FileStream(
+            resolvedPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: 81920,
+            useAsync: true);
+        var hash = await SHA256.HashDataAsync(stream, cancellationToken);
+        return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
     internal async Task<StepResult> TagArtifactsAsync(
@@ -856,7 +901,7 @@ public sealed class ConfigCommandLoader
         };
     }
 
-    private static IReadOnlyList<PlanCredentialCheck> GetCredentialChecks(
+    internal static IReadOnlyList<PlanCredentialCheck> GetCredentialChecks(
         RepoArtifactConfig artifact,
         string repositoryRoot,
         IReadOnlyDictionary<string, string> mappedSecretEnvironment)
@@ -1043,6 +1088,42 @@ public sealed class ConfigCommandLoader
         }
 
         return (canPush, skipReasons);
+    }
+
+    internal static IReadOnlyList<string> GetPushPolicyBlockers(
+        RepoConfig config,
+        RepoArtifactConfig artifact,
+        bool isPullRequest,
+        bool isCleanTree,
+        string? branch)
+    {
+        var policy = BuildEffectivePushPolicy(ParsePushPolicyRules(config), artifact.Settings);
+        var blockers = new List<string>();
+        if (!policy.Enabled)
+        {
+            blockers.Add("push disabled by policy");
+        }
+
+        if (policy.NoPushInPullRequest && isPullRequest)
+        {
+            blockers.Add("pull request context is blocked by policy");
+        }
+
+        if (policy.RequireCleanWorkingTree && !isCleanTree)
+        {
+            blockers.Add("working tree is not clean");
+        }
+
+        if (policy.Branches.Count > 0 &&
+            (string.IsNullOrWhiteSpace(branch) ||
+             !policy.Branches.Any(pattern => BranchMatches(pattern, branch))))
+        {
+            blockers.Add(string.IsNullOrWhiteSpace(branch)
+                ? "branch is unknown but policy requires an allowed branch"
+                : $"branch '{branch}' is not allowed by policy");
+        }
+
+        return blockers;
     }
 
     private static ArtifactConfig ToArtifactConfig(RepoArtifactConfig artifactCfg, RepoConfig config, string outputRoot)
@@ -1496,7 +1577,7 @@ public sealed class ConfigCommandLoader
         string Decision,
         IReadOnlyList<string> SkipReasons);
 
-    private sealed record PlanCredentialCheck(
+    internal sealed record PlanCredentialCheck(
         bool Available,
         string Detail);
 
@@ -1845,7 +1926,8 @@ public sealed class ConfigCommandLoader
                 ? null
                 : new Core.Models.StepContainerBuildDefinition(
                     container.Build.Target is null ? null : templateRenderer.Render(container.Build.Target, context),
-                    RenderStringDictionary(container.Build.Args, context, templateRenderer)));
+                    RenderStringDictionary(container.Build.Args, context, templateRenderer)),
+            container.Fallback is null ? "error" : templateRenderer.Render(container.Fallback, context));
 
     private static IReadOnlyDictionary<string, string>? RenderStringDictionary(
         IReadOnlyDictionary<string, string>? source,

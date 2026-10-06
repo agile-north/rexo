@@ -70,7 +70,19 @@ public static class ContainerResolver
                 "Resolved container has no image. Specify an image or use 'none' to run on the host.");
         }
 
-        return resolved;
+        if (resolved is null)
+        {
+            return null;
+        }
+
+        var fallback = renderName(resolved.Fallback ?? "error").Trim().ToLowerInvariant();
+        if (fallback is not ("error" or "host"))
+        {
+            throw new InvalidOperationException(
+                $"Invalid container fallback policy '{fallback}'. Supported values are 'error' and 'host'.");
+        }
+
+        return resolved with { Fallback = fallback };
     }
 
     /// <summary>Layers <paramref name="override"/> on top of <paramref name="base"/> field by field (env and build args merge).</summary>
@@ -90,6 +102,7 @@ public static class ContainerResolver
         {
             Use = @override.Use ?? @base.Use,
             Extends = @override.Extends ?? @base.Extends,
+            Fallback = @override.Fallback ?? @base.Fallback,
         };
     }
 

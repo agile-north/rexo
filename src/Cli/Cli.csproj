@@ -51,8 +51,7 @@
     Replaces __REXO_DOC_TAG__ with the resolved doc tag and writes the generated file.
   -->
   <Target Name="GeneratePackagedMarkdown"
-          BeforeTargets="GenerateNuspec"
-          Outputs="%(PackagedMarkdownTemplate.GeneratedFile)">
+          BeforeTargets="GenerateNuspec">
     <ReadLinesFromFile File="%(PackagedMarkdownTemplate.Identity)">
       <Output TaskParameter="Lines" ItemName="_MdTemplateLines" />
     </ReadLinesFromFile>

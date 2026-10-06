@@ -31,7 +31,7 @@ public sealed class InitCommandTests
 
             var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
 
-            Assert.True(result.Success, result.Message);
+            Assert.True(result.Success, result.Message ?? string.Empty);
             var configPath = Path.Join(dir, ".rexo", "rexo.yaml");
             var policyPath = Path.Join(dir, ".rexo", "policy.yaml");
             Assert.True(File.Exists(configPath));
@@ -95,7 +95,7 @@ public sealed class InitCommandTests
                 WorkingDirectory: dir);
 
             var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
-            Assert.True(result.Success, result.Message);
+            Assert.True(result.Success, result.Message ?? string.Empty);
 
             var configPath = Rexo.Configuration.ConfigFileLocator.FindConfigPath(dir);
             var policyPath = Rexo.Configuration.ConfigFileLocator.FindPolicyPath(dir);
@@ -205,6 +205,57 @@ public sealed class InitCommandTests
 
             Assert.False(result.Success);
             Assert.Contains("already exists", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task InitForceRemovesOnlySupersededDotRexoVariants()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-force-variants-{Guid.NewGuid():N}");
+        var rexoDir = Path.Combine(dir, ".rexo");
+        Directory.CreateDirectory(rexoDir);
+
+        try
+        {
+            var rootConfig = Path.Combine(dir, "rexo.json");
+            await File.WriteAllTextAsync(Path.Combine(rexoDir, "rexo.json"), "old-json-config");
+            await File.WriteAllTextAsync(Path.Combine(rexoDir, "rexo.yml"), "old-yaml-config");
+            await File.WriteAllTextAsync(Path.Combine(rexoDir, "policy.json"), "old-json-policy");
+            await File.WriteAllTextAsync(Path.Combine(rexoDir, "policy.yml"), "old-yaml-policy");
+            await File.WriteAllTextAsync(rootConfig, "preserve-root-config");
+
+            var executor = new DefaultCommandExecutor(BuiltinCommandRegistration.CreateDefault());
+            var invocation = new CommandInvocation(
+                new Dictionary<string, string>(),
+                new Dictionary<string, string?>
+                {
+                    ["yes"] = "true",
+                    ["force"] = "true",
+                    ["format"] = "yaml",
+                    ["with-policy"] = "true",
+                    ["policy"] = "standard",
+                },
+                Json: false,
+                JsonFile: null,
+                WorkingDirectory: dir);
+
+            var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
+
+            Assert.True(result.Success, result.Message);
+            Assert.True(File.Exists(Path.Combine(rexoDir, "rexo.yaml")));
+            Assert.True(File.Exists(Path.Combine(rexoDir, "policy.yaml")));
+            Assert.False(File.Exists(Path.Combine(rexoDir, "rexo.json")));
+            Assert.False(File.Exists(Path.Combine(rexoDir, "rexo.yml")));
+            Assert.False(File.Exists(Path.Combine(rexoDir, "policy.json")));
+            Assert.False(File.Exists(Path.Combine(rexoDir, "policy.yml")));
+            Assert.Equal("preserve-root-config", await File.ReadAllTextAsync(rootConfig));
+            Assert.Contains($"Removed superseded config: {Path.Combine(".rexo", "rexo.json")}", result.Message ?? string.Empty, StringComparison.Ordinal);
+            Assert.Contains($"Removed superseded config: {Path.Combine(".rexo", "policy.json")}", result.Message ?? string.Empty, StringComparison.Ordinal);
+            Assert.Contains("Preserved out-of-slot config candidate: rexo.json", result.Message ?? string.Empty, StringComparison.Ordinal);
         }
         finally
         {
@@ -941,6 +992,70 @@ public sealed class InitCommandTests
             Assert.Contains("  displayName: Restore tools", azdoYaml, StringComparison.Ordinal);
             Assert.True(azdoRoot.Children.ContainsKey(new YamlScalarNode("trigger")));
             Assert.True(azdoRoot.Children.ContainsKey(new YamlScalarNode("steps")));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task InitCiDryRunDoesNotWriteFiles()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-ci-dry-run-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+
+        try
+        {
+            var executor = new DefaultCommandExecutor(BuiltinCommandRegistration.CreateDefault());
+            var invocation = new CommandInvocation(
+                new Dictionary<string, string>(),
+                new Dictionary<string, string?>
+                {
+                    ["mode"] = "ci",
+                    ["dry-run"] = "true",
+                },
+                Json: false,
+                JsonFile: null,
+                WorkingDirectory: dir);
+
+            var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
+
+            Assert.True(result.Success);
+            Assert.Contains("Dry run: would initialize", result.Message, StringComparison.Ordinal);
+            Assert.False(Directory.Exists(Path.Combine(dir, ".github")));
+            Assert.False(Directory.Exists(Path.Combine(dir, ".azuredevops")));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task InitCiChecksAllTargetsBeforeWritingAnyFile()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-ci-conflict-{Guid.NewGuid():N}");
+        var azdoDirectory = Path.Combine(dir, ".azuredevops");
+        Directory.CreateDirectory(azdoDirectory);
+        var azdoPath = Path.Combine(azdoDirectory, "rexo-release.yml");
+        await File.WriteAllTextAsync(azdoPath, "existing");
+
+        try
+        {
+            var executor = new DefaultCommandExecutor(BuiltinCommandRegistration.CreateDefault());
+            var invocation = new CommandInvocation(
+                new Dictionary<string, string>(),
+                new Dictionary<string, string?> { ["mode"] = "ci", ["provider"] = "both" },
+                Json: false,
+                JsonFile: null,
+                WorkingDirectory: dir);
+
+            var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
+
+            Assert.False(result.Success);
+            Assert.False(Directory.Exists(Path.Combine(dir, ".github")));
+            Assert.Equal("existing", await File.ReadAllTextAsync(azdoPath));
         }
         finally
         {

@@ -32,6 +32,87 @@ Policy files use the same order: `.rexo/policy.*`, root `policy.*`, then `.repo/
 If more than one candidate exists, Rexo uses the first match and prints a warning naming the
 ignored files (also reported by `rx doctor` as `config-duplicates`).
 
+Use `rx config explain <property.path>` to inspect a value from the effective merged
+configuration. Sensitive property names and nested credentials are redacted. Its JSON output
+identifies applicable merged policy, repository config files that declare the property (including
+resolved local `extends` and overlays), and CLI `--set` layers in precedence order. Policy source
+files remain grouped; the repository file list identifies declarations rather than resolving
+field-level merge behavior.
+
+Use `rx config resolved --provenance` to emit the effective configuration with sensitive values
+redacted alongside repository config files, the merged policy group, and CLI `--set` property paths
+(override values are omitted). Repository file paths indicate declarations rather than exact
+field-level merge ownership.
+
+## Remote policy lockfile
+
+Policy sources declared in `policySources` or `REXO_POLICY_SOURCES` can be content-locked in
+`.rexo/rexo.lock.yaml`:
+
+```bash
+rx update   # resolve configured sources and write source SHA-256 entries
+rx restore  # require and verify a lock entry for each configured source
+```
+
+The lockfile records source references and content hashes only; URLs containing embedded
+user information are rejected. When a lockfile exists, matching sources must retain their locked
+content. Unlocked sources remain allowed for ordinary commands in existing repositories unless
+strict locking is enabled with `REXO_POLICY_REQUIRE_LOCKED=true`; `rx restore` always requires
+complete lock coverage. It never updates the lockfile; `rx update` deliberately refreshes it.
+A source-resolution or hash error fails loading rather
+than silently dropping that policy. Network cache fallback is reported and locked HTTP content is
+still hash-checked.
+
+`rx check` reports whether a policy lockfile is present and warns when configured sources are not
+locked (or fails in strict-lock mode). `rx doctor` reports the CLI/config schema identity and
+whether a local policy and policy lockfile are present.
+`rx check` validates configured artifact source paths and provider availability, including automatic
+version-provider detection and direct environment-backed version inputs, without printing values.
+It does not resolve configured secret providers or contact artifact registries. Credential preflight
+reports direct process/environment-file presence only; warnings may not account for provider-backed
+secrets. Use `rx plan --push` when the configured lifecycle provides it to inspect policy and
+credential eligibility without publishing.
+
+## Local artifact promotion
+
+Named environments currently identify repository-relative local artifact directories:
+
+```yaml
+environments:
+  staging:
+    path: deployments/staging
+```
+
+Run a build with `--json-file` to create its sidecar manifest, then promote its single verified
+file artifact with `rx promote <run-manifest.json> staging`. Promotion verifies the recorded
+SHA-256 and copies the same bytes into an immutable content-addressed directory; it never rebuilds.
+`--dry-run` validates the source and reports the destination without writing files. This initial
+contract supports one local file artifact at a time; providers that only report remote references
+(such as container image tags) are rejected rather than treated as immutable identities. A JSON
+record is written beside the promoted object with the source commit, version, config hash, lockfile
+hash, target environment, and timestamp. This is local file promotion, not a remote deploy workflow.
+
+## CLI workflow and safety
+
+- `rx doctor` performs lightweight runtime/tool availability checks. `rx check [--strict]` inspects
+  the effective repository configuration without building, publishing, deploying, resolving configured
+  secret providers, or contacting artifact registries. It reports direct credential presence only,
+  never values. Errors fail the check; warnings fail only in strict mode.
+- `rx graph <command> [--format text|json|mermaid]` displays the effective configured steps without
+  printing shell command bodies. `rx completion bash|zsh|fish|powershell` prints a basic completion
+  script for the selected shell.
+- `rx config explain <property.path>` displays an effective value with sensitive values redacted and
+  reports applicable policy, repository files declaring the property (including local `extends`
+  and overlays), and CLI `--set` source layers. Policy source files remain grouped.
+- `NO_COLOR` disables color by default; `--no-color` and `--color` override it. `--non-interactive`
+  disables prompts and prevents opening `rx ui`.
+- `rx update` refreshes `.rexo/rexo.lock.yaml`; `rx restore` verifies every configured remote policy
+  source against it without updating the lock. `REXO_POLICY_REQUIRE_LOCKED=true` requires lock
+  coverage during ordinary commands.
+- `rx promote <run-manifest.json> <environment>` copies exactly one local file artifact after
+  verifying its recorded SHA-256. `--dry-run` performs validation without writing promotion files.
+  This does not deploy to a remote environment or promote a mutable registry tag.
+
 ---
 
 ## Schema Contract (required)
@@ -325,4 +406,3 @@ Detailed reference for each config section:
 - [Secrets](secrets.md) — Configure first-class secret providers and named secret items
 - [Runtime](runtime.md) — Configure output, push policy, tests, and analysis settings
 - [Template Variables](templates.md) — Use dynamic variables in step commands
-

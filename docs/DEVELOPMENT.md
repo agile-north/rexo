@@ -9,11 +9,32 @@
 
 ```bash
 git clone <repo-url>
-cd repoOS
+cd rexo
 dotnet restore
 dotnet build solution.slnx -c Release
 dotnet test solution.slnx -c Release
 ```
+
+## Repository release workflow
+
+The repository release workflow publishes a temporary bootstrap CLI from the checked-out source tree
+to an isolated output directory, then runs the repository's `.rexo/rexo.yaml` release command. The
+separate bootstrap path lets that command rebuild the CLI on Windows without locking its build
+outputs. It does not install an older published Rexo tool to build the current source.
+
+Configure at most one publishing mode:
+
+- Set the `NUGET_ORG_USER` Actions secret to use NuGet.org trusted publishing through OIDC.
+- Otherwise, set the `PUBLISH_TO_GITHUB_PACKAGES` Actions variable to `true` to publish through
+  GitHub Packages using `GITHUB_TOKEN`.
+- If neither is configured, Rexo still builds, tests, and packs the CLI, but the workflow skips
+  package publishing, tagging, schema-branch publication, and GitHub Release creation.
+  If both modes are configured, the workflow fails before publishing.
+
+The self-hosted version comes from GitVersion and is passed to the local CLI as
+`GITVERSION_SEMVER`. Never add publishing credentials to repository configuration. NuGet push
+output masks API keys, but `dotnet nuget push` receives them as process arguments; use a dedicated
+CI identity and avoid sharing the runner with untrusted processes.
 
 ## Build rules
 
@@ -23,7 +44,8 @@ The build is strict:
 - `AnalysisLevel=latest-recommended` — Roslyn CA rules enforced
 - `GenerateDocumentationFile=true` for all `src/` projects (CS1591 suppressed)
 
-Run this before every commit:
+The integration suite also checks that repository-local Markdown links resolve. Run this before
+every commit:
 
 ```bash
 dotnet build solution.slnx -c Release && dotnet test solution.slnx -c Release --no-build

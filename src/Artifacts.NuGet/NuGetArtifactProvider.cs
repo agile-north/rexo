@@ -42,6 +42,7 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
         Console.WriteLine($"  > dotnet {args}");
 
         var result = await _runDotnetAsync(args, context.RepositoryRoot, cancellationToken);
+        WriteToolOutput(result.Output);
 
         return new ArtifactBuildResult(
             Name: artifact.Name,
@@ -88,9 +89,10 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
                 args += $" --api-key {auth.Secret}";
             }
 
-            Console.WriteLine($"  > dotnet {args}");
+            Console.WriteLine($"  > dotnet {MaskSecret(args, auth.Secret)}");
 
             var result = await _runDotnetAsync(args, context.RepositoryRoot, cancellationToken);
+            WriteToolOutput(result.Output, auth.Secret);
             if (result.ExitCode != 0)
             {
                 return new ArtifactPushResult(artifact.Name, false, Array.Empty<string>());
@@ -122,9 +124,10 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
                 symbolArgs += $" --api-key {symbolAuth.Secret}";
             }
 
-            Console.WriteLine($"  > dotnet {symbolArgs}");
+            Console.WriteLine($"  > dotnet {MaskSecret(symbolArgs, symbolAuth.Secret)}");
 
             var symbolResult = await _runDotnetAsync(symbolArgs, context.RepositoryRoot, cancellationToken);
+            WriteToolOutput(symbolResult.Output, auth.Secret, symbolAuth.Secret);
             if (symbolResult.ExitCode != 0)
             {
                 return new ArtifactPushResult(artifact.Name, false, Array.Empty<string>());
@@ -334,11 +337,29 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
         var stdout = await stdoutTask;
         var stderr = await stderrTask;
 
-        if (!string.IsNullOrWhiteSpace(stdout)) Console.WriteLine(stdout);
-        if (!string.IsNullOrWhiteSpace(stderr)) Console.Error.WriteLine(stderr);
-
         return (process.ExitCode, stdout + stderr);
     }
+
+    private static void WriteToolOutput(string output, params string?[] secrets)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            return;
+        }
+
+        var maskedOutput = output;
+        foreach (var secret in secrets.Where(secret => !string.IsNullOrEmpty(secret)))
+        {
+            maskedOutput = MaskSecret(maskedOutput, secret);
+        }
+
+        Console.WriteLine(maskedOutput);
+    }
+
+    private static string MaskSecret(string text, string? secret) =>
+        string.IsNullOrEmpty(secret)
+            ? text
+            : text.Replace(secret, "***", StringComparison.Ordinal);
 
     private static string ResolveSource(
         ArtifactConfig artifact,

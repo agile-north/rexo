@@ -349,6 +349,7 @@ public sealed partial class RepoConfigurationLoader
             PolicySources = MergeLists(@base.PolicySources, child.PolicySources, child.MergeStrategy),
             Versioning = child.Versioning ?? @base.Versioning,
             Artifacts = MergeLists(@base.Artifacts, child.Artifacts, child.MergeStrategy),
+            Environments = MergeDictionaries(@base.Environments, child.Environments),
             Runtime = child.Runtime ?? @base.Runtime,
             Outputs = MergeOutputsConfig(@base.Outputs, child.Outputs),
             Settings = DeepMergeJsonMaps(@base.Settings, child.Settings),

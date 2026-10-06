@@ -206,5 +206,93 @@ public sealed class ConfigBuilderTests
         Assert.Null(result.Commands);
         Assert.Null(result.Aliases);
     }
-}
 
+    [Fact]
+    public async Task LoadPoliciesFromSourcesAsyncFailsWhenConfiguredSourceCannotBeLoaded()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"rexo-policy-missing-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        var missingPolicy = Path.Combine(dir, "missing.policy.json");
+
+        try
+        {
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                PolicySourceLoader.LoadPoliciesFromSourcesAsync(
+                    [missingPolicy],
+                    dir,
+                    debug: false,
+                    CancellationToken.None));
+
+            Assert.Contains(missingPolicy, exception.Message, StringComparison.Ordinal);
+            Assert.Contains("Failed to load policy source", exception.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task PolicyLockfilePinsSourceContentAndUpdateRefreshesHash()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"rexo-policy-lock-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(dir, ".rexo"));
+        var policyPath = Path.Combine(dir, "team.policy.json");
+        const string policyTemplate =
+            """
+            {
+              "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/policy.schema.json",
+              "schemaVersion": "1.0",
+              "name": "team-policy",
+              "commands": {},
+              "aliases": {}
+            }
+            """;
+        await File.WriteAllTextAsync(policyPath, policyTemplate);
+
+        try
+        {
+            var lockPath = await PolicySourceLoader.UpdateLockfileAsync([policyPath], dir, CancellationToken.None);
+            Assert.Equal(Path.Combine(".rexo", "rexo.lock.yaml"), lockPath);
+            var lockfile = await PolicySourceLoader.ReadLockfileAsync(dir, CancellationToken.None);
+            Assert.NotNull(lockfile);
+            Assert.Single(lockfile!.Policies);
+            Assert.Equal(policyPath, lockfile.Policies[0].Source);
+            Assert.Equal(64, lockfile.Policies[0].Sha256.Length);
+
+            await PolicySourceLoader.LoadPoliciesFromSourcesAsync([policyPath], dir, debug: false, CancellationToken.None);
+            await File.WriteAllTextAsync(policyPath, policyTemplate.Replace("team-policy", "changed-policy", StringComparison.Ordinal));
+            var mismatch = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                PolicySourceLoader.LoadPoliciesFromSourcesAsync([policyPath], dir, debug: false, CancellationToken.None));
+            Assert.Contains("SHA-256 mismatch", mismatch.Message, StringComparison.Ordinal);
+
+            await PolicySourceLoader.UpdateLockfileAsync([policyPath], dir, CancellationToken.None);
+            await PolicySourceLoader.LoadPoliciesFromSourcesAsync([policyPath], dir, debug: false, CancellationToken.None);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    [Theory]
+    [InlineData("schemaVersion: \"1.0\"\npolicies: null\n", "must be an array")]
+    [InlineData("schemaVersion: \"1.0\"\npolicies:\n  - null\n", "non-empty source")]
+    public async Task PolicyLockfileRejectsMalformedEntries(string lockText, string expectedMessage)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"rexo-policy-lock-invalid-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Combine(dir, ".rexo"));
+        await File.WriteAllTextAsync(Path.Combine(dir, ".rexo", "rexo.lock.yaml"), lockText);
+
+        try
+        {
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                PolicySourceLoader.ReadLockfileAsync(dir, CancellationToken.None));
+            Assert.Contains(expectedMessage, exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+}

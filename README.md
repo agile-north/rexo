@@ -50,9 +50,17 @@ rx release --push
 
 These two `rx init` concepts are distinct:
 
-**`--stack`** — the technology stack of the repository. Tells the wizard what kind of project you have so it can scaffold an appropriate starter `rexo.json`. Valid values: `auto` (detect from disk), `dotnet`, `node`, `python`, `go`, `java`, `ruby`, `generic`, `blank`. The stack shapes the generated config — which artifact type to add, what project-specific convenience commands to include (`local build`, `local test`), and so on. The stack choice is a one-time scaffolding decision.
+**`--stack`** — the technology stack of the repository. Tells the wizard what kind of project you have so it can scaffold an appropriate starter `.rexo/rexo.yaml`. Valid values: `auto` (detect from disk), `dotnet`, `node`, `python`, `go`, `java`, `ruby`, `generic`, `blank`. The stack shapes the generated config — which artifact type to add, what project-specific convenience commands to include (`local build`, `local test`), and so on. The stack choice is a one-time scaffolding decision.
 
-**`--policy`** — which embedded lifecycle policy to adopt. When you pass `--with-policy`, a `.rexo/policy.json` file is written and referenced from `rexo.json` via `extends`. The policy provides the shared lifecycle commands (`build`, `test`, `verify`, `release`, `plan`, `push`, etc.). Available policies: `standard` (language-agnostic), `dotnet` (extends standard with .NET-specific steps). A project's stack and policy are independent: you can have a `node` stack with a `standard` policy, or a `dotnet` stack with no policy at all.
+**`--policy`** — which embedded lifecycle policy to adopt. When you pass `--with-policy`, a `.rexo/policy.yaml` file is written alongside `.rexo/rexo.yaml`. The policy provides the shared lifecycle commands (`build`, `test`, `verify`, `release`, `plan`, `push`, etc.). Available policies: `standard` (language-agnostic), `dotnet` (extends standard with .NET-specific steps). A project's stack and policy are independent: you can have a `node` stack with a `standard` policy, or a `dotnet` stack with no policy at all.
+
+## Config Format and Location
+
+Rexo config can be YAML or JSON — both are validated against the same JSON Schema and behave identically. `rx init` writes YAML to `.rexo/rexo.yaml` by default (`--format json` writes `.rexo/rexo.json`).
+
+Discovery order (first match wins): `.rexo/rexo.yaml`, `.rexo/rexo.yml`, `.rexo/rexo.json`, then the repo root (`rexo.yaml`, `rexo.yml`, `rexo.json`). Rexo warns if more than one exists.
+
+Generated YAML starts with a `# yaml-language-server: $schema=...` modeline, so editors such as VS Code (Red Hat YAML extension) and JetBrains IDEs provide completion, hover docs, and validation. See [Configuration Reference](docs/configuration/README.md#editor-intellisense).
 
 ## Goals
 

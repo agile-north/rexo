@@ -15,7 +15,7 @@ Configure how Rexo resolves semantic versions and selects version providers.
     "tagPrefix": "v",                 // for minver provider
     "minimumMajorMinor": "1.0",       // for minver provider
     "useDocker": "true",              // gitversion/nbgv/minver — enable Docker fallback (default true)
-    "dockerImage": "gittools/gitversion:6.0.0"  // override the Docker image for this provider
+    "dockerImage": "gittools/gitversion:6.0.0"  // override the Docker image for this provider; template expressions are rendered first
   }
 }
 ```
@@ -69,5 +69,5 @@ Disable Docker for a specific provider with:
 Override the Docker image:
 
 ```jsonc
-{ "versioning": { "provider": "gitversion", "settings": { "dockerImage": "gittools/gitversion:5.12.0" } } }
+{ "versioning": { "provider": "gitversion", "settings": { "dockerImage": "gittools/gitversion:{{args.channel}}" } } }
 ```

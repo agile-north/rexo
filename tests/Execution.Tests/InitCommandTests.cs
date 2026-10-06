@@ -7,6 +7,143 @@ using YamlDotNet.RepresentationModel;
 public sealed class InitCommandTests
 {
     [Fact]
+    public async Task InitCreatesYamlConfigInDotRexoByDefault()
+    {
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-yaml-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+
+        try
+        {
+            var registry = BuiltinCommandRegistration.CreateDefault();
+            var executor = new DefaultCommandExecutor(registry);
+
+            var invocation = new CommandInvocation(
+                new Dictionary<string, string>(),
+                new Dictionary<string, string?>
+                {
+                    ["yes"] = "true",
+                    ["with-policy"] = "true",
+                    ["policy"] = "dotnet",
+                },
+                Json: false,
+                JsonFile: null,
+                WorkingDirectory: dir);
+
+            var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
+
+            Assert.True(result.Success, result.Message);
+            var configPath = Path.Join(dir, ".rexo", "rexo.yaml");
+            var policyPath = Path.Join(dir, ".rexo", "policy.yaml");
+            Assert.True(File.Exists(configPath));
+            Assert.True(File.Exists(policyPath));
+            Assert.False(File.Exists(Path.Join(dir, ".rexo", "rexo.json")));
+            Assert.False(File.Exists(Path.Join(dir, ".rexo", "policy.json")));
+
+            var content = await File.ReadAllTextAsync(configPath);
+            Assert.StartsWith(
+                "# yaml-language-server: $schema=https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json\n",
+                content,
+                StringComparison.Ordinal);
+            Assert.Contains("$schema: https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json", content, StringComparison.Ordinal);
+            Assert.Contains("schemaVersion: \"1.0\"", content, StringComparison.Ordinal);
+
+            var policyContent = await File.ReadAllTextAsync(policyPath);
+            Assert.StartsWith("# yaml-language-server: $schema=", policyContent, StringComparison.Ordinal);
+
+            Assert.Equal(configPath, Rexo.Configuration.ConfigFileLocator.FindConfigPath(dir));
+            var config = await Rexo.Configuration.RepoConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
+            Assert.NotNull(config.Commands);
+            var policy = await Rexo.Configuration.RepoConfigurationLoader.LoadPolicyAsync(policyPath, CancellationToken.None);
+            Assert.NotNull(policy);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    [Theory]
+    [InlineData("dotnet", "yaml")]
+    [InlineData("dotnet", "json")]
+    [InlineData("node", "yaml")]
+    [InlineData("node", "json")]
+    [InlineData("python", "yaml")]
+    [InlineData("go", "yaml")]
+    [InlineData("java", "yaml")]
+    [InlineData("ruby", "yaml")]
+    [InlineData("generic", "yaml")]
+    [InlineData("generic", "json")]
+    public async Task InitTemplatesProduceConfigAndPolicyThatPassSchemaValidation(string stack, string format)
+    {
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-matrix-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+
+        try
+        {
+            var executor = new DefaultCommandExecutor(BuiltinCommandRegistration.CreateDefault());
+            var invocation = new CommandInvocation(
+                new Dictionary<string, string>(),
+                new Dictionary<string, string?>
+                {
+                    ["yes"] = "true",
+                    ["stack"] = stack,
+                    ["with-policy"] = "true",
+                    ["format"] = format,
+                },
+                Json: false,
+                JsonFile: null,
+                WorkingDirectory: dir);
+
+            var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
+            Assert.True(result.Success, result.Message);
+
+            var configPath = Rexo.Configuration.ConfigFileLocator.FindConfigPath(dir);
+            var policyPath = Rexo.Configuration.ConfigFileLocator.FindPolicyPath(dir);
+            Assert.Equal(Path.Join(dir, ".rexo", $"rexo.{format}"), configPath);
+            Assert.Equal(Path.Join(dir, ".rexo", $"policy.{format}"), policyPath);
+            Assert.Empty(Rexo.Configuration.ConfigFileLocator.GetShadowedFileWarnings(dir));
+
+            var config = await Rexo.Configuration.RepoConfigurationLoader.LoadAsync(configPath!, CancellationToken.None);
+            Assert.NotNull(config);
+            var policy = await Rexo.Configuration.RepoConfigurationLoader.LoadPolicyAsync(policyPath!, CancellationToken.None);
+            Assert.NotNull(policy);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    [Theory]
+    [InlineData("toml")]
+    [InlineData("yml")]
+    public async Task InitRejectsInvalidFormat(string format)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-format-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+
+        try
+        {
+            var executor = new DefaultCommandExecutor(BuiltinCommandRegistration.CreateDefault());
+            var invocation = new CommandInvocation(
+                new Dictionary<string, string>(),
+                new Dictionary<string, string?> { ["yes"] = "true", ["format"] = format },
+                Json: false,
+                JsonFile: null,
+                WorkingDirectory: dir);
+
+            var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
+
+            Assert.False(result.Success);
+            Assert.Contains("--format", result.Message ?? string.Empty, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
     public async Task InitCreatesConfigInDotRexoByDefaultWhenNonInteractive()
     {
         var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-{Guid.NewGuid():N}");
@@ -19,7 +156,7 @@ public sealed class InitCommandTests
 
             var invocation = new CommandInvocation(
                 new Dictionary<string, string>(),
-                new Dictionary<string, string?> { ["yes"] = "true" },
+                new Dictionary<string, string?> { ["yes"] = "true", ["format"] = "json" },
                 Json: false,
                 JsonFile: null,
                 WorkingDirectory: dir);
@@ -59,7 +196,7 @@ public sealed class InitCommandTests
 
             var invocation = new CommandInvocation(
                 new Dictionary<string, string>(),
-                new Dictionary<string, string?> { ["yes"] = "true" },
+                new Dictionary<string, string?> { ["yes"] = "true", ["format"] = "json" },
                 Json: false,
                 JsonFile: null,
                 WorkingDirectory: dir);
@@ -91,6 +228,7 @@ public sealed class InitCommandTests
                 new Dictionary<string, string?>
                 {
                     ["yes"] = "true",
+                    ["format"] = "json",
                     ["with-policy"] = "true",
                     ["policy"] = "dotnet",
                 },
@@ -139,6 +277,7 @@ public sealed class InitCommandTests
                 new Dictionary<string, string?>
                 {
                     ["yes"] = "true",
+                    ["format"] = "json",
                     ["with-policy"] = "true",
                     ["policy"] = "standard",
                 },
@@ -176,6 +315,7 @@ public sealed class InitCommandTests
                 new Dictionary<string, string?>
                 {
                     ["yes"] = "true",
+                    ["format"] = "json",
                     ["with-policy"] = "true",
                     ["policy"] = "does-not-exist",
                 },
@@ -212,6 +352,7 @@ public sealed class InitCommandTests
                 new Dictionary<string, string?>
                 {
                     ["yes"] = "true",
+                    ["format"] = "json",
                     ["template"] = "auto",
                 },
                 Json: false,
@@ -258,6 +399,7 @@ public sealed class InitCommandTests
                 new Dictionary<string, string?>
                 {
                     ["yes"] = "true",
+                    ["format"] = "json",
                     ["template"] = "auto",
                     ["with-policy"] = "true",
                 },
@@ -306,6 +448,7 @@ public sealed class InitCommandTests
                 new Dictionary<string, string?>
                 {
                     ["yes"] = "true",
+                    ["format"] = "json",
                     ["template"] = "auto",
                     ["with-policy"] = "true",
                 },
@@ -405,6 +548,7 @@ public sealed class InitCommandTests
                 new Dictionary<string, string?>
                 {
                     ["yes"] = "true",
+                    ["format"] = "json",
                     ["with-docker-artifact"] = "true",
                 },
                 Json: false,
@@ -450,6 +594,7 @@ public sealed class InitCommandTests
                 new Dictionary<string, string?>
                 {
                     ["yes"] = "true",
+                    ["format"] = "json",
                 },
                 Json: false,
                 JsonFile: null,
@@ -496,6 +641,7 @@ public sealed class InitCommandTests
                 new Dictionary<string, string?>
                 {
                     ["yes"] = "true",
+                    ["format"] = "json",
                 },
                 Json: false,
                 JsonFile: null,
@@ -540,6 +686,7 @@ public sealed class InitCommandTests
                 new Dictionary<string, string?>
                 {
                     ["yes"] = "true",
+                    ["format"] = "json",
                     ["without-docker-artifact"] = "true",
                 },
                 Json: false,
@@ -577,6 +724,7 @@ public sealed class InitCommandTests
                 new Dictionary<string, string?>
                 {
                     ["yes"] = "true",
+                    ["format"] = "json",
                     ["with-docker-artifact"] = "true",
                     ["without-docker-artifact"] = "true",
                 },
@@ -611,6 +759,7 @@ public sealed class InitCommandTests
                 new Dictionary<string, string?>
                 {
                     ["yes"] = "true",
+                    ["format"] = "json",
                     ["with-instructions"] = "true",
                     ["instructions-path"] = "..\\outside.instructions.md",
                 },
@@ -649,6 +798,7 @@ public sealed class InitCommandTests
                 new Dictionary<string, string?>
                 {
                     ["yes"] = "true",
+                    ["format"] = "json",
                     ["with-instructions"] = "true",
                 },
                 Json: false,
@@ -682,6 +832,7 @@ public sealed class InitCommandTests
                 new Dictionary<string, string?>
                 {
                     ["yes"] = "true",
+                    ["format"] = "json",
                     ["location"] = "root",
                 },
                 Json: false,
@@ -691,7 +842,7 @@ public sealed class InitCommandTests
             var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
 
             Assert.False(result.Success);
-            Assert.Contains("always creates .rexo/rexo.json", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("always creates the config in .rexo/", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -715,6 +866,7 @@ public sealed class InitCommandTests
                 new Dictionary<string, string?>
                 {
                     ["yes"] = "true",
+                    ["format"] = "json",
                     ["schema-source"] = "remote",
                 },
                 Json: false,
@@ -854,7 +1006,7 @@ public sealed class InitCommandTests
 
             var invocation = new CommandInvocation(
                 new Dictionary<string, string>(),
-                new Dictionary<string, string?> { ["yes"] = "true", ["stack"] = "blank" },
+                new Dictionary<string, string?> { ["yes"] = "true", ["stack"] = "blank", ["format"] = "json" },
                 Json: false,
                 JsonFile: null,
                 WorkingDirectory: dir);
@@ -920,6 +1072,7 @@ public sealed class InitCommandTests
                 new Dictionary<string, string?>
                 {
                     ["yes"] = "true",
+                    ["format"] = "json",
                     ["stack"] = "dotnet",
                     ["with-policy"] = "true",
                     ["policy"] = "dotnet",
@@ -947,4 +1100,3 @@ public sealed class InitCommandTests
         }
     }
 }
-

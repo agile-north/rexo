@@ -1,5 +1,5 @@
 ---
-applyTo: "rexo.json,rexo.yaml,rexo.yml,.rexo/**,policy.json"
+applyTo: "rexo.yaml,rexo.yml,rexo.json,.rexo/**,policy.yaml,policy.yml,policy.json"
 ---
 
 # Rexo configuration context
@@ -12,8 +12,8 @@ single config file and run identically locally and in CI.
 
 | File | Purpose |
 | ---- | ------- |
-| `.rexo/rexo.json` (or `rexo.json`) | Main repo config: commands, versioning, artifacts, tests |
-| `.rexo/policy.json` (or `policy.json`) | Policy overlay: org-level commands and defaults |
+| `.rexo/rexo.yaml` (or `.rexo/rexo.json`, root `rexo.yaml`/`rexo.json`) | Main repo config: commands, versioning, artifacts, tests. YAML is the default; JSON is equally supported |
+| `.rexo/policy.yaml` (or `.rexo/policy.json`, root `policy.*`) | Policy overlay: org-level commands and defaults |
 
 ## Documentation
 
@@ -25,6 +25,8 @@ single config file and run identically locally and in CI.
 ## Quick reference
 
 ### Config file structure
+
+YAML files start with a `# yaml-language-server: $schema=...` modeline for editor intellisense; the structure is identical to JSON (shown below).
 
 ```jsonc
 {

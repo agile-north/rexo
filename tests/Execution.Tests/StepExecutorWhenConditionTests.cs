@@ -411,6 +411,55 @@ public sealed class StepExecutorWhenConditionTests
         Assert.Equal("1.2.3", version.SemVer);
     }
 
+    [Fact]
+    public async Task RunStepRendersTemplatedOutputFilePath()
+    {
+        var executor = CreateExecutor();
+        var root = Path.Combine(Path.GetTempPath(), $"rexo-output-file-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+
+        try
+        {
+            var context = ExecutionContext.Empty(root) with
+            {
+                Version = new VersionResult(
+                    SemVer: "1.2.3",
+                    Major: 1,
+                    Minor: 2,
+                    Patch: 3,
+                    PreRelease: null,
+                    CommitSha: "abc",
+                    ShortSha: "abc",
+                    IsPreRelease: false,
+                    IsStable: true),
+            };
+
+            var step = new StepDefinition(
+                Id: "write-output",
+                Run: "echo templated-output",
+                Uses: null,
+                Command: null,
+                When: null)
+            {
+                OutputFile = "generated/{{version.semver}}/output.txt",
+            };
+
+            var result = await executor.ExecuteAsync(step, context, CancellationToken.None);
+
+            var expectedPath = Path.Combine(root, "generated", "1.2.3", "output.txt");
+            Assert.True(File.Exists(expectedPath));
+            Assert.Equal(expectedPath, result.Outputs["outputFile"]);
+            Assert.Equal("templated-output", await File.ReadAllTextAsync(expectedPath));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
     // ──────────────────────────────────────────────────────────────────────────
     // Step with no run/uses/command → failure result
     // ──────────────────────────────────────────────────────────────────────────

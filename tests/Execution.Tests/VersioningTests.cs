@@ -86,6 +86,30 @@ public sealed class VersioningTests
     }
 
     [Fact]
+    public void GitVersionProviderRendersTemplatedDockerImage()
+    {
+        var config = new VersioningConfig(
+            Provider: "gitversion",
+            Fallback: "1.0.0",
+            Settings: new Dictionary<string, string>
+            {
+                ["dockerImage"] = "my/gitversion:{{args.channel}}",
+            });
+
+        var context = ExecutionContext.Empty("C:\\repo") with
+        {
+            Args = new Dictionary<string, string>
+            {
+                ["channel"] = "preview",
+            },
+        };
+
+        var image = VersionProcessHelper.GetDockerImage(config, context, "gittools/gitversion:6.0.0");
+
+        Assert.Equal("my/gitversion:preview", image);
+    }
+
+    [Fact]
     public void VersionProviderRegistryContainsGitProvider()
     {
         var registry = VersionProviderRegistry.CreateDefault();

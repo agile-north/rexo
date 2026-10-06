@@ -18,6 +18,7 @@ public static class BuiltinCommandRegistration
     private static readonly HttpClient HttpClient = new();
     private static readonly string[] InitTemplateChoices = ["dotnet", "node", "python", "go", "java", "ruby", "generic", "blank"];
     private static readonly string[] InitSchemaSourceChoices = ["remote", "local"];
+    private static readonly string[] InitFormatChoices = ["yaml", "json"];
     private static readonly string[] InitYesNoChoices = ["yes", "no"];
     private const string DefaultInstructionsPath = ".github/instructions/rexo.instructions.md";
     private const string InstructionsTemplateUrl = RepoConfigurationLoader.RawGitHubBaseUrl + "release/next/docs/rexo.instructions.md";
@@ -205,7 +206,14 @@ public static class BuiltinCommandRegistration
         checks.Add((
             "config",
             configPath is not null,
-            configPath is not null ? $"found ({Path.GetFileName(configPath)})" : "not found (expected rexo.json/rexo.yml in root or .rexo/)"));
+            configPath is not null
+                ? $"found ({Path.GetRelativePath(invocation.WorkingDirectory, configPath)})"
+                : "not found (expected rexo.yaml/rexo.yml/rexo.json in .rexo/ or repository root)"));
+
+        foreach (var shadowWarning in ConfigFileLocator.GetShadowedFileWarnings(invocation.WorkingDirectory))
+        {
+            checks.Add(("config-duplicates", true, $"warning: {shadowWarning}"));
+        }
 
         if (configPath is not null)
         {
@@ -542,13 +550,19 @@ public static class BuiltinCommandRegistration
         RepoConfig? config,
         CancellationToken cancellationToken)
     {
-        if (config?.Secrets?.Items is not { Count: > 0 } items)
+        if (config is null)
+        {
+            return CommandResult.Ok("secrets doctor", "Secrets doctor:\n  No configured secrets found.");
+        }
+
+        var items = config.Secrets?.Items;
+        if (items is not { Count: > 0 })
         {
             return CommandResult.Ok("secrets doctor", "Secrets doctor:\n  No configured secrets found.");
         }
 
         var fileEnvironment = RepositoryEnvironmentFiles.Load(invocation.WorkingDirectory);
-        var resolver = new ConfigSecretResolver(config, fileEnvironment, SecretProviderRegistry.CreateDefault());
+        var resolver = new ConfigSecretResolver(config!, fileEnvironment, SecretProviderRegistry.CreateDefault());
         var preflight = await resolver.PreflightRequiredAsync(cancellationToken);
 
         var lines = new List<string> { "Secrets doctor:" };
@@ -897,6 +911,7 @@ public static class BuiltinCommandRegistration
         var template = requestedTemplate ?? detectedTemplate;
         var autoTemplateRequested = string.IsNullOrWhiteSpace(requestedTemplate) || requestedTemplate.Equals("auto", StringComparison.OrdinalIgnoreCase);
         var schemaSource = ReadOption(options, "schema-source") ?? "remote";
+        var configFormat = ReadOption(options, "format") ?? "yaml";
         var withPolicy = IsTrue(options, "with-policy");
         var policyTemplate = ReadOption(options, "policy");
         var instructionsPathOption = ReadOption(options, "instructions-path");
@@ -927,7 +942,7 @@ public static class BuiltinCommandRegistration
             return CommandResult.Fail(
                 "init",
                 1,
-                "Invalid --location value. 'init' always creates .rexo/rexo.json; root location must be set up manually.");
+                "Invalid --location value. 'init' always creates the config in .rexo/; root location must be set up manually.");
         }
 
         if (!nonInteractive)
@@ -953,6 +968,11 @@ public static class BuiltinCommandRegistration
                 "Schema source?",
                 InitSchemaSourceChoices,
                 "remote");
+
+            configFormat = PromptChoice(
+                "Config file format?",
+                InitFormatChoices,
+                NormalizeConfigFormat(configFormat) ?? "yaml");
 
             // Ask whether the repo will publish artifacts. This drives whether
             // embedded:standard lifecycle commands are included in the scaffold.
@@ -1039,6 +1059,15 @@ public static class BuiltinCommandRegistration
             return CommandResult.Fail("init", 1, "Invalid --schema-source value. Use local|remote.");
         }
 
+        configFormat = NormalizeConfigFormat(configFormat);
+        if (configFormat is null)
+        {
+            return CommandResult.Fail("init", 1, "Invalid --format value. Use yaml|json.");
+        }
+
+        var useYaml = configFormat.Equals("yaml", StringComparison.Ordinal);
+        var configExtension = useYaml ? ".yaml" : ".json";
+
         if (withPolicy && string.IsNullOrWhiteSpace(policyTemplate))
         {
             return CommandResult.Fail(
@@ -1094,7 +1123,7 @@ public static class BuiltinCommandRegistration
 
         Directory.CreateDirectory(configDir);
 
-        var configPath = Path.Combine(configDir, "rexo.json");
+        var configPath = Path.Join(configDir, "rexo" + configExtension);
         if (File.Exists(configPath) && !force)
         {
             return CommandResult.Fail("init", 1, $"Target config already exists at '{configPath}'. Use --force to overwrite.");
@@ -1140,12 +1169,13 @@ public static class BuiltinCommandRegistration
             }
         }
 
-        await File.WriteAllTextAsync(configPath, configJson, cancellationToken);
+        var configContent = useYaml ? YamlJsonConverter.FromJson(configJson, schemaValue) : configJson;
+        await File.WriteAllTextAsync(configPath, configContent, cancellationToken);
 
         string? policyPath = null;
         if (withPolicy)
         {
-            policyPath = Path.Combine(configDir, "policy.json");
+            policyPath = Path.Join(configDir, "policy" + configExtension);
             if (File.Exists(policyPath) && !force)
             {
                 return CommandResult.Fail(
@@ -1159,7 +1189,8 @@ public static class BuiltinCommandRegistration
                 : RepoConfigurationLoader.SupportedPolicySchemaUri;
             var policyJson = EmbeddedPolicyTemplates.ReadTemplate(policyTemplate!);
             policyJson = ApplySchemaMetadata(policyJson, policySchemaValue);
-            await File.WriteAllTextAsync(policyPath, policyJson, cancellationToken);
+            var policyContent = useYaml ? YamlJsonConverter.FromJson(policyJson, policySchemaValue) : policyJson;
+            await File.WriteAllTextAsync(policyPath, policyContent, cancellationToken);
         }
 
         if (withInstructions)
@@ -1188,16 +1219,17 @@ public static class BuiltinCommandRegistration
             $"Initialized Rexo config: {configPath}",
             $"Template: {template}",
             $"Schema source: {schemaSource}",
+            $"Format: {configFormat}",
             rexoSchemaPath is not null ? $"Initialized schema: {rexoSchemaPath}" : "Schema file: not created (remote URL)",
             policySchemaPath is not null ? $"Initialized schema: {policySchemaPath}" : "Policy schema file: not created",
             withPolicy ? $"Policy template: {policyTemplate}" : "Policy template: none",
             withPolicy ? $"Initialized policy: {policyPath}" : "Policy file: not created",
             withInstructions ? $"Initialized instructions: {instructionsTargetPath}" : "Instructions file: not created",
             withDockerArtifact ? "Initialized docker artifact: yes" : "Initialized docker artifact: no",
-            detection.HasDockerfile ? "Packaging hint: Dockerfile detected. Consider adding a docker artifact to .rexo/rexo.json." : "Packaging hint: none detected",
+            detection.HasDockerfile ? $"Packaging hint: Dockerfile detected. Consider adding a docker artifact to .rexo/rexo{configExtension}." : "Packaging hint: none detected",
             "Policy template tips: run 'rx policies list' and 'rx policies show <name>'",
             "Next steps:",
-            "  1. Review and edit rexo.json for your workflow.",
+            $"  1. Review and edit .rexo/rexo{configExtension} for your workflow.",
             "  2. Run 'rx list' and then 'rx build' (or your configured command).",
             "  Docs: https://github.com/agile-north/rexo/blob/release/next/docs/CONFIGURATION.md",
         };
@@ -1910,6 +1942,12 @@ public static class BuiltinCommandRegistration
             doc["extends"] = extendsValue;
         }
 
+        var optInVars = BuildPolicyOptInVars(policyTemplate);
+        if (optInVars is not null)
+        {
+            doc["vars"] = optInVars;
+        }
+
         // Collect artifacts to scaffold based on what was detected and what was requested.
         // blank template intentionally omits artifacts — the user adds them explicitly.
         if (!isBlank)
@@ -1958,6 +1996,40 @@ public static class BuiltinCommandRegistration
         }
 
         return JsonSerializer.Serialize(doc, IndentedJsonOptions);
+    }
+
+    /// <summary>
+    /// Scaffolds the opt-in toggles of a stack policy (all <c>false</c>, matching the policy defaults)
+    /// so they are discoverable in the generated config.
+    /// </summary>
+    private static Dictionary<string, object>? BuildPolicyOptInVars(string? policyTemplate)
+    {
+        if (string.Equals(policyTemplate, "dotnet", StringComparison.OrdinalIgnoreCase))
+        {
+            return new Dictionary<string, object>
+            {
+                ["dotnet"] = new
+                {
+                    analyze = new { format = new { enabled = false }, sarif = new { enabled = false } },
+                    security = new { enabled = false },
+                },
+            };
+        }
+
+        if (string.Equals(policyTemplate, "node", StringComparison.OrdinalIgnoreCase))
+        {
+            return new Dictionary<string, object>
+            {
+                ["node"] = new
+                {
+                    format = new { check = new { enabled = false } },
+                    sarif = new { enabled = false },
+                    audit = new { enabled = false },
+                },
+            };
+        }
+
+        return null;
     }
 
     private static Dictionary<string, object> RenameCollidingStarterCommands(
@@ -2113,6 +2185,14 @@ public static class BuiltinCommandRegistration
         return JsonSerializer.Serialize(node, IndentedJsonOptions);
     }
 
+    private static string? NormalizeConfigFormat(string value) =>
+        value.ToUpperInvariant() switch
+        {
+            "YAML" => "yaml",
+            "JSON" => "json",
+            _ => null,
+        };
+
     private static string? NormalizeSchemaSource(string value)
     {
         if (value.Equals("local", StringComparison.OrdinalIgnoreCase))
@@ -2128,4 +2208,3 @@ public static class BuiltinCommandRegistration
         return null;
     }
 }
-

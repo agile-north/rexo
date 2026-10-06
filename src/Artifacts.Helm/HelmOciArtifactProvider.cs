@@ -136,6 +136,8 @@ public sealed class HelmOciArtifactProvider : IArtifactProvider
             return new ArtifactPushResult(artifact.Name, false, Array.Empty<string>());
         }
 
+        destination = RemoveDuplicateChartNameLeaf(destination, chartName);
+
         var pushArgs = new[] { "push", packagePath, destination };
         Console.WriteLine($"  > helm {FormatArguments(pushArgs)}");
         var pushResult = await _runHelmAsync(artifact, pushArgs, context.RepositoryRoot, null, null, cancellationToken);
@@ -150,6 +152,54 @@ public sealed class HelmOciArtifactProvider : IArtifactProvider
             : $"{destination}/{chartName}";
 
         return new ArtifactPushResult(artifact.Name, true, [reference]);
+    }
+
+    private static string RemoveDuplicateChartNameLeaf(string destination, string chartName)
+    {
+        if (string.IsNullOrWhiteSpace(destination) || string.IsNullOrWhiteSpace(chartName))
+        {
+            return destination;
+        }
+
+        var normalized = destination.Trim();
+        if (!normalized.StartsWith("oci://", StringComparison.OrdinalIgnoreCase))
+        {
+            normalized = "oci://" + normalized;
+        }
+
+        var ociBody = normalized["oci://".Length..].Trim('/');
+        var registrySeparator = ociBody.IndexOf('/');
+        if (registrySeparator < 0)
+        {
+            return normalized;
+        }
+
+        var registry = ociBody[..registrySeparator].Trim();
+        var repository = ociBody[(registrySeparator + 1)..].Trim('/');
+        if (string.IsNullOrWhiteSpace(registry) || string.IsNullOrWhiteSpace(repository))
+        {
+            return normalized;
+        }
+
+        var lastSeparator = repository.LastIndexOf('/');
+        if (lastSeparator < 0)
+        {
+            return normalized;
+        }
+
+        var leaf = repository[(lastSeparator + 1)..];
+        if (!string.Equals(leaf, chartName, StringComparison.OrdinalIgnoreCase))
+        {
+            return normalized;
+        }
+
+        var dedupedRepository = repository[..lastSeparator];
+        if (string.IsNullOrWhiteSpace(dedupedRepository))
+        {
+            return normalized;
+        }
+
+        return $"oci://{registry}/{dedupedRepository}";
     }
 
     private async Task TryHelmRegistryLoginAsync(

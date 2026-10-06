@@ -41,6 +41,8 @@ dotnet build solution.slnx -c Release && dotnet test solution.slnx -c Release --
 | Constant arrays | Never `new[] { ... }` inside a method called in a loop — use `static readonly` |
 | `JsonSerializerOptions` | Cache as `static readonly` fields — never instantiate inline in hot paths (CA1869) |
 | `IReadOnlyList<T>` | Use `.Count`, not `.Length` |
+| Path composition | Use `Path.Join` when every component must be appended. If absolute paths are allowed, handle rooted paths explicitly instead of relying on `Path.Combine` to discard earlier components. |
+| LINQ | Use `Where` and `Select` when a loop only filters or maps a sequence; keep imperative loops when they make control flow or side effects clearer. |
 | NuGet packages | Add version to `Directory.Packages.props`; reference in `.csproj` without a version |
 | `Core` project | Never add a `<ProjectReference>` to `src/Core/Core.csproj` — it must have zero project dependencies |
 

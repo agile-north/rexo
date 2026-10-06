@@ -28,6 +28,11 @@ internal static class ConfigBuilder
             return null;
         }
 
+        foreach (var warning in ConfigFileLocator.GetShadowedFileWarnings(workingDir))
+        {
+            Console.Error.WriteLine($"[warn] {warning}");
+        }
+
         try
         {
             var config = await RepoConfigurationLoader.LoadAsync(configPath, cancellationToken);
@@ -79,46 +84,14 @@ internal static class ConfigBuilder
         }
     }
 
-    public static PolicyConfig MergePolicies(PolicyConfig? baseline, PolicyConfig? overridePolicy)
-    {
-        var commands = new Dictionary<string, RepoCommandConfig>(StringComparer.OrdinalIgnoreCase);
-        var aliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    public static PolicyConfig MergePolicies(PolicyConfig? baseline, PolicyConfig? overridePolicy) =>
+        RepoConfigurationLoader.MergePolicies(baseline, overridePolicy);
 
-        if (baseline?.Commands is { Count: > 0 })
-        {
-            foreach (var (name, command) in baseline.Commands)
-            {
-                commands[name] = NormalizeCommandConfig(command);
-            }
-        }
-
-        if (overridePolicy?.Commands is { Count: > 0 })
-        {
-            foreach (var (name, command) in overridePolicy.Commands)
-            {
-                commands[name] = NormalizeCommandConfig(command);
-            }
-        }
-
-        if (baseline?.Aliases is { Count: > 0 })
-        {
-            foreach (var (alias, target) in baseline.Aliases)
-            {
-                aliases[alias] = target;
-            }
-        }
-
-        if (overridePolicy?.Aliases is { Count: > 0 })
-        {
-            foreach (var (alias, target) in overridePolicy.Aliases)
-            {
-                aliases[alias] = target;
-            }
-        }
-
-        return new PolicyConfig(commands, aliases);
-    }
-
+    /// <summary>
+    /// Builds the effective config: policy defaults (vars, settings, containers, outputs, runtime, secrets,
+    /// versioning) are layered underneath the repository config, and policy commands/aliases are added
+    /// where the repository does not define the same name. The repository always wins.
+    /// </summary>
     public static RepoConfig? MergePolicyIntoEffectiveConfig(RepoConfig? config, PolicyConfig? policy)
     {
         if (config is null)
@@ -131,27 +104,23 @@ internal static class ConfigBuilder
             return config;
         }
 
+        var withDefaults = RepoConfigurationLoader.ApplyPolicyDefaults(config, policy);
+
         var commands = new Dictionary<string, RepoCommandConfig>(StringComparer.OrdinalIgnoreCase);
-        if (policy.Commands is not null)
+        foreach (var (name, command) in policy.Commands ?? [])
         {
-            foreach (var (name, command) in policy.Commands)
-            {
-                commands[name] = NormalizeCommandConfig(command);
-            }
+            commands[name] = command;
         }
 
         foreach (var (name, command) in config.Commands ?? [])
         {
-            commands[name] = NormalizeCommandConfig(command);
+            commands[name] = command;
         }
 
         var aliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (policy.Aliases is not null)
+        foreach (var (alias, target) in policy.Aliases ?? [])
         {
-            foreach (var (alias, target) in policy.Aliases)
-            {
-                aliases[alias] = target;
-            }
+            aliases[alias] = target;
         }
 
         foreach (var (alias, target) in config.Aliases ?? [])
@@ -159,77 +128,12 @@ internal static class ConfigBuilder
             aliases[alias] = target;
         }
 
-        return config with
+        return withDefaults with
         {
             Commands = commands,
             Aliases = aliases,
         };
     }
-
-    private static PolicyConfig LoadEmbeddedPolicyTemplate(string templateName, bool debug)
-    {
-        try
-        {
-            var json = EmbeddedPolicyTemplates.ReadTemplate(templateName);
-            using var document = JsonDocument.Parse(json);
-            var root = document.RootElement;
-
-            var commands = new Dictionary<string, RepoCommandConfig>(StringComparer.OrdinalIgnoreCase);
-            if (root.TryGetProperty("commands", out var commandsElement) && commandsElement.ValueKind == JsonValueKind.Object)
-            {
-                foreach (var commandProperty in commandsElement.EnumerateObject())
-                {
-                    var command = JsonSerializer.Deserialize<RepoCommandConfig>(commandProperty.Value.GetRawText());
-                    if (command is not null)
-                    {
-                        commands[commandProperty.Name] = NormalizeCommandConfig(command);
-                    }
-                }
-            }
-
-            var aliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            if (root.TryGetProperty("aliases", out var aliasesElement) && aliasesElement.ValueKind == JsonValueKind.Object)
-            {
-                foreach (var aliasProperty in aliasesElement.EnumerateObject())
-                {
-                    var value = aliasProperty.Value.GetString();
-                    if (!string.IsNullOrWhiteSpace(value))
-                    {
-                        aliases[aliasProperty.Name] = value;
-                    }
-                }
-            }
-
-            if (debug)
-            {
-                Console.WriteLine($"[debug] Loaded embedded policy template: {templateName}");
-            }
-
-            return new PolicyConfig(commands, aliases);
-        }
-        catch (Exception ex) when (ex is JsonException or ArgumentException)
-        {
-            if (debug)
-            {
-                Console.WriteLine($"[debug] Embedded policy '{templateName}' load failed: {ex.Message}");
-            }
-
-            return new PolicyConfig();
-        }
-    }
-
-    private static RepoCommandConfig NormalizeCommandConfig(RepoCommandConfig command) =>
-        new(
-            command.Description,
-            command.Options ?? [],
-            command.Steps ?? [])
-        {
-            Hidden = command.Hidden,
-            Args = command.Args ?? [],
-            Merge = command.Merge,
-            MaxParallel = command.MaxParallel,
-        };
-
     /// <summary>
     /// Applies <c>--set key.path=value</c> CLI overrides to the effective config.
     /// This is the final (highest-priority) layer of the config merge pipeline.

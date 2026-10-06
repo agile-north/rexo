@@ -21,6 +21,129 @@ public sealed class TemplateRenderer : ITemplateRenderer
 
     private static string EvaluateExpression(string expr, Dictionary<string, object?> root, ExecutionContext context)
     {
+        // Logical operators (||, &&, unary !, grouping parentheses) bind looser than comparisons.
+        var orSegments = SplitTopLevel(expr, "||");
+        if (orSegments.Count > 1)
+        {
+            foreach (var segment in orSegments)
+            {
+                if (IsTruthy(EvaluateExpression(segment, root, context)))
+                {
+                    return "true";
+                }
+            }
+
+            return "false";
+        }
+
+        var andSegments = SplitTopLevel(expr, "&&");
+        if (andSegments.Count > 1)
+        {
+            foreach (var segment in andSegments)
+            {
+                if (!IsTruthy(EvaluateExpression(segment, root, context)))
+                {
+                    return "false";
+                }
+            }
+
+            return "true";
+        }
+
+        if (expr.Length > 1 && expr[0] == '!' && expr[1] != '=')
+        {
+            return IsTruthy(EvaluateExpression(expr[1..].Trim(), root, context)) ? "false" : "true";
+        }
+
+        if (expr.Length > 1 && expr[0] == '(' && expr[^1] == ')' && IsWrappedInParentheses(expr))
+        {
+            return EvaluateExpression(expr[1..^1].Trim(), root, context);
+        }
+
+        return EvaluateComparison(expr, root, context);
+    }
+
+    /// <summary>
+    /// Truthiness used by logical operators; mirrors step <c>when</c> evaluation:
+    /// empty, <c>false</c>, <c>0</c> and <c>no</c> are falsy.
+    /// </summary>
+    private static bool IsTruthy(string value) =>
+        !string.IsNullOrWhiteSpace(value) &&
+        !value.Trim().Equals("false", StringComparison.OrdinalIgnoreCase) &&
+        value.Trim() != "0" &&
+        !value.Trim().Equals("no", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsWrappedInParentheses(string expr)
+    {
+        var depth = 0;
+        char? quote = null;
+        for (var i = 0; i < expr.Length; i++)
+        {
+            var c = expr[i];
+            if (quote is not null)
+            {
+                if (c == quote) quote = null;
+                continue;
+            }
+
+            if (c is '\'' or '"') { quote = c; continue; }
+            if (c == '(') depth++;
+            else if (c == ')')
+            {
+                depth--;
+                if (depth == 0 && i < expr.Length - 1)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return depth == 0;
+    }
+
+    /// <summary>Splits on an operator token that is outside quotes and parentheses.</summary>
+    private static List<string> SplitTopLevel(string expr, string op)
+    {
+        var segments = new List<string>();
+        if (!expr.Contains(op, StringComparison.Ordinal))
+        {
+            return segments;
+        }
+
+        var depth = 0;
+        var start = 0;
+        char? quote = null;
+        for (var i = 0; i < expr.Length; i++)
+        {
+            var c = expr[i];
+            if (quote is not null)
+            {
+                if (c == quote) quote = null;
+                continue;
+            }
+
+            if (c is '\'' or '"') { quote = c; continue; }
+            if (c == '(') { depth++; continue; }
+            if (c == ')') { depth--; continue; }
+            if (depth == 0 && string.CompareOrdinal(expr, i, op, 0, op.Length) == 0)
+            {
+                segments.Add(expr[start..i].Trim());
+                i += op.Length - 1;
+                start = i + 1;
+            }
+        }
+
+        if (segments.Count == 0)
+        {
+            return segments;
+        }
+
+        segments.Add(expr[start..].Trim());
+        return segments;
+    }
+
+    private static string EvaluateComparison(string expr, Dictionary<string, object?> root, ExecutionContext context)
+    {
         // Check for equality/inequality expressions before pipe-filter handling
         if (expr.Contains(" == ", StringComparison.Ordinal))
         {

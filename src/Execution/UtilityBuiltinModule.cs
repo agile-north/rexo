@@ -29,7 +29,7 @@ internal sealed class UtilityBuiltinModule : IConfigBuiltinModule
         registry.Register("builtin:clean", (step, ctx, ct) =>
         {
             Console.WriteLine("  Cleaning generated output...");
-            var artifactsDir = Path.Combine(context.RepositoryRoot, ConfigCommandLoader.ResolveOutputRoot(context.Config));
+            var artifactsDir = Path.Combine(context.RepositoryRoot, ConfigCommandLoader.ResolveOutputRoot(context.Config, ctx));
             var cleaned = new List<string>();
 
             if (Directory.Exists(artifactsDir))

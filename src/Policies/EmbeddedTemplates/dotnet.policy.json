@@ -66,8 +66,34 @@
           }
         },
         {
+          "id": "dotnet-sarif-targets",
+          "when": "{{outputs.analysis.sarif != ''}}",
+          "uses": "builtin:dotnet-sarif-targets",
+          "with": {
+            "path": "{{outputs.temp}}/msbuild/Rexo.Sarif.targets",
+            "sarifDirectory": "{{outputs.temp}}/sarif/dotnet"
+          }
+        },
+        {
           "id": "dotnet-build-warnings",
-          "run": "dotnet build{{vars.dotnet.solution | prefix(' ')}} -c {{vars.dotnet.configuration | default('Release')}} --no-restore{{outputs.analysis.sarif | suffix('/dotnet-build.sarif') | abspath | prefix(' /p:ErrorLog=')}}{{vars.dotnet.analyze.buildExtraArgs | prefix(' ')}}",
+          "when": "{{outputs.analysis.sarif != ''}}",
+          "run": "dotnet build{{vars.dotnet.solution | prefix(' ')}} -c {{vars.dotnet.configuration | default('Release')}} --no-restore --no-incremental \"-p:CustomAfterMicrosoftCommonTargets={{outputs.temp | suffix('/msbuild/Rexo.Sarif.targets') | abspath}}\" \"-p:RexoSarifDirectory={{outputs.temp | suffix('/sarif/dotnet') | abspath}}\" -p:RexoSarifVersion={{vars.dotnet.analyze.sarifVersion | default('2.1')}}{{vars.dotnet.analyze.buildExtraArgs | prefix(' ')}}"
+        },
+        {
+          "id": "dotnet-build-warnings-no-sarif",
+          "when": "{{outputs.analysis.sarif == ''}}",
+          "run": "dotnet build{{vars.dotnet.solution | prefix(' ')}} -c {{vars.dotnet.configuration | default('Release')}} --no-restore{{vars.dotnet.analyze.buildExtraArgs | prefix(' ')}}"
+        },
+        {
+          "id": "dotnet-sarif-merge",
+          "when": "{{outputs.analysis.sarif != ''}}",
+          "alwaysRun": true,
+          "uses": "builtin:sarif-merge",
+          "with": {
+            "input": "{{outputs.temp}}/sarif/dotnet",
+            "output": "{{outputs.analysis.sarif}}/dotnet-build.sarif",
+            "category": "{{vars.dotnet.analyze.sarifCategory | default('dotnet-build')}}"
+          },
           "outputs": {
             "sarifReports": [
               "{{outputs.analysis.sarif}}/**/*.sarif"

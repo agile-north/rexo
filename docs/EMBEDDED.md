@@ -296,6 +296,12 @@ Core lifecycle builtins:
 - `builtin:push-artifacts`: Push artifacts, apply push gates, write artifact manifest.
 - `builtin:plan-artifacts`: Print/emit plan model for build and push eligibility.
 - `builtin:clean`: Remove generated output (`artifacts/`).
+- `builtin:dotnet-sarif-targets`: Write an MSBuild targets file (`with.path`) that makes every
+  project/TFM emit its own SARIF 2.1 `ErrorLog` into `$(RexoSarifDirectory)`; optionally clears
+  `with.sarifDirectory`. Used by the `embedded:dotnet` `analyze` command.
+- `builtin:sarif-merge`: Merge SARIF 2.1.0 logs (`with.input` file or directory, recursive) into
+  `with.output` with one run per tool, de-duplicated rules/results, repo-relative URIs, and
+  `automationDetails.id` from `with.category`. Suitable for GitHub code scanning upload.
 
 Related utility builtins available for custom commands:
 

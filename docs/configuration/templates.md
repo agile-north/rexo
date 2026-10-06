@@ -110,7 +110,7 @@ Supported filters:
 Chain filters with pipes:
 
 ```text
-{{args.dir | suffix('/dotnet-build.sarif') | abspath | prefix('/p:ErrorLog=')}}
+{{args.dir | suffix('/dotnet-build.sarif') | abspath | prefix('/p:ErrorLog=') | suffix('%2Cversion=2.1')}}
 ```
 
 Coalescing examples:

@@ -193,6 +193,8 @@ Given args `branch feature my-change`, the CLI tries longest prefix first:
 | `builtin:build-artifacts` | Build all configured artifacts |
 | `builtin:tag-artifacts` | Tag artifacts with version tags |
 | `builtin:push-artifacts` | Push artifacts to registries |
+| `builtin:dotnet-sarif-targets` | Write MSBuild targets for per-project SARIF 2.1 `ErrorLog` |
+| `builtin:sarif-merge` | Merge SARIF 2.1.0 logs into one GitHub-compatible file |
 
 ### Template engine (`TemplateRenderer`)
 

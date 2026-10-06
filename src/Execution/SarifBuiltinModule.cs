@@ -35,7 +35,7 @@ internal sealed class SarifBuiltinModule : IConfigBuiltinModule
                     return Fail(stepId, "No 'path' provided and outputs.temp is not configured.");
                 }
 
-                targetsPath = ResolvePath(context.RepositoryRoot, Path.Combine(temp, DefaultTargetsRelativePath))!;
+                targetsPath = ResolvePath(context.RepositoryRoot, Path.Join(temp, DefaultTargetsRelativePath))!;
             }
 
             Directory.CreateDirectory(Path.GetDirectoryName(targetsPath)!);
@@ -129,10 +129,18 @@ internal sealed class SarifBuiltinModule : IConfigBuiltinModule
             ? value.Trim()
             : null;
 
-    private static string? ResolvePath(string repositoryRoot, string? path) =>
-        path is null
-            ? null
-            : Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Combine(repositoryRoot, path));
+    private static string? ResolvePath(string repositoryRoot, string? path)
+    {
+        if (path is null)
+        {
+            return null;
+        }
+
+        var combinedPath = Path.IsPathRooted(path)
+            ? path
+            : Path.Join(repositoryRoot, path);
+        return Path.GetFullPath(combinedPath);
+    }
 
     private static StepResult Fail(string stepId, string message)
     {

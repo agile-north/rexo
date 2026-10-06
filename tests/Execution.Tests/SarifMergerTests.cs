@@ -4,7 +4,7 @@ using System.Text.Json.Nodes;
 
 public sealed class SarifMergerTests : IDisposable
 {
-    private readonly string _root = Path.Combine(Path.GetTempPath(), $"rexo-sarif-{Guid.NewGuid():N}");
+    private readonly string _root = Path.Join(Path.GetTempPath(), $"rexo-sarif-{Guid.NewGuid():N}");
 
     public SarifMergerTests() => Directory.CreateDirectory(_root);
 
@@ -17,11 +17,11 @@ public sealed class SarifMergerTests : IDisposable
     }
 
     private string FileUri(string relative) =>
-        new Uri(Path.Combine(_root, relative)).AbsoluteUri;
+        new Uri(Path.Join(_root, relative)).AbsoluteUri;
 
     private string WriteLog(string name, string version, string ruleIds, string results)
     {
-        var path = Path.Combine(_root, "in", name);
+        var path = Path.Join(_root, "in", name);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var rules = string.Join(',', ruleIds.Split(',').Select(id => $"{{\"id\":\"{id}\"}}"));
         File.WriteAllText(path, $$"""
@@ -51,7 +51,7 @@ public sealed class SarifMergerTests : IDisposable
     {
         var a = WriteLog("A.sarif", "2.1.0", "CS0168,CA1822", Result("CA1822", 1, "A/W.cs") + "," + Result("CS0168", 0, "A/W.cs"));
         var b = WriteLog("B.sarif", "2.1.0", "CA1822,CS9999", Result("CS9999", 1, "B/W.cs") + "," + Result("CA1822", 0, "B/W.cs"));
-        var output = Path.Combine(_root, "out", "merged.sarif");
+        var output = Path.Join(_root, "out", "merged.sarif");
 
         var result = await SarifMerger.MergeAsync([a, b], output, "dotnet-build", _root, CancellationToken.None);
 
@@ -82,7 +82,7 @@ public sealed class SarifMergerTests : IDisposable
     {
         var a = WriteLog("A.net8.0.sarif", "2.1.0", "CS0168", Result("CS0168", 0, "Shared/W.cs"));
         var b = WriteLog("A.net10.0.sarif", "2.1.0", "CS0168", Result("CS0168", 0, "Shared/W.cs"));
-        var output = Path.Combine(_root, "merged.sarif");
+        var output = Path.Join(_root, "merged.sarif");
 
         var result = await SarifMerger.MergeAsync([a, b], output, null, _root, CancellationToken.None);
 
@@ -93,7 +93,7 @@ public sealed class SarifMergerTests : IDisposable
     public async Task SkipsNon21InputsWithWarning()
     {
         var legacy = WriteLog("old.sarif", "1.0.0", "CS0168", Result("CS0168", 0, "A/W.cs"));
-        var output = Path.Combine(_root, "merged.sarif");
+        var output = Path.Join(_root, "merged.sarif");
 
         var result = await SarifMerger.MergeAsync([legacy], output, null, _root, CancellationToken.None);
 
@@ -105,7 +105,7 @@ public sealed class SarifMergerTests : IDisposable
     [Fact]
     public async Task NoInputsRemovesStaleOutput()
     {
-        var output = Path.Combine(_root, "merged.sarif");
+        var output = Path.Join(_root, "merged.sarif");
         await File.WriteAllTextAsync(output, "stale");
 
         var result = await SarifMerger.MergeAsync([], output, null, _root, CancellationToken.None);

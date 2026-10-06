@@ -92,9 +92,8 @@ internal static class SarifMerger
 
         var outputRuns = new JsonArray();
         var totalResults = 0;
-        foreach (var toolName in toolOrder)
+        foreach (var merged in toolOrder.Select(toolName => runsByTool[toolName]))
         {
-            var merged = runsByTool[toolName];
             totalResults += merged.ResultCount;
             outputRuns.Add(merged.Build(category, rootUri));
         }
@@ -178,9 +177,8 @@ internal static class SarifMerger
             var artifactOffset = _artifacts.Count;
             if (run["artifacts"] is JsonArray artifacts)
             {
-                foreach (var artifact in artifacts)
+                foreach (var clone in artifacts.Select(artifact => artifact?.DeepClone()))
                 {
-                    var clone = artifact?.DeepClone();
                     if (clone is not null)
                     {
                         _usedSourceRoot |= RewriteLocations(clone, 0, rootUri);
@@ -192,9 +190,9 @@ internal static class SarifMerger
 
             if (run["invocations"] is JsonArray invocations)
             {
-                foreach (var invocation in invocations)
+                foreach (var invocation in invocations.Select(item => item?.DeepClone()))
                 {
-                    _invocations.Add(invocation?.DeepClone());
+                    _invocations.Add(invocation);
                 }
             }
 
@@ -203,9 +201,8 @@ internal static class SarifMerger
                 return;
             }
 
-            foreach (var result in results.OfType<JsonObject>())
+            foreach (var clone in results.OfType<JsonObject>().Select(result => (JsonObject)result.DeepClone()))
             {
-                var clone = (JsonObject)result.DeepClone();
                 RemapRuleIndex(clone, ruleIndexMap);
                 _usedSourceRoot |= RewriteLocations(clone, artifactOffset, rootUri);
 
@@ -321,23 +318,20 @@ internal static class SarifMerger
                         usedSourceRoot |= RewriteArtifactLocation(location, 0, rootUri);
                     }
 
-                    foreach (var (key, child) in obj.ToList())
+                    foreach (var child in obj
+                        .Where(pair => pair.Key is not "artifactLocation")
+                        .Select(pair => pair.Value)
+                        .OfType<JsonNode>())
                     {
-                        if (child is not null && key is not "artifactLocation")
-                        {
-                            usedSourceRoot |= RewriteLocations(child, artifactOffset, rootUri);
-                        }
+                        usedSourceRoot |= RewriteLocations(child, artifactOffset, rootUri);
                     }
 
                     break;
 
                 case JsonArray array:
-                    foreach (var child in array)
+                    foreach (var child in array.OfType<JsonNode>())
                     {
-                        if (child is not null)
-                        {
-                            usedSourceRoot |= RewriteLocations(child, artifactOffset, rootUri);
-                        }
+                        usedSourceRoot |= RewriteLocations(child, artifactOffset, rootUri);
                     }
 
                     break;

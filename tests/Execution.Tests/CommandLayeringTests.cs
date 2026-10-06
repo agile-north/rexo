@@ -210,6 +210,23 @@ public sealed class CommandLayeringTests
                 s.Run.Contains("warnaserror", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(analyzeSteps, s => s.Run is not null &&
                 s.Run.Contains("abspath", StringComparison.OrdinalIgnoreCase));
+
+            var sarifBuild = Assert.Single(analyzeSteps, s => s.Id == "dotnet-build-warnings");
+            Assert.Contains("--no-incremental", sarifBuild.Run, StringComparison.Ordinal);
+            Assert.Contains("CustomAfterMicrosoftCommonTargets", sarifBuild.Run, StringComparison.Ordinal);
+            Assert.Contains("RexoSarifVersion={{vars.dotnet.analyze.sarifVersion | default('2.1')}}", sarifBuild.Run, StringComparison.Ordinal);
+            Assert.DoesNotContain("ErrorLog", sarifBuild.Run, StringComparison.Ordinal);
+
+            var targets = Assert.Single(analyzeSteps, s => s.Id == "dotnet-sarif-targets");
+            Assert.Equal("builtin:dotnet-sarif-targets", targets.Uses);
+
+            var merge = Assert.Single(analyzeSteps, s => s.Id == "dotnet-sarif-merge");
+            Assert.Equal("builtin:sarif-merge", merge.Uses);
+            Assert.True(merge.AlwaysRun);
+            Assert.NotNull(merge.With);
+            Assert.EndsWith("/dotnet-build.sarif", merge.With["output"], StringComparison.Ordinal);
+
+            Assert.Single(analyzeSteps, s => s.Id == "dotnet-build-warnings-no-sarif");
         }
         finally
         {

@@ -124,6 +124,7 @@ public sealed class ConfigCommandLoader
             new DockerBuiltinModule(),
             new UtilityBuiltinModule(),
             new ConfigBuiltinModule(),
+            new SarifBuiltinModule(),
         ];
 
         foreach (var module in modules)

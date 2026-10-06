@@ -27,7 +27,7 @@ public sealed class CliSmokeTests
 
             var exitCode = await Program.ExecuteAsync(["new", "--yes"], CancellationToken.None);
             Assert.Equal(0, exitCode);
-            Assert.True(File.Exists(Path.Combine(tempDir, ".rexo", "rexo.json")));
+            Assert.True(File.Exists(Path.Combine(tempDir, ".rexo", "rexo.yaml")));
         }
         finally
         {
@@ -53,7 +53,7 @@ public sealed class CliSmokeTests
 
             var exitCode = await Program.ExecuteAsync(["init", "detect"], CancellationToken.None);
             Assert.Equal(0, exitCode);
-            Assert.False(File.Exists(Path.Combine(tempDir, ".rexo", "rexo.json")));
+            Assert.False(File.Exists(Path.Combine(tempDir, ".rexo", "rexo.yaml")));
         }
         finally
         {

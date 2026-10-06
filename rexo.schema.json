@@ -691,6 +691,10 @@
           "type": "boolean",
           "description": "Continue executing subsequent steps when this step fails."
         },
+        "alwaysRun": {
+          "type": "boolean",
+          "description": "Execute this step even after a previous hard failure."
+        },
         "parallel": {
           "type": "boolean",
           "description": "Marks the step as eligible for parallel scheduling with other independent steps."

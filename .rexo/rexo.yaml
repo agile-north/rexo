@@ -1,0 +1,97 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json
+$schema: https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json
+schemaVersion: "1.0"
+name: my-service
+description: Example Rexo config for a typical .NET service
+version: 1.0.0
+versioning:
+  provider: env
+  settings:
+    variable: BUILD_VERSION
+  fallback: 0.1.0-local
+artifacts:
+  - type: docker
+    name: my-service
+    settings:
+      repository: ghcr.io/myorg/my-service
+      dockerfile: src/MyService/Dockerfile
+      context: .
+      tags:
+        - semver
+        - latest-on-main
+        - branch
+        - sha
+  - type: nuget
+    name: MyService.Client
+    settings:
+      project: src/MyService.Client/MyService.Client.csproj
+      target:
+        source: https://api.nuget.org/v3/index.json
+        sourceEnv: NUGET_TARGET_SOURCE
+        apiKeyEnv: NUGET_API_KEY
+      output: artifacts/packages
+settings:
+  dotnet:
+    solution: solution.slnx
+    configuration: Release
+    test:
+      logger: trx
+      coverageArgs: --collect:"XPlat Code Coverage" -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.OutputDirectory={{outputs.tests.coverage}}
+commands:
+  build:
+    description: Build the solution
+    steps:
+      - id: restore
+        run: dotnet restore
+        description: Restore NuGet packages
+      - id: compile
+        run: dotnet build --no-restore -c Release
+        description: Compile the solution
+  release:
+    description: 'Run the full release pipeline: version, test, build, push'
+    steps:
+      - id: resolve-version
+        uses: builtin:resolve-version
+        description: Resolve the release version
+      - id: test
+        command: test
+        whenExists: true
+        description: Run all tests
+      - id: analyze
+        command: analyze
+        whenExists: true
+        description: Run static analysis and format checks
+      - id: build-artifacts
+        uses: builtin:build-artifacts
+        description: Build Docker image and NuGet package
+      - id: push-artifacts
+        uses: builtin:push-artifacts
+        description: Push artifacts to registries
+  branch feature:
+    description: Create a feature branch
+    args:
+      name:
+        description: Feature branch name (e.g. my-feature)
+        required: true
+    steps:
+      - id: git-checkout
+        run: git checkout -b feature/{{args.name | slug}}
+        description: Create and switch to new feature branch
+  branch release:
+    description: Create a release branch from the version
+    steps:
+      - id: resolve-version
+        uses: builtin:resolve-version
+      - id: git-checkout
+        run: git checkout -b release/{{steps.resolve-version.outputs.semver}}
+        description: Create release branch
+  env check:
+    description: Verify required environment variables are set
+    steps:
+      - id: check-vars
+        run: echo BUILD_VERSION=${BUILD_VERSION:-not set}
+        description: Show build environment
+aliases:
+  ci: release
+  bf: branch feature
+  br: branch release

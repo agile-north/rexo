@@ -122,6 +122,11 @@
           "$ref": "#/$defs/commandHook",
           "description": "Optional hook executed after this command's steps. Supports a command name string or an explicit step array."
         },
+        "maxParallel": {
+          "type": "integer",
+          "description": "Maximum concurrent step execution when parallel groups are used.",
+          "minimum": 1
+        },
         "maxDepth": {
           "type": "integer",
           "description": "Maximum delegated command call depth for this command chain.",
@@ -410,11 +415,36 @@
           "type": "boolean",
           "description": "Execute this step even after a previous hard failure."
         },
+        "parallel": {
+          "type": "boolean",
+          "description": "Marks the step as eligible for parallel scheduling with other independent steps."
+        },
         "dependsOn": {
           "type": "array",
           "description": "List of step ids that must complete before this step can run.",
           "items": {
             "type": "string"
+          }
+        },
+        "outputPattern": {
+          "type": "string",
+          "description": "Regex pattern used by compatible steps to capture structured output values.",
+          "markdownDescription": "Regex pattern used by compatible steps to capture structured output values. Named capture groups become step outputs."
+        },
+        "outputFile": {
+          "type": "string",
+          "description": "Path to an output file consumed by compatible steps for captured outputs.",
+          "markdownDescription": "Path to an output file consumed by compatible steps for captured outputs. The path is template-rendered before use, so it can reference step, version, args, options, and outputs values."
+        },
+        "outputs": {
+          "type": "object",
+          "description": "Step output declarations. Each key names an output category; values are arrays of glob patterns relative to the repository root that identify produced files.",
+          "markdownDescription": "Step output declarations. Each key names an output category; values are arrays of glob patterns relative to the repository root that identify produced files. Use this when a step produces files instead of inline text outputs.",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },

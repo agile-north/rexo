@@ -35,6 +35,9 @@ Legend:
 - [x] Environment overlays (REXO_OVERLAY env var)
 - [x] Merge strategy customization for arrays/objects
 - [x] Alternative config file names (`repo.yaml`, `.repo/repo.json`, `.repo/repo.yaml`)
+- [x] YAML/JSON parity: YAML 1.2 core-schema typing, modeline `$schema`, duplicate-key/line-numbered errors
+- [x] Default config location `.rexo/rexo.yaml` (root still supported), shadowed-file warnings
+- [x] `rx init --format yaml|json` (YAML default) for config and policy
 
 ## 3) Command Resolution Order
 

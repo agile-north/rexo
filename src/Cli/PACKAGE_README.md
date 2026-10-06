@@ -27,7 +27,7 @@ Use `--` after `Rexo.Cli` so remaining arguments are passed to `rx`.
 
 ## Quick Start
 
-1. Run `rx init` (defaults to `.rexo/rexo.json`).
+1. Run `rx init` (defaults to `.rexo/rexo.yaml`; pass `--format json` for `.rexo/rexo.json`).
 2. Add commands and steps.
 3. Run commands with `rx`.
 
@@ -54,6 +54,12 @@ Use remote schema URL instead:
 
 ```bash
 rx init --yes --schema-source remote
+```
+
+Write JSON instead of the default YAML:
+
+```bash
+rx init --yes --format json
 ```
 
 Non-interactive example that also downloads AI instructions into the repo:
@@ -86,7 +92,22 @@ rx init --yes --with-docker-artifact
 
 > `--with-docker-artifact` and `--without-docker-artifact` cannot be combined — passing both is an error.
 
-Minimal example:
+Minimal example (`.rexo/rexo.yaml`):
+
+```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/agile-north/rexo/__REXO_SCHEMA_TAG__/rexo.schema.json
+$schema: https://raw.githubusercontent.com/agile-north/rexo/__REXO_SCHEMA_TAG__/rexo.schema.json
+schemaVersion: "1.0"
+name: my-repo
+commands:
+  build:
+    description: Build the project
+    steps:
+      - run: dotnet build -c Release
+aliases: {}
+```
+
+The same config in JSON (`.rexo/rexo.json`):
 
 ```json
 {
@@ -126,11 +147,15 @@ rx doctor
 
 Rexo looks for configuration in this order:
 
-1. `rexo.json`, `rexo.yaml`, `rexo.yml`
-2. `.rexo/rexo.json`, `.rexo/rexo.yaml`, `.rexo/rexo.yml`
-3. Backward-compatible fallback: `repo.json|yaml|yml` (root and `.repo/`)
+1. `.rexo/rexo.yaml`, `.rexo/rexo.yml`, `.rexo/rexo.json` (default location)
+2. `rexo.yaml`, `rexo.yml`, `rexo.json` (repo root)
+3. Backward-compatible fallback: `repo.yaml|yml|json` (`.repo/` and root)
 
-Policy files are discovered in root, `.rexo/`, and legacy `.repo/` locations.
+Policy files are discovered in `.rexo/`, root, and legacy `.repo/` locations (YAML before JSON).
+If several candidates exist, the first match wins and Rexo warns about the ignored files.
+
+YAML and JSON are validated against the same schema. Add a
+`# yaml-language-server: $schema=...` modeline (written by `rx init`) for editor intellisense.
 
 ## Notes
 

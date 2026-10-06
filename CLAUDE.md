@@ -22,7 +22,7 @@ Build must be clean: **0 errors, 0 warnings**. Tests must all pass before commit
 - **CLI command**: `rx`
 - **Stack**: .NET 10, C#, xUnit, Spectre.Console, NJsonSchema
 - **Solution**: `solution.slnx` (15 src + 4 test projects)
-- **Config file**: `repo.json` — requires `$schema` + `schemaVersion: "1.0"`
+- **Config file**: `.rexo/rexo.yaml` (default; `.rexo/rexo.json` and root `rexo.yaml|json` also supported) — requires `$schema` (key or YAML modeline) + `schemaVersion: "1.0"`
 - **Schema**: `rexo.schema.json` (repo root)
 
 ---
@@ -81,5 +81,5 @@ The implementation is feature-complete per `docs/scope.md`. No known gaps remain
 | `src/Execution/StepExecutor.cs` | Step execution loop |
 | `src/Templating/TemplateRenderer.cs` | Template variable/filter engine |
 | `src/Configuration/RepoConfigurationLoader.cs` | Config load + schema validation |
-| `rexo.schema.json` | JSON Schema for `repo.json` |
+| `rexo.schema.json` | JSON Schema for the rexo config (YAML or JSON) |
 

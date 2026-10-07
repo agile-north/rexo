@@ -69,6 +69,10 @@ try {
         try { $text = $reader.ReadToEnd() } finally { $reader.Dispose() }
         if ($text -match '\{\{') { throw 'Packaged README contains unresolved template tokens.' }
     } finally { $archive.Dispose() }
+    & dotnet $cli --non-interactive ci handoff
+    if ($LASTEXITCODE -ne 0) { throw 'Verified package handoff failed.' }
+    & dotnet $cli --non-interactive --dry-run ci publish --confirm
+    if ($LASTEXITCODE -ne 0) { throw 'Verified package publication rehearsal failed.' }
     Write-Host "Self-host acceptance passed: $package; $manifestPath"
 } finally {
     $env:GITVERSION_SEMVER = $originalVersion

@@ -7,7 +7,7 @@ not simply whether a command exists.
 | Scope | Status in foundation | Evidence / remaining acceptance |
 | --- | --- | --- |
 | Container fallback (section 7; scenario D) | Implemented and tested | Resolver and executor tests cover fail-closed defaults and explicit host fallback. |
-| Release modes and self-hosting (8–9) | Implemented; publication unverified | Source-built isolated CLI runs check/release in PR CI; `scripts/Test-SelfHost.ps1` verifies package, README, config hash, version and unpublished artifact metadata. Real publishing is not an acceptance action. |
+| Release modes and self-hosting (8–9) | Implemented for NuGet handoff; real publication unverified | Source-built isolated CLI runs check/release in PR CI; `scripts/Test-SelfHost.ps1` verifies evidence, seals exact NuGet package hashes and rehearses publish-only with dry-run. Publishing downloads the same-run packages and CLI without rebuilding. Other providers/symbol packages and real publishing remain outside this acceptance. |
 | Documentation consolidation (10) | Partial | Link tests and refreshed guidance exist; historical archive and complete authoritative documentation audit remain. |
 | Init lifecycle (11) | Implemented and tested | Init tests cover superseded same-slot variants and preserved legacy files. |
 | Repository readiness (12) | Partial | Tool/provider/path/lock findings exist; required-secret resolution, full container/artifact readiness and version resolution remain. `check` is a basic gate, not proof of full readiness. |

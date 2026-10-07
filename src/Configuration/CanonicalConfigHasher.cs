@@ -1,11 +1,11 @@
-namespace Rexo.Cli;
+namespace Rexo.Configuration;
 
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Rexo.Configuration.Models;
 
-internal static class CanonicalConfigHasher
+public static class CanonicalConfigHasher
 {
     public static string Compute(RepoConfig config)
     {

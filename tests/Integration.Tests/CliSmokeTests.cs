@@ -84,6 +84,10 @@ public sealed class CliSmokeTests
         Assert.Contains("inputs.publish", gate, StringComparison.Ordinal);
         Assert.Contains("github.ref_type == 'branch'", gate, StringComparison.Ordinal);
         Assert.Contains("github.ref_name == 'main'", gate, StringComparison.Ordinal);
+        Assert.DoesNotContain("dotnet publish", publish.GetRawText(), StringComparison.Ordinal);
+        Assert.DoesNotContain("release --push", publish.GetRawText(), StringComparison.Ordinal);
+        Assert.Contains("ci publish --confirm", publish.GetRawText(), StringComparison.Ordinal);
+        Assert.Contains("actions/download-artifact@v4", publish.GetRawText(), StringComparison.Ordinal);
         var acceptance = Assert.Single(steps, step => step.GetProperty("name").GetString() == "Rehearse release without publication");
         Assert.Equal("pwsh", acceptance.GetProperty("shell").GetString());
         Assert.Contains("./scripts/Test-SelfHost.ps1", acceptance.GetProperty("run").GetString(), StringComparison.Ordinal);

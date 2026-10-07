@@ -30,6 +30,32 @@ outputs:
   analysis:
     sarif: ~/sarif
 commands:
+  ci handoff:
+    description: Seal the packages from a successful unpublished release for transfer.
+    steps:
+      - id: version
+        uses: builtin:resolve-version
+      - id: seal
+        uses: builtin:seal-nuget-handoff
+        with:
+          runManifest: artifacts/selfhost/release-manifest.json
+          path: artifacts/selfhost/handoff.json
+  ci publish:
+    description: Verify and publish handed-off packages without rebuilding or testing.
+    options:
+      confirm:
+        type: bool
+        default: false
+    steps:
+      - id: version
+        uses: builtin:resolve-version
+      - id: publish
+        uses: builtin:push-nuget-handoff
+        with:
+          path: artifacts/selfhost/handoff.json
+      - id: post-push
+        command: post-push
+        when: "{{push.anyPushed && !options.dry-run}}"
   ci coverage:
     description: Generate coverage reports locally and in CI from the release test evidence.
     steps:

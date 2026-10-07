@@ -69,6 +69,16 @@ jobs:
           dotnet artifacts/rx-bootstrap/Rexo.Cli.dll --non-interactive ci coverage
           cat artifacts/coverage-report/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Upload verified release handoff
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-handoff
+          path: |
+            artifacts/selfhost/handoff.json
+            artifacts/packages/*.nupkg
+            artifacts/rx-bootstrap/**
+          if-no-files-found: error
+
       - name: Upload coverage artifact
         if: always()
         uses: actions/upload-artifact@v4
@@ -127,8 +137,11 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Bootstrap local Rexo CLI
-        run: dotnet publish src/Cli/Cli.csproj --configuration Release --output artifacts/rx-bootstrap
+      - name: Download verified release handoff
+        uses: actions/download-artifact@v4
+        with:
+          name: release-handoff
+          path: artifacts
 
       - name: NuGet login (OIDC -> temporary API key)
         id: nuget-login
@@ -152,14 +165,14 @@ jobs:
         env:
           NUGET_TARGET_SOURCE: https://api.nuget.org/v3/index.json
           NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
-        run: dotnet artifacts/rx-bootstrap/Rexo.Cli.dll --non-interactive release --push
+        run: dotnet artifacts/rx-bootstrap/Rexo.Cli.dll --non-interactive ci publish --confirm
 
       - name: Publish with Rexo (GitHub Packages)
         if: ${{ env.NUGET_ORG_USER == '' && vars.PUBLISH_TO_GITHUB_PACKAGES == 'true' }}
         env:
           NUGET_TARGET_SOURCE: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
           NUGET_API_KEY: ${{ secrets.GITHUB_TOKEN }}
-        run: dotnet artifacts/rx-bootstrap/Rexo.Cli.dll --non-interactive release --push
+        run: dotnet artifacts/rx-bootstrap/Rexo.Cli.dll --non-interactive ci publish --confirm
 
       - name: Publish schema branch (schema/v<major.minor>, moving)
         if: ${{ env.NUGET_ORG_USER != '' || vars.PUBLISH_TO_GITHUB_PACKAGES == 'true' }}

@@ -130,3 +130,21 @@ Exit behavior:
 - Policy-gated skip: success `0` with decision reasons
 - Dry-run: success `0`, no provider calls, simulated push output only
 - Provider push failure: exit code `6`
+## Verified NuGet handoff
+
+`builtin:seal-nuget-handoff` accepts `with.runManifest` and `with.path` as portable,
+repository-relative paths. It requires a successful, unpublished `release` run with
+the same commit, effective config hash, policy lock hash, resolved version and CI run
+identity. It records the SHA-256 of each explicitly named NuGet package.
+
+`builtin:push-nuget-handoff` accepts `with.path`, requires `--confirm`, verifies the
+entire inventory before pushing, and uses existing provider and push-policy gates.
+Missing/changed packages, identity mismatches and denied pushes fail explicitly.
+Global `--dry-run` verifies evidence and simulates publication without calling providers.
+It does not invoke build/test/pack. Configured post-push hooks must be gated separately.
+
+The repository demonstrates these primitives through `rx ci handoff` and
+`rx ci publish --confirm`. Only NuGet packages with literal repository-relative
+output directories are supported; symbol publication and other providers are rejected.
+The receipt is integrity evidence, not a signature or remote promotion/deployment record.
+Do not consume a receipt from an untrusted PR run in a privileged release run.

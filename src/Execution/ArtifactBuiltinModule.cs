@@ -6,6 +6,70 @@ internal sealed class ArtifactBuiltinModule : IConfigBuiltinModule
 {
     public void Register(BuiltinRegistry registry, ConfigBuiltinModuleContext context)
     {
+        registry.Register("builtin:seal-nuget-handoff", async (step, ctx, ct) =>
+        {
+            if (ctx.IsDryRun)
+            {
+                return new StepResult(step.Id ?? "seal-handoff", true, 0, TimeSpan.Zero,
+                    new Dictionary<string, object?> { ["message"] = "Dry run: handoff not written." });
+            }
+
+            await VerifiedNuGetHandoff.SealAsync(
+                step.With?["runManifest"] ?? throw new InvalidOperationException("runManifest is required."),
+                step.With?["path"] ?? throw new InvalidOperationException("path is required."),
+                context.Config, ctx, ct);
+            return new StepResult(step.Id ?? "seal-handoff", true, 0, TimeSpan.Zero,
+                new Dictionary<string, object?> { ["message"] = "Verified NuGet handoff sealed." });
+        });
+
+        registry.Register("builtin:push-nuget-handoff", async (step, ctx, ct) =>
+        {
+            if (ConfigCommandLoader.TryGetOptionBoolean(ctx.Options, "confirm") != true)
+            {
+                throw new InvalidOperationException("Verified publication requires --confirm.");
+            }
+            var version = await VerifiedNuGetHandoff.VerifyAsync(
+                step.With?["path"] ?? throw new InvalidOperationException("path is required."),
+                context.Config, ctx, ct);
+            var result = await context.Loader.PushArtifactsAsync(
+                step.Id ?? "push-handoff", context.Config, context.RepositoryRoot,
+                ConfigCommandLoader.ResolveOutputRoot(context.Config, ctx),
+                ConfigCommandLoader.ShouldEmitRuntimeFiles(context.Config),
+                ctx.WithVersion(version), static _ => true, "Verified packages pushed.", "No packages configured.", ct);
+            if (result.Success && result.Outputs.TryGetValue("__pushDecisions", out var decisions) &&
+                decisions is List<PushDecision> pushDecisions && pushDecisions.Any(decision => !decision.Allowed))
+            {
+                return result with
+                {
+                    Success = false,
+                    ExitCode = 6,
+                    Outputs = new Dictionary<string, object?>(result.Outputs)
+                    {
+                        ["error"] = "Verified publication was denied by push policy.",
+                    },
+                };
+            }
+            if (result.Success && !ctx.IsDryRun &&
+                (!result.Outputs.TryGetValue("__artifacts", out var artifacts) ||
+                 artifacts is not List<ArtifactManifestEntry> entries ||
+                 entries.Count == 0 || entries.Any(entry => !entry.Pushed)))
+            {
+                return result with
+                {
+                    Success = false,
+                    ExitCode = 6,
+                    Outputs = new Dictionary<string, object?>(result.Outputs)
+                    {
+                        ["error"] = "Verified publication did not publish every configured package.",
+                    },
+                };
+            }
+            return result with
+            {
+                Outputs = new Dictionary<string, object?>(result.Outputs) { ["__version"] = version },
+            };
+        });
+
         registry.Register("builtin:build-artifacts", (step, ctx, ct) =>
             context.Loader.BuildArtifactsAsync(
                 step.Id ?? "build-artifacts",

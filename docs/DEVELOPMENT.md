@@ -55,6 +55,9 @@ dotnet build solution.slnx -c Release && dotnet test solution.slnx -c Release --
 
 ## Coding Conventions
 
+See [CODE_STYLE.md](CODE_STYLE.md) for examples and guidance on platform-neutral paths,
+rooted-path handling, cleanup exceptions, LINQ transforms, and condition flow.
+
 | Rule | Detail |
 | --- | --- |
 | Namespaces | Source files use `Rexo.*` prefix (e.g. `namespace Rexo.Cli;`). Match the namespace already used in the file. |

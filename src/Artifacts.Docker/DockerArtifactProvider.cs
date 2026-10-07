@@ -1391,11 +1391,10 @@ public sealed class DockerArtifactProvider : IArtifactProvider
         {
             Directory.Delete(tempDockerConfigDirectory, recursive: true);
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-        }
-        catch (UnauthorizedAccessException)
-        {
+            Console.Error.WriteLine(
+                $"  Warning: could not remove temporary Docker config directory '{tempDockerConfigDirectory}': {ex.Message}");
         }
     }
 

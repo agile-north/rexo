@@ -681,7 +681,10 @@ public static class BuiltinCommandRegistration
                 continue;
             }
 
-            var resolvedPath = Path.GetFullPath(Path.Combine(workingDirectory, configuredPath));
+            var resolvedPath = Path.GetFullPath(
+                Path.IsPathRooted(configuredPath)
+                    ? configuredPath
+                    : Path.Join(workingDirectory, configuredPath));
             var exists = isFile ? File.Exists(resolvedPath) : Directory.Exists(resolvedPath);
             findings.Add(exists
                 ? new CheckFinding(
@@ -1577,8 +1580,10 @@ public static class BuiltinCommandRegistration
                     {
                         process.Kill(entireProcessTree: true);
                     }
-                    catch (InvalidOperationException)
+                    catch (InvalidOperationException ex) when (process.HasExited)
                     {
+                        Console.Error.WriteLine(
+                            $"  Process {process.Id} already exited during cancellation: {ex.Message}");
                     }
                 }
 

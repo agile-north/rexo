@@ -22,24 +22,25 @@ public sealed class DocumentationLinkTests
         foreach (var markdownFile in markdownFiles)
         {
             var markdown = File.ReadAllText(markdownFile);
-            foreach (Match match in MarkdownLinkPattern.Matches(markdown))
+            foreach (var target in MarkdownLinkPattern.Matches(markdown)
+                .Select(match => match.Groups[1].Value.Trim()))
             {
-                var target = match.Groups[1].Value.Trim();
-                var separator = target.IndexOfAny([' ', '\t', '\r', '\n']);
+                var linkTarget = target;
+                var separator = linkTarget.IndexOfAny([' ', '\t', '\r', '\n']);
                 if (separator >= 0)
                 {
-                    target = target[..separator];
+                    linkTarget = linkTarget[..separator];
                 }
 
-                target = target.Trim('<', '>');
-                if (string.IsNullOrWhiteSpace(target) ||
-                    target.StartsWith('#') ||
-                    Uri.TryCreate(target, UriKind.Absolute, out _))
+                linkTarget = linkTarget.Trim('<', '>');
+                if (string.IsNullOrWhiteSpace(linkTarget) ||
+                    linkTarget.StartsWith('#') ||
+                    Uri.TryCreate(linkTarget, UriKind.Absolute, out _))
                 {
                     continue;
                 }
 
-                var localPath = Uri.UnescapeDataString(target.Split(['#', '?'], 2)[0]);
+                var localPath = Uri.UnescapeDataString(linkTarget.Split(['#', '?'], 2)[0]);
                 if (string.IsNullOrWhiteSpace(localPath))
                 {
                     continue;
@@ -50,7 +51,7 @@ public sealed class DocumentationLinkTests
                     localPath.Replace('/', Path.DirectorySeparatorChar)));
                 if (!File.Exists(resolvedPath) && !Directory.Exists(resolvedPath))
                 {
-                    missingLinks.Add($"{Path.GetRelativePath(repositoryRoot, markdownFile)}: {target}");
+                    missingLinks.Add($"{Path.GetRelativePath(repositoryRoot, markdownFile)}: {linkTarget}");
                 }
             }
         }

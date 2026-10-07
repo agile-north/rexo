@@ -46,7 +46,7 @@ internal static class ArtifactPromotionService
 
         var resolvedManifestPath = Path.IsPathRooted(manifestPath)
             ? manifestPath
-            : Path.GetFullPath(Path.Combine(repositoryRoot, manifestPath));
+            : Path.GetFullPath(Path.Join(repositoryRoot, manifestPath));
         await using var manifestStream = File.OpenRead(resolvedManifestPath);
         var manifest = await JsonSerializer.DeserializeAsync<RunManifest>(
             manifestStream,
@@ -75,7 +75,7 @@ internal static class ArtifactPromotionService
 
         var sourcePath = Path.IsPathRooted(artifact.Location)
             ? artifact.Location
-            : Path.GetFullPath(Path.Combine(repositoryRoot, artifact.Location));
+            : Path.GetFullPath(Path.Join(repositoryRoot, artifact.Location));
         if (!File.Exists(sourcePath))
         {
             throw new FileNotFoundException($"Artifact '{artifact.Name}' file was not found.", sourcePath);
@@ -97,14 +97,14 @@ internal static class ArtifactPromotionService
             resolvedRepositoryRoot,
             Path.GetRelativePath(
                 resolvedRepositoryRoot,
-                Path.Combine(resolvedEnvironmentPath, "objects", actualHash.ToLowerInvariant())),
+                Path.Join(resolvedEnvironmentPath, "objects", actualHash.ToLowerInvariant())),
             environmentName);
-        var destinationPath = Path.Combine(objectDirectory, fileName);
+        var destinationPath = Path.Join(objectDirectory, fileName);
         var recordDirectory = ResolveRepositoryDirectoryPath(
             resolvedRepositoryRoot,
-            Path.GetRelativePath(resolvedRepositoryRoot, Path.Combine(resolvedEnvironmentPath, "promotions")),
+            Path.GetRelativePath(resolvedRepositoryRoot, Path.Join(resolvedEnvironmentPath, "promotions")),
             environmentName);
-        var recordPath = Path.Combine(
+        var recordPath = Path.Join(
             recordDirectory,
             $"{SanitizeFileName(artifact.Name)}-{actualHash.ToLowerInvariant()}.json");
         var relativeManifest = Path.GetRelativePath(repositoryRoot, resolvedManifestPath);
@@ -276,7 +276,7 @@ internal static class ArtifactPromotionService
                      [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
                      StringSplitOptions.RemoveEmptyEntries))
         {
-            var candidate = Path.GetFullPath(Path.Combine(currentPath, segment));
+            var candidate = Path.GetFullPath(Path.Join(currentPath, segment));
             if (Directory.Exists(candidate))
             {
                 var directory = new DirectoryInfo(candidate);

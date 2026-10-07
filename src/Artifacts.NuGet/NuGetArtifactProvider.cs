@@ -31,7 +31,8 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
         var output = GetSetting(artifact, "output") ?? "artifacts/packages";
         var version = context.Version?.SemVer;
 
-        Directory.CreateDirectory(Path.Combine(context.RepositoryRoot, output));
+        var outputPath = ResolveRepositoryPath(context.RepositoryRoot, output);
+        Directory.CreateDirectory(outputPath);
 
         var args = $"pack {project} --configuration Release --output {output}";
         if (!string.IsNullOrEmpty(version))
@@ -47,7 +48,7 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
         return new ArtifactBuildResult(
             Name: artifact.Name,
             Success: result.ExitCode == 0,
-            Location: result.ExitCode == 0 ? Path.Combine(context.RepositoryRoot, output) : null);
+            Location: result.ExitCode == 0 ? outputPath : null);
     }
 
     public Task<ArtifactTagResult> TagAsync(
@@ -151,7 +152,7 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
 
         var absoluteDirectory = string.IsNullOrWhiteSpace(directory)
             ? repositoryRoot
-            : Path.Combine(repositoryRoot, directory);
+            : ResolveRepositoryPath(repositoryRoot, directory);
 
         return Directory.Exists(absoluteDirectory)
             && Directory.EnumerateFiles(absoluteDirectory, searchPattern, SearchOption.TopDirectoryOnly).Any();
@@ -211,7 +212,9 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
         string extension,
         bool includeSymbols)
     {
-        var outputDirectory = Path.Combine(repositoryRoot, output.Replace('/', Path.DirectorySeparatorChar));
+        var outputDirectory = ResolveRepositoryPath(
+            repositoryRoot,
+            output.Replace('/', Path.DirectorySeparatorChar));
         if (!Directory.Exists(outputDirectory))
         {
             return Array.Empty<string>();
@@ -251,6 +254,12 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
         matches.Sort(StringComparer.OrdinalIgnoreCase);
         return matches;
     }
+
+    private static string ResolveRepositoryPath(string repositoryRoot, string path) =>
+        Path.GetFullPath(
+            Path.IsPathRooted(path)
+                ? path
+                : Path.Join(repositoryRoot, path));
 
     private static FeedAuthResolution ResolveSymbolAuth(
         ArtifactConfig artifact,

@@ -173,7 +173,7 @@ public sealed class StepExecutor : IStepExecutor
             var outputFilePath = Path.GetFullPath(
                 Path.IsPathRooted(renderedOutputFile)
                     ? renderedOutputFile
-                    : Path.Combine(context.RepositoryRoot, renderedOutputFile));
+                    : Path.Join(context.RepositoryRoot, renderedOutputFile));
             var dir = Path.GetDirectoryName(outputFilePath);
             if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
             await File.WriteAllTextAsync(outputFilePath, maskedStdout, cancellationToken);
@@ -426,12 +426,12 @@ public sealed class StepExecutor : IStepExecutor
 
         var dockerfilePath = Path.IsPathRooted(container.Dockerfile)
             ? container.Dockerfile
-            : Path.GetFullPath(Path.Combine(context.RepositoryRoot, container.Dockerfile));
+            : Path.GetFullPath(Path.Join(context.RepositoryRoot, container.Dockerfile));
         var buildContextPath = string.IsNullOrWhiteSpace(container.Context)
             ? context.RepositoryRoot
             : (Path.IsPathRooted(container.Context)
                 ? container.Context
-                : Path.GetFullPath(Path.Combine(context.RepositoryRoot, container.Context)));
+                : Path.GetFullPath(Path.Join(context.RepositoryRoot, container.Context)));
 
         if (!File.Exists(dockerfilePath))
         {

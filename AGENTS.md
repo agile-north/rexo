@@ -287,6 +287,7 @@ dotnet test solution.slnx -c Release --no-build
 - Avoid `new[] { ... }` literal arrays in hot paths — use `static readonly`
 - `IReadOnlyList<T>` → use `.Count` not `.Length`
 - No circular dependencies between projects — `Core` has zero project references
+- See [docs/CODE_STYLE.md](docs/CODE_STYLE.md) for path safety, cleanup exception, LINQ, and condition-flow guidance
 
 ---
 

@@ -7,14 +7,18 @@ public static class ConsoleRenderer
 {
     public static void ConfigureColors(bool? enabled)
     {
-        var colorSystem = enabled switch
+        var colorSystem = ColorSystemSupport.Detect;
+        if (enabled.HasValue)
         {
-            true => ColorSystemSupport.TrueColor,
-            false => ColorSystemSupport.NoColors,
-            null when !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NO_COLOR")) =>
-                ColorSystemSupport.NoColors,
-            _ => ColorSystemSupport.Detect,
-        };
+            colorSystem = enabled.Value
+                ? ColorSystemSupport.TrueColor
+                : ColorSystemSupport.NoColors;
+        }
+        else if (!string.IsNullOrEmpty(Environment.GetEnvironmentVariable("NO_COLOR")))
+        {
+            colorSystem = ColorSystemSupport.NoColors;
+        }
+
         AnsiConsole.Console = AnsiConsole.Create(new AnsiConsoleSettings
         {
             ColorSystem = colorSystem,

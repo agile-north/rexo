@@ -365,7 +365,7 @@ public sealed class ConfigCommandLoader
             if (emitRuntimeFiles)
             {
                 var manifestDirectory = ResolveOutputPath(resolvedOutputs, "manifests")
-                    ?? Path.Combine(outputRoot, "manifests");
+                    ?? Path.Join(outputRoot, "manifests");
                 await WriteCommandManifestAsync(repositoryRoot, config, manifestDirectory, commandName, commandResult, cancellationToken);
             }
 
@@ -449,7 +449,7 @@ public sealed class ConfigCommandLoader
     {
         var resolvedPath = Path.IsPathRooted(path)
             ? path
-            : Path.GetFullPath(Path.Combine(repositoryRoot, path));
+            : Path.GetFullPath(Path.Join(repositoryRoot, path));
         if (!File.Exists(resolvedPath))
         {
             return null;
@@ -1135,7 +1135,7 @@ public sealed class ConfigCommandLoader
         if (string.Equals(artifactCfg.Type, "nuget", StringComparison.OrdinalIgnoreCase) &&
             !settings.ContainsKey("output"))
         {
-            var nugetOutput = Path.Combine(outputRoot, "packages");
+            var nugetOutput = Path.Join(outputRoot, "packages");
             settings["output"] = JsonSerializer.SerializeToElement(nugetOutput);
         }
 
@@ -1273,7 +1273,7 @@ public sealed class ConfigCommandLoader
         IReadOnlyList<Core.Models.ArtifactManifestEntry> entries,
         CancellationToken cancellationToken)
     {
-        var artifactsDir = Path.Combine(repositoryRoot, outputRoot);
+        var artifactsDir = ResolvePathFromRoot(repositoryRoot, outputRoot);
         Directory.CreateDirectory(artifactsDir);
         var manifestPath = Path.Combine(artifactsDir, "manifest.json");
 
@@ -1297,7 +1297,7 @@ public sealed class ConfigCommandLoader
         CommandResult commandResult,
         CancellationToken cancellationToken)
     {
-        var manifestsDir = Path.Combine(repositoryRoot, manifestDirectory);
+        var manifestsDir = ResolvePathFromRoot(repositoryRoot, manifestDirectory);
         Directory.CreateDirectory(manifestsDir);
 
         var mode = string.Equals(config.Outputs?.Manifests?.CommandMode, "perCommand", StringComparison.OrdinalIgnoreCase)
@@ -1503,7 +1503,7 @@ public sealed class ConfigCommandLoader
             return manifestsPath;
         }
 
-        return Path.Combine(repositoryRoot, manifestsPath);
+        return Path.Join(repositoryRoot, manifestsPath);
     }
 
     internal static string ResolveOutputRoot(RepoConfig config) =>
@@ -1861,7 +1861,7 @@ public sealed class ConfigCommandLoader
         // Resolve directory relative to repo root
         var searchDir = Path.IsPathRooted(dirPattern)
             ? dirPattern
-            : Path.Combine(repositoryRoot, dirPattern.Replace('/', Path.DirectorySeparatorChar));
+            : Path.Join(repositoryRoot, dirPattern.Replace('/', Path.DirectorySeparatorChar));
 
         if (!Directory.Exists(searchDir))
         {
@@ -2081,7 +2081,7 @@ public sealed class ConfigCommandLoader
 
         var absolutePath = Path.IsPathRooted(outputPath)
             ? outputPath
-            : Path.GetFullPath(Path.Combine(repositoryRoot, outputPath));
+            : Path.GetFullPath(Path.Join(repositoryRoot, outputPath));
 
         var targetDirectory = treatAsFile
             ? Path.GetDirectoryName(absolutePath)
@@ -2157,11 +2157,10 @@ public sealed class ConfigCommandLoader
                 Directory.Delete(directoryFullPath, recursive: false);
             }
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-        }
-        catch (UnauthorizedAccessException)
-        {
+            Console.Error.WriteLine(
+                $"  Warning: could not remove empty output directory '{directoryFullPath}': {ex.Message}");
         }
     }
 
@@ -2252,7 +2251,7 @@ public sealed class ConfigCommandLoader
     {
         if (string.IsNullOrWhiteSpace(configuredPath))
         {
-            return Path.Combine(repositoryRoot, outputRoot, "manifests");
+            return Path.Join(ResolvePathFromRoot(repositoryRoot, outputRoot), "manifests");
         }
 
         if (Path.IsPathRooted(configuredPath))
@@ -2263,11 +2262,16 @@ public sealed class ConfigCommandLoader
         if (configuredPath.StartsWith("~/", StringComparison.Ordinal) ||
             configuredPath.StartsWith("~\\", StringComparison.Ordinal))
         {
-            return Path.Combine(repositoryRoot, CombineOutputPath(outputRoot, configuredPath[2..]));
+            return Path.Join(
+                ResolvePathFromRoot(repositoryRoot, outputRoot),
+                configuredPath[2..].Replace('/', Path.DirectorySeparatorChar));
         }
 
-        return Path.Combine(repositoryRoot, configuredPath);
+        return Path.Join(repositoryRoot, configuredPath);
     }
+
+    private static string ResolvePathFromRoot(string root, string path) =>
+        Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Join(root, path));
 
     private static string CombineOutputPath(string root, string relative)
     {

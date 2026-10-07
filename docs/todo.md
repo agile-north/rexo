@@ -41,8 +41,9 @@ These are recorded decisions, not silently successful implementations:
 - **SchemaStore registration:** repository schemas currently use JSON Schema 2020-12 and strict unknown-property rejection. SchemaStore's contribution guidance recommends draft-07 and cautions against blanket `additionalProperties: false`; an upstream catalog change should follow a compatibility review and dedicated positive/negative schema tests. YAML modelines and the canonical raw schema URLs remain available now.
 - **Platform matrix:** local acceptance runs on Windows, and source-built no-publish acceptance is now required by Linux PR CI. macOS and the full scenario matrix remain follow-ups; no external publication or deployment is used for acceptance.
 
-Foundation acceptance: `pwsh -File scripts\Test-SelfHost.ps1` bootstraps the checked-out
-CLI, runs basic `check`, and executes `release` without `--push`. It rejects stale package
+Foundation acceptance: the workflow bootstraps the checked-out CLI and calls `check`,
+`release` without `--push`, `ci handoff`, and dry-run `ci publish` directly.
+The config's evidence validation rejects stale package
 evidence and asserts successful result/manifest identity, unpublished artifact metadata,
 fresh TRX/coverage/SARIF reports and a packaged README without unresolved tokens.
 This is not proof of full roadmap acceptance or real publishing.

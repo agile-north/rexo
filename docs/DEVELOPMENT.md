@@ -38,7 +38,9 @@ Rexo's embedded policies and `.rexo/rexo.yaml` own restore/build/test/analyze/pa
 orchestration. `rx ci coverage` restores the pinned local report tool and generates
 coverage summaries using the config's output paths; Actions only appends the summary
 to GitHub and uploads evidence. The local tool version lives in `.config/dotnet-tools.json`.
-The acceptance script checks evidence rather than reimplementing that lifecycle.
+There is no lifecycle wrapper script. After the unavoidable source bootstrap,
+workflow steps call the CLI directly; `ci handoff` validates configured evidence
+through `builtin:validate-release-evidence` before sealing outputs.
 After release verification, `rx ci handoff` seals the successful run and provider-described
 prepared outputs. Actions transfers that receipt, this repository's packages and the
 source-built bootstrap CLI to the separate publishing runner. `rx ci publish --confirm`
@@ -55,14 +57,22 @@ image/chart references need provider-specific immutable identity validation, not
 SHA-256 detects changed bytes, but the receipt is not a signed
 attestation: only artifacts from the same trusted Actions run may enter publication.
 
-PR CI continuously exercises the policy-backed lifecycle using
-`pwsh -File scripts\Test-SelfHost.ps1`. It bootstraps the checked-out source into an isolated
-directory, runs a basic readiness gate, executes `release` without `--push`, and checks the
-package and run manifest. No publishing credentials are needed. This does not certify the full
+To reproduce PR verification locally from the repository root:
+
+```powershell
+dotnet publish src\Cli\Cli.csproj -c Release --output artifacts\rx-bootstrap
+dotnet artifacts\rx-bootstrap\Rexo.Cli.dll --non-interactive check
+dotnet artifacts\rx-bootstrap\Rexo.Cli.dll --non-interactive --json-file artifacts/selfhost/release.json release
+dotnet artifacts\rx-bootstrap\Rexo.Cli.dll --non-interactive ci handoff
+dotnet artifacts\rx-bootstrap\Rexo.Cli.dll --non-interactive --dry-run ci publish --confirm
+```
+
+Set `GITVERSION_SEMVER` to select a version; local execution otherwise uses the configured
+fallback. No publishing credentials are needed. This does not certify the full
 readiness or deployment roadmap; see [ROADMAP.md](ROADMAP.md).
 The repository config uses `~/` output paths relative to `outputs.root` (`artifacts`).
 TRX and XPlat coverage attachments share `artifacts/test-results`; merged analyzer output
-lives in `artifacts/sarif`. The acceptance runner requires fresh reports and a newly built
+lives in `artifacts/sarif`. The configured evidence validation requires fresh reports and a newly built
 package, so leftover local outputs cannot satisfy the gate.
 
 The repository release workflow publishes a temporary bootstrap CLI from the checked-out source tree

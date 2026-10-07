@@ -67,8 +67,7 @@ public sealed class CliSmokeTests
             .Where(name => name is not null)
             .ToArray();
 
-        Assert.Contains("Rehearse release without publication", names);
-        Assert.DoesNotContain("Bootstrap local Rexo CLI", names);
+        Assert.Contains("Bootstrap source-built Rexo", names);
         Assert.False(File.Exists(Path.Join(directory.FullName, ".github", "workflows", "build.yml")));
         Assert.Equal("read", workflow.RootElement.GetProperty("permissions").GetProperty("contents").GetString());
         Assert.Single(workflow.RootElement.GetProperty("permissions").EnumerateObject());
@@ -88,13 +87,12 @@ public sealed class CliSmokeTests
         Assert.DoesNotContain("release --push", publish.GetRawText(), StringComparison.Ordinal);
         Assert.Contains("ci publish --confirm", publish.GetRawText(), StringComparison.Ordinal);
         Assert.Contains("actions/download-artifact@v4", publish.GetRawText(), StringComparison.Ordinal);
-        var acceptance = Assert.Single(steps, step => step.GetProperty("name").GetString() == "Rehearse release without publication");
-        Assert.Equal("pwsh", acceptance.GetProperty("shell").GetString());
-        Assert.Contains("./scripts/Test-SelfHost.ps1", acceptance.GetProperty("run").GetString(), StringComparison.Ordinal);
-        var script = await File.ReadAllTextAsync(Path.Join(directory.FullName, "scripts", "Test-SelfHost.ps1"));
-        Assert.Contains("& dotnet $cli --non-interactive check", script, StringComparison.Ordinal);
-        Assert.Contains("& dotnet $cli --non-interactive --json-file $resultPath release", script, StringComparison.Ordinal);
-        Assert.DoesNotContain("--push", script, StringComparison.Ordinal);
+        var acceptance = Assert.Single(steps, step => step.GetProperty("name").GetString() == "Verify release without publication");
+        Assert.Contains("--json-file artifacts/selfhost/release.json release", acceptance.GetProperty("run").GetString(), StringComparison.Ordinal);
+        Assert.False(File.Exists(Path.Join(directory.FullName, "scripts", "Test-SelfHost.ps1")));
+        Assert.DoesNotContain(".ps1", workflowText, StringComparison.Ordinal);
+        Assert.True(Array.IndexOf(names, "Check repository readiness") < Array.IndexOf(names, "Verify release without publication"));
+        Assert.True(Array.IndexOf(names, "Verify release without publication") < Array.IndexOf(names, "Validate and seal verified outputs"));
         var evidence = Assert.Single(steps, step => step.GetProperty("name").GetString() == "Upload release rehearsal evidence");
         Assert.Contains("artifacts/selfhost/**", evidence.GetProperty("with").GetProperty("path").GetString(), StringComparison.Ordinal);
         Assert.Contains("artifacts/packages/*.nupkg", evidence.GetProperty("with").GetProperty("path").GetString(), StringComparison.Ordinal);

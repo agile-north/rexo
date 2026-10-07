@@ -6,6 +6,17 @@ internal sealed class ArtifactBuiltinModule : IConfigBuiltinModule
 {
     public void Register(BuiltinRegistry registry, ConfigBuiltinModuleContext context)
     {
+        registry.Register("builtin:validate-release-evidence", (step, ctx, ct) => ExecuteHandoffAsync(step, async () =>
+        {
+            var renderer = new Rexo.Templating.TemplateRenderer();
+            await ReleaseEvidenceValidator.ValidateAsync(context.RepositoryRoot,
+                (step.With ?? throw new InvalidOperationException("Evidence inputs are required."))
+                    .ToDictionary(input => input.Key, input => renderer.Render(input.Value, ctx)),
+                ct);
+            return new StepResult(step.Id ?? "release-evidence", true, 0, TimeSpan.Zero,
+                new Dictionary<string, object?> { ["message"] = "Release evidence validated." });
+        }));
+
         registry.Register("builtin:seal-artifact-handoff", (step, ctx, ct) => ExecuteHandoffAsync(step, async () =>
         {
             if (ctx.IsDryRun)

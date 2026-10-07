@@ -57,11 +57,28 @@ jobs:
         id: gitversion
         uses: gittools/actions/gitversion/execute@v3
 
-      - name: Rehearse release without publication
-        shell: pwsh
+      - name: Bootstrap source-built Rexo
+        run: dotnet publish src/Cli/Cli.csproj -c Release --output artifacts/rx-bootstrap
+
+      - name: Check repository readiness
         env:
-          RELEASE_VERSION: ${{ steps.gitversion.outputs.semVer }}
-        run: ./scripts/Test-SelfHost.ps1 -Version $env:RELEASE_VERSION
+          GITVERSION_SEMVER: ${{ steps.gitversion.outputs.semVer }}
+        run: dotnet artifacts/rx-bootstrap/Rexo.Cli.dll --non-interactive check
+
+      - name: Verify release without publication
+        env:
+          GITVERSION_SEMVER: ${{ steps.gitversion.outputs.semVer }}
+        run: dotnet artifacts/rx-bootstrap/Rexo.Cli.dll --non-interactive --json-file artifacts/selfhost/release.json release
+
+      - name: Validate and seal verified outputs
+        env:
+          GITVERSION_SEMVER: ${{ steps.gitversion.outputs.semVer }}
+        run: dotnet artifacts/rx-bootstrap/Rexo.Cli.dll --non-interactive ci handoff
+
+      - name: Rehearse prepared publication
+        env:
+          GITVERSION_SEMVER: ${{ steps.gitversion.outputs.semVer }}
+        run: dotnet artifacts/rx-bootstrap/Rexo.Cli.dll --non-interactive --dry-run ci publish --confirm
 
       - name: Generate coverage summary
         if: ${{ always() && hashFiles('artifacts/test-results/**/*.cobertura.xml') != '' }}

@@ -35,6 +35,15 @@ commands:
     steps:
       - id: version
         uses: builtin:resolve-version
+      - id: evidence
+        uses: builtin:validate-release-evidence
+        with:
+          runManifest: artifacts/selfhost/release-manifest.json
+          result: artifacts/selfhost/release.json
+          tests: "{{outputs.tests.results}}"
+          sarif: "{{outputs.analysis.sarif}}/dotnet-build.sarif"
+          archive: "artifacts/packages/Rexo.Cli.{{version.semver}}.nupkg"
+          entry: PACKAGE_README.generated.md
       - id: seal
         uses: builtin:seal-artifact-handoff
         with:

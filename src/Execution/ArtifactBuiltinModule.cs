@@ -15,8 +15,8 @@ internal sealed class ArtifactBuiltinModule : IConfigBuiltinModule
             }
 
             await VerifiedArtifactHandoff.SealAsync(
-                step.With?["runManifest"] ?? throw new InvalidOperationException("runManifest is required."),
-                step.With?["path"] ?? throw new InvalidOperationException("path is required."),
+                RequiredInput(step, "runManifest"),
+                RequiredInput(step, "path"),
                 context.Config, ctx, context.Loader.ArtifactProviders, ct);
             return new StepResult(step.Id ?? "seal-handoff", true, 0, TimeSpan.Zero,
                 new Dictionary<string, object?> { ["message"] = "Verified artifact handoff sealed." });
@@ -29,7 +29,7 @@ internal sealed class ArtifactBuiltinModule : IConfigBuiltinModule
                 throw new InvalidOperationException("Verified publication requires --confirm.");
             }
             var handoff = await VerifiedArtifactHandoff.VerifyAsync(
-                step.With?["path"] ?? throw new InvalidOperationException("path is required."),
+                RequiredInput(step, "path"),
                 context.Config, ctx, context.Loader.ArtifactProviders, ct);
             var version = handoff.Run.Version!;
             var result = await context.Loader.PushArtifactsAsync(
@@ -211,4 +211,9 @@ internal sealed class ArtifactBuiltinModule : IConfigBuiltinModule
                 : Task.FromResult(new StepResult(step.Id ?? "all", false, 1, TimeSpan.Zero,
                     new Dictionary<string, object?> { ["error"] = "builtin:all-artifacts is not registered." }))));
     }
+
+    private static string RequiredInput(StepDefinition step, string name) =>
+        step.With is not null && step.With.TryGetValue(name, out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value
+            : throw new InvalidOperationException($"{name} is required.");
 }

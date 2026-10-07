@@ -864,13 +864,13 @@ public sealed class ConfigCommandLoader
             case "nuget":
                 settings["project"] = TryGetArtifactSettingString(artifact.Settings, "project") ?? string.Empty;
                 settings["source"] = TryGetArtifactSettingString(artifact.Settings, "target.source") ?? "https://api.nuget.org/v3/index.json";
-                settings["output"] = TryGetArtifactSettingString(artifact.Settings, "output") ?? Path.Combine("artifacts", "packages");
+                settings["output"] = TryGetArtifactSettingString(artifact.Settings, "output") ?? Path.Join("artifacts", "packages");
                 break;
             case "helm-oci":
                 settings["chart"] = TryGetArtifactSettingString(artifact.Settings, "chart") ?? artifactName;
                 settings["chartPath"] = TryGetArtifactSettingString(artifact.Settings, "chartPath") ?? "chart";
                 settings["registry"] = TryGetArtifactSettingString(artifact.Settings, "registry") ?? string.Empty;
-                settings["output"] = TryGetArtifactSettingString(artifact.Settings, "output") ?? Path.Combine("artifacts", "charts");
+                settings["output"] = TryGetArtifactSettingString(artifact.Settings, "output") ?? Path.Join("artifacts", "charts");
                 break;
         }
 
@@ -881,8 +881,8 @@ public sealed class ConfigCommandLoader
     {
         return artifact.Type.ToLowerInvariant() switch
         {
-            "nuget" => [Path.Join(TryGetArtifactSettingString(artifact.Settings, "output") ?? Path.Combine("artifacts", "packages"), $"{artifactName}.*.nupkg")],
-            "helm-oci" => [Path.Join(TryGetArtifactSettingString(artifact.Settings, "output") ?? Path.Combine("artifacts", "charts"), $"{(TryGetArtifactSettingString(artifact.Settings, "chart") ?? artifactName)}-{ctx.Version?.SemVer ?? "<version>"}.tgz")],
+            "nuget" => [Path.Join(TryGetArtifactSettingString(artifact.Settings, "output") ?? Path.Join("artifacts", "packages"), $"{artifactName}.*.nupkg")],
+            "helm-oci" => [Path.Join(TryGetArtifactSettingString(artifact.Settings, "output") ?? Path.Join("artifacts", "charts"), $"{(TryGetArtifactSettingString(artifact.Settings, "chart") ?? artifactName)}-{ctx.Version?.SemVer ?? "<version>"}.tgz")],
             "docker" => (TryGetArtifactSettingString(artifact.Settings, "image") is { Length: > 0 } image)
                 ? [image]
                 : [artifactName],
@@ -1275,7 +1275,7 @@ public sealed class ConfigCommandLoader
     {
         var artifactsDir = ResolvePathFromRoot(repositoryRoot, outputRoot);
         Directory.CreateDirectory(artifactsDir);
-        var manifestPath = Path.Combine(artifactsDir, "manifest.json");
+        var manifestPath = Path.Join(artifactsDir, "manifest.json");
 
         var manifest = new
         {

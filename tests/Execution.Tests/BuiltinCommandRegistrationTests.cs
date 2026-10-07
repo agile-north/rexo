@@ -87,7 +87,7 @@ public sealed class BuiltinCommandRegistrationTests
     [Fact]
     public async Task CheckReportsMissingConfiguredArtifactSourcePath()
     {
-        var workingDirectory = Path.Combine(Path.GetTempPath(), $"rexo-check-{Guid.NewGuid():N}");
+        var workingDirectory = Path.Join(Path.GetTempPath(), $"rexo-check-{Guid.NewGuid():N}");
         Directory.CreateDirectory(workingDirectory);
         try
         {
@@ -123,12 +123,12 @@ public sealed class BuiltinCommandRegistrationTests
     [Fact]
     public async Task CheckReportsCredentialPresenceWithoutPrintingTheSecret()
     {
-        var workingDirectory = Path.Combine(Path.GetTempPath(), $"rexo-check-credentials-{Guid.NewGuid():N}");
+        var workingDirectory = Path.Join(Path.GetTempPath(), $"rexo-check-credentials-{Guid.NewGuid():N}");
         Directory.CreateDirectory(workingDirectory);
         try
         {
             const string apiKey = "test-nuget-api-key-that-must-not-appear";
-            await File.WriteAllTextAsync(Path.Combine(workingDirectory, ".env"), $"NUGET_API_KEY={apiKey}");
+            await File.WriteAllTextAsync(Path.Join(workingDirectory, ".env"), $"NUGET_API_KEY={apiKey}");
             var config = new RepoConfig("test", [], [])
             {
                 Artifacts = [new RepoArtifactConfig("nuget", "sample")],
@@ -158,13 +158,13 @@ public sealed class BuiltinCommandRegistrationTests
     [Fact]
     public async Task CheckDetectsEnvironmentVersionFromDotEnvWithoutPrintingItsValue()
     {
-        var workingDirectory = Path.Combine(Path.GetTempPath(), $"rexo-check-version-env-{Guid.NewGuid():N}");
+        var workingDirectory = Path.Join(Path.GetTempPath(), $"rexo-check-version-env-{Guid.NewGuid():N}");
         Directory.CreateDirectory(workingDirectory);
         var variableName = $"REXO_CHECK_VERSION_{Guid.NewGuid():N}";
         const string versionValue = "private-version-value";
         try
         {
-            await File.WriteAllTextAsync(Path.Combine(workingDirectory, ".env"), $"{variableName}={versionValue}");
+            await File.WriteAllTextAsync(Path.Join(workingDirectory, ".env"), $"{variableName}={versionValue}");
             var config = new RepoConfig("test", [], [])
             {
                 Versioning = new RepoVersioningConfig(
@@ -189,12 +189,12 @@ public sealed class BuiltinCommandRegistrationTests
     [Fact]
     public async Task CheckRecognizesAutoVersionProviderAndReportsItsDetection()
     {
-        var workingDirectory = Path.Combine(Path.GetTempPath(), $"rexo-check-version-auto-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(workingDirectory, ".git"));
-        Directory.CreateDirectory(Path.Combine(workingDirectory, ".rexo"));
+        var workingDirectory = Path.Join(Path.GetTempPath(), $"rexo-check-version-auto-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(workingDirectory, ".git"));
+        Directory.CreateDirectory(Path.Join(workingDirectory, ".rexo"));
         try
         {
-            await File.WriteAllTextAsync(Path.Combine(workingDirectory, ".rexo", "rexo.yaml"), "config");
+            await File.WriteAllTextAsync(Path.Join(workingDirectory, ".rexo", "rexo.yaml"), "config");
             var config = new RepoConfig("test", [], [])
             {
                 Versioning = new RepoVersioningConfig("auto"),
@@ -216,7 +216,7 @@ public sealed class BuiltinCommandRegistrationTests
     [Fact]
     public async Task CheckTreatsHelmOciChartAsAnIdentityRatherThanAPath()
     {
-        var workingDirectory = Path.Combine(Path.GetTempPath(), $"rexo-check-helm-{Guid.NewGuid():N}");
+        var workingDirectory = Path.Join(Path.GetTempPath(), $"rexo-check-helm-{Guid.NewGuid():N}");
         Directory.CreateDirectory(workingDirectory);
         try
         {
@@ -289,7 +289,7 @@ public sealed class BuiltinCommandRegistrationTests
     [Fact]
     public async Task ConfigMaterializeDryRunDoesNotWriteFiles()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-materialize-dry-run-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-materialize-dry-run-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         try
         {
@@ -308,7 +308,7 @@ public sealed class BuiltinCommandRegistrationTests
 
             Assert.True(result.Success);
             Assert.Contains("Dry run: would materialize", result.Message, StringComparison.Ordinal);
-            Assert.False(File.Exists(Path.Combine(dir, "GitVersion.yml")));
+            Assert.False(File.Exists(Path.Join(dir, "GitVersion.yml")));
         }
         finally
         {
@@ -351,9 +351,9 @@ public sealed class BuiltinCommandRegistrationTests
     [Fact]
     public async Task DoctorReportsEmbeddedSchemaFallbackWhenNoLocalSchema()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-doctor-noschema-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(dir, ".rexo"));
-        await File.WriteAllTextAsync(Path.Combine(dir, ".rexo", "rexo.json"), "{}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-doctor-noschema-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(dir, ".rexo"));
+        await File.WriteAllTextAsync(Path.Join(dir, ".rexo", "rexo.json"), "{}");
 
         try
         {
@@ -380,10 +380,10 @@ public sealed class BuiltinCommandRegistrationTests
     [Fact]
     public async Task DoctorReportsLocalSchemaWhenPresent()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-doctor-localschema-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(dir, ".rexo"));
-        await File.WriteAllTextAsync(Path.Combine(dir, ".rexo", "rexo.json"), "{}");
-        await File.WriteAllTextAsync(Path.Combine(dir, "rexo.schema.json"), "{}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-doctor-localschema-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(dir, ".rexo"));
+        await File.WriteAllTextAsync(Path.Join(dir, ".rexo", "rexo.json"), "{}");
+        await File.WriteAllTextAsync(Path.Join(dir, "rexo.schema.json"), "{}");
 
         try
         {
@@ -410,9 +410,9 @@ public sealed class BuiltinCommandRegistrationTests
     [Fact]
     public async Task CheckPassesForLoadedConfigAndReturnsStructuredFindings()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-check-valid-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(dir, ".rexo"));
-        await File.WriteAllTextAsync(Path.Combine(dir, ".rexo", "rexo.yaml"), "config");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-check-valid-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(dir, ".rexo"));
+        await File.WriteAllTextAsync(Path.Join(dir, ".rexo", "rexo.yaml"), "config");
 
         try
         {
@@ -446,10 +446,10 @@ public sealed class BuiltinCommandRegistrationTests
     [Fact]
     public async Task CheckTreatsDuplicateConfigAsWarningUnlessStrict()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-check-duplicates-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(dir, ".rexo"));
-        await File.WriteAllTextAsync(Path.Combine(dir, ".rexo", "rexo.yaml"), "config");
-        await File.WriteAllTextAsync(Path.Combine(dir, "rexo.json"), "shadow");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-check-duplicates-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(dir, ".rexo"));
+        await File.WriteAllTextAsync(Path.Join(dir, ".rexo", "rexo.yaml"), "config");
+        await File.WriteAllTextAsync(Path.Join(dir, "rexo.json"), "shadow");
 
         try
         {
@@ -526,9 +526,9 @@ public sealed class BuiltinCommandRegistrationTests
     [Fact]
     public async Task CheckRejectsUnknownArtifactProvidersAndDoesNotResolveRequiredSecrets()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-check-unknown-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(dir, ".rexo"));
-        await File.WriteAllTextAsync(Path.Combine(dir, ".rexo", "rexo.yaml"), "config");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-check-unknown-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(dir, ".rexo"));
+        await File.WriteAllTextAsync(Path.Join(dir, ".rexo", "rexo.yaml"), "config");
 
         try
         {
@@ -566,8 +566,8 @@ public sealed class BuiltinCommandRegistrationTests
     public async Task CheckReportsMissingPolicyLockWhenStrictLockingIsEnabled()
     {
         var originalRequireLocked = Environment.GetEnvironmentVariable("REXO_POLICY_REQUIRE_LOCKED");
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-check-policy-lock-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(dir, ".rexo"));
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-check-policy-lock-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(dir, ".rexo"));
 
         try
         {
@@ -583,7 +583,7 @@ public sealed class BuiltinCommandRegistrationTests
             Assert.False(missingLock.Success);
             Assert.Contains("strict policy locking", missingLock.Message, StringComparison.OrdinalIgnoreCase);
 
-            await File.WriteAllTextAsync(Path.Combine(dir, ".rexo", "rexo.lock.yaml"), "schemaVersion: \"1.0\"\npolicies: []\n");
+            await File.WriteAllTextAsync(Path.Join(dir, ".rexo", "rexo.lock.yaml"), "schemaVersion: \"1.0\"\npolicies: []\n");
             var existingLock = await executor.ExecuteAsync("check", invocation, CancellationToken.None);
             Assert.Contains("policy.lockfile", existingLock.Message, StringComparison.Ordinal);
             Assert.Contains("lack lock entries", existingLock.Message, StringComparison.OrdinalIgnoreCase);
@@ -599,13 +599,13 @@ public sealed class BuiltinCommandRegistrationTests
     public async Task CheckWarnsWhenPolicyLockfileDoesNotCoverConfiguredSources()
     {
         var originalRequireLocked = Environment.GetEnvironmentVariable("REXO_POLICY_REQUIRE_LOCKED");
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-check-policy-coverage-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(dir, ".rexo"));
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-check-policy-coverage-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(dir, ".rexo"));
         try
         {
             Environment.SetEnvironmentVariable("REXO_POLICY_REQUIRE_LOCKED", null);
-            await File.WriteAllTextAsync(Path.Combine(dir, ".rexo", "rexo.yaml"), "config");
-            await File.WriteAllTextAsync(Path.Combine(dir, ".rexo", "rexo.lock.yaml"), "schemaVersion: \"1.0\"\npolicies: []\n");
+            await File.WriteAllTextAsync(Path.Join(dir, ".rexo", "rexo.yaml"), "config");
+            await File.WriteAllTextAsync(Path.Join(dir, ".rexo", "rexo.lock.yaml"), "schemaVersion: \"1.0\"\npolicies: []\n");
             var config = new RepoConfig("sample", null, null)
             {
                 PolicySources = ["https://example.invalid/policy.json"],
@@ -630,13 +630,13 @@ public sealed class BuiltinCommandRegistrationTests
     public async Task CheckReportsMalformedPolicyLockfileAsStructuredError()
     {
         var originalRequireLocked = Environment.GetEnvironmentVariable("REXO_POLICY_REQUIRE_LOCKED");
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-check-policy-lock-invalid-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(dir, ".rexo"));
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-check-policy-lock-invalid-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(dir, ".rexo"));
         try
         {
             Environment.SetEnvironmentVariable("REXO_POLICY_REQUIRE_LOCKED", null);
             await File.WriteAllTextAsync(
-                Path.Combine(dir, ".rexo", "rexo.lock.yaml"),
+                Path.Join(dir, ".rexo", "rexo.lock.yaml"),
                 "schemaVersion: \"1.0\"\npolicies: [\n");
             var config = new RepoConfig("sample", null, null)
             {
@@ -688,7 +688,7 @@ public sealed class BuiltinCommandRegistrationTests
     [Fact]
     public async Task DoctorIncludesHelmCheckWhenHelmOciArtifactConfigured()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-doctor-helm-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-doctor-helm-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         try
         {
@@ -727,7 +727,7 @@ public sealed class BuiltinCommandRegistrationTests
     public async Task DoctorIncludesVersionProviderCheckWhenExternalProviderConfigured(
         string providerKey, string expectedCheckName)
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-doctor-vp-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-doctor-vp-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         try
         {
@@ -761,7 +761,7 @@ public sealed class BuiltinCommandRegistrationTests
     [Fact]
     public async Task DoctorDoesNotIncludeVersionProviderCheckForFixedProvider()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-doctor-fixed-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-doctor-fixed-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         try
         {

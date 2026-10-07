@@ -12,10 +12,10 @@ public sealed class StructuredArtifactSettingsTests
         var originalOverlay = Environment.GetEnvironmentVariable("REXO_OVERLAY");
         Environment.SetEnvironmentVariable("REXO_OVERLAY", null);
 
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-artifact-settings-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-artifact-settings-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
-        var configPath = Path.Combine(dir, "rexo.json");
+        var configPath = Path.Join(dir, "rexo.json");
         await File.WriteAllTextAsync(
             configPath,
             """

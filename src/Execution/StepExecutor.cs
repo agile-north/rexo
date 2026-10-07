@@ -567,7 +567,7 @@ public sealed class StepExecutor : IStepExecutor
         buffer.Append("dockerfileContent=");
         buffer.AppendLine(dockerfileContent);
 
-        var dockerIgnorePath = Path.Combine(buildContextPath, ".dockerignore");
+        var dockerIgnorePath = Path.Join(buildContextPath, ".dockerignore");
         if (File.Exists(dockerIgnorePath))
         {
             var dockerIgnoreContent = await File.ReadAllTextAsync(dockerIgnorePath, cancellationToken);

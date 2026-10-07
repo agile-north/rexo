@@ -10,7 +10,7 @@ public sealed class CliJsonOutputTests
     [Fact]
     public async Task JsonModeWritesOnlyJsonToStdout()
     {
-        var tempDir = Path.Combine(Path.GetTempPath(), $"rexo-cli-json-only-{Guid.NewGuid():N}");
+        var tempDir = Path.Join(Path.GetTempPath(), $"rexo-cli-json-only-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDir);
 
         var originalDirectory = Environment.CurrentDirectory;
@@ -20,7 +20,7 @@ public sealed class CliJsonOutputTests
         try
         {
             await File.WriteAllTextAsync(
-                Path.Combine(tempDir, "rexo.json"),
+                Path.Join(tempDir, "rexo.json"),
                 """
                 {
                   "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -76,7 +76,7 @@ public sealed class CliJsonOutputTests
   [Fact]
   public async Task JsonFileModeWritesRunManifestForDirectCommandPath()
   {
-    var tempDir = Path.Combine(Path.GetTempPath(), $"rexo-cli-json-file-{Guid.NewGuid():N}");
+    var tempDir = Path.Join(Path.GetTempPath(), $"rexo-cli-json-file-{Guid.NewGuid():N}");
     Directory.CreateDirectory(tempDir);
 
     var originalDirectory = Environment.CurrentDirectory;
@@ -85,8 +85,8 @@ public sealed class CliJsonOutputTests
     {
       Environment.CurrentDirectory = tempDir;
 
-      var jsonFile = Path.Combine(tempDir, "out", "version.json");
-      var manifestFile = Path.Combine(tempDir, "out", "version-manifest.json");
+      var jsonFile = Path.Join(tempDir, "out", "version.json");
+      var manifestFile = Path.Join(tempDir, "out", "version-manifest.json");
 
       var exitCode = await Program.ExecuteAsync(["version", "--json-file", jsonFile, "--quiet"], CancellationToken.None);
 
@@ -118,7 +118,7 @@ public sealed class CliJsonOutputTests
   [Fact]
   public async Task CommandOutputDefaultsCanDisableStdoutAndSetJsonFile()
   {
-    var tempDir = Path.Combine(Path.GetTempPath(), $"rexo-cli-output-defaults-{Guid.NewGuid():N}");
+    var tempDir = Path.Join(Path.GetTempPath(), $"rexo-cli-output-defaults-{Guid.NewGuid():N}");
     Directory.CreateDirectory(tempDir);
 
     var originalDirectory = Environment.CurrentDirectory;
@@ -127,10 +127,10 @@ public sealed class CliJsonOutputTests
 
     try
     {
-      var jsonFile = Path.Combine(tempDir, "artifacts", "version.json");
+      var jsonFile = Path.Join(tempDir, "artifacts", "version.json");
 
       await File.WriteAllTextAsync(
-          Path.Combine(tempDir, "rexo.json"),
+          Path.Join(tempDir, "rexo.json"),
           $$"""
           {
             "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -168,7 +168,7 @@ public sealed class CliJsonOutputTests
 
       Assert.Equal(0, exitCode);
       Assert.True(File.Exists(jsonFile));
-      Assert.True(File.Exists(Path.Combine(tempDir, "artifacts", "version-manifest.json")));
+      Assert.True(File.Exists(Path.Join(tempDir, "artifacts", "version-manifest.json")));
       Assert.True(string.IsNullOrWhiteSpace(stdout.ToString()));
       Assert.True(string.IsNullOrWhiteSpace(stderr.ToString()));
     }
@@ -188,7 +188,7 @@ public sealed class CliJsonOutputTests
   [Fact]
   public async Task ExplicitCiProviderCanEmitLocallyWithoutDetectedCi()
   {
-    var tempDir = Path.Combine(Path.GetTempPath(), $"rexo-cli-ci-emit-{Guid.NewGuid():N}");
+    var tempDir = Path.Join(Path.GetTempPath(), $"rexo-cli-ci-emit-{Guid.NewGuid():N}");
     Directory.CreateDirectory(tempDir);
 
     var originalDirectory = Environment.CurrentDirectory;
@@ -198,7 +198,7 @@ public sealed class CliJsonOutputTests
     try
     {
       await File.WriteAllTextAsync(
-          Path.Combine(tempDir, "rexo.json"),
+          Path.Join(tempDir, "rexo.json"),
           """
           {
             "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -251,7 +251,7 @@ public sealed class CliJsonOutputTests
   [Fact]
   public async Task RunManifestIncludesStepExecutionModeForRunStep()
   {
-    var tempDir = Path.Combine(Path.GetTempPath(), $"rexo-cli-manifest-execution-mode-{Guid.NewGuid():N}");
+    var tempDir = Path.Join(Path.GetTempPath(), $"rexo-cli-manifest-execution-mode-{Guid.NewGuid():N}");
     Directory.CreateDirectory(tempDir);
 
     var originalDirectory = Environment.CurrentDirectory;
@@ -259,7 +259,7 @@ public sealed class CliJsonOutputTests
     try
     {
       await File.WriteAllTextAsync(
-          Path.Combine(tempDir, "rexo.json"),
+          Path.Join(tempDir, "rexo.json"),
           """
           {
             "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -278,8 +278,8 @@ public sealed class CliJsonOutputTests
 
       Environment.CurrentDirectory = tempDir;
 
-      var jsonFile = Path.Combine(tempDir, "out", "hello.json");
-      var manifestFile = Path.Combine(tempDir, "out", "hello-manifest.json");
+      var jsonFile = Path.Join(tempDir, "out", "hello.json");
+      var manifestFile = Path.Join(tempDir, "out", "hello-manifest.json");
 
       var exitCode = await Program.ExecuteAsync(["hello", "--json-file", jsonFile, "--quiet"], CancellationToken.None);
 
@@ -311,7 +311,7 @@ public sealed class CliJsonOutputTests
   [Fact]
   public async Task CommandManifestDefaultsToAggregateSummaryFile()
   {
-    var tempDir = Path.Combine(Path.GetTempPath(), $"rexo-cli-command-manifest-default-{Guid.NewGuid():N}");
+    var tempDir = Path.Join(Path.GetTempPath(), $"rexo-cli-command-manifest-default-{Guid.NewGuid():N}");
     Directory.CreateDirectory(tempDir);
 
     var originalDirectory = Environment.CurrentDirectory;
@@ -319,7 +319,7 @@ public sealed class CliJsonOutputTests
     try
     {
       await File.WriteAllTextAsync(
-          Path.Combine(tempDir, "rexo.json"),
+          Path.Join(tempDir, "rexo.json"),
           """
           {
             "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -341,8 +341,8 @@ public sealed class CliJsonOutputTests
 
       Assert.Equal(0, exitCode);
 
-      var aggregatePath = Path.Combine(tempDir, "artifacts", "manifests", "commands.json");
-      var perCommandPath = Path.Combine(tempDir, "artifacts", "manifests", "hello.json");
+      var aggregatePath = Path.Join(tempDir, "artifacts", "manifests", "commands.json");
+      var perCommandPath = Path.Join(tempDir, "artifacts", "manifests", "hello.json");
 
       Assert.True(File.Exists(aggregatePath));
       Assert.False(File.Exists(perCommandPath));
@@ -367,7 +367,7 @@ public sealed class CliJsonOutputTests
   [Fact]
   public async Task CommandManifestSingleModeBehavesLikeAggregate()
   {
-    var tempDir = Path.Combine(Path.GetTempPath(), $"rexo-cli-command-manifest-single-{Guid.NewGuid():N}");
+    var tempDir = Path.Join(Path.GetTempPath(), $"rexo-cli-command-manifest-single-{Guid.NewGuid():N}");
     Directory.CreateDirectory(tempDir);
 
     var originalDirectory = Environment.CurrentDirectory;
@@ -375,7 +375,7 @@ public sealed class CliJsonOutputTests
     try
     {
       await File.WriteAllTextAsync(
-          Path.Combine(tempDir, "rexo.json"),
+          Path.Join(tempDir, "rexo.json"),
           """
           {
             "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -402,9 +402,9 @@ public sealed class CliJsonOutputTests
 
       Assert.Equal(0, exitCode);
 
-      var aggregatePath = Path.Combine(tempDir, "artifacts", "manifests", "commands.json");
-      var singlePath = Path.Combine(tempDir, "artifacts", "manifests", "latest.json");
-      var perCommandPath = Path.Combine(tempDir, "artifacts", "manifests", "hello.json");
+      var aggregatePath = Path.Join(tempDir, "artifacts", "manifests", "commands.json");
+      var singlePath = Path.Join(tempDir, "artifacts", "manifests", "latest.json");
+      var perCommandPath = Path.Join(tempDir, "artifacts", "manifests", "hello.json");
 
       Assert.True(File.Exists(aggregatePath));
       Assert.False(File.Exists(singlePath));
@@ -424,7 +424,7 @@ public sealed class CliJsonOutputTests
   [Fact]
   public async Task CommandManifestCanBePerCommandAndVerbose()
   {
-    var tempDir = Path.Combine(Path.GetTempPath(), $"rexo-cli-command-manifest-verbose-{Guid.NewGuid():N}");
+    var tempDir = Path.Join(Path.GetTempPath(), $"rexo-cli-command-manifest-verbose-{Guid.NewGuid():N}");
     Directory.CreateDirectory(tempDir);
 
     var originalDirectory = Environment.CurrentDirectory;
@@ -432,7 +432,7 @@ public sealed class CliJsonOutputTests
     try
     {
       await File.WriteAllTextAsync(
-          Path.Combine(tempDir, "rexo.json"),
+          Path.Join(tempDir, "rexo.json"),
           """
           {
             "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -460,8 +460,8 @@ public sealed class CliJsonOutputTests
 
       Assert.Equal(0, exitCode);
 
-      var aggregatePath = Path.Combine(tempDir, "artifacts", "manifests", "commands.json");
-      var perCommandPath = Path.Combine(tempDir, "artifacts", "manifests", "hello.json");
+      var aggregatePath = Path.Join(tempDir, "artifacts", "manifests", "commands.json");
+      var perCommandPath = Path.Join(tempDir, "artifacts", "manifests", "hello.json");
 
       Assert.False(File.Exists(aggregatePath));
       Assert.True(File.Exists(perCommandPath));
@@ -489,7 +489,7 @@ public sealed class CliJsonOutputTests
   [InlineData("[]")]
   public async Task CommandManifestCanAggregateAllCommandsInOneFile(string? existingManifest)
   {
-    var tempDir = Path.Combine(Path.GetTempPath(), $"rexo-cli-command-manifest-aggregate-{Guid.NewGuid():N}");
+    var tempDir = Path.Join(Path.GetTempPath(), $"rexo-cli-command-manifest-aggregate-{Guid.NewGuid():N}");
     Directory.CreateDirectory(tempDir);
 
     var originalDirectory = Environment.CurrentDirectory;
@@ -497,7 +497,7 @@ public sealed class CliJsonOutputTests
     try
     {
       await File.WriteAllTextAsync(
-          Path.Combine(tempDir, "rexo.json"),
+          Path.Join(tempDir, "rexo.json"),
           """
           {
             "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -525,7 +525,7 @@ public sealed class CliJsonOutputTests
           }
           """);
 
-      var aggregatePath = Path.Combine(tempDir, "artifacts", "manifests", "commands.json");
+      var aggregatePath = Path.Join(tempDir, "artifacts", "manifests", "commands.json");
       if (existingManifest is not null)
       {
         Directory.CreateDirectory(Path.GetDirectoryName(aggregatePath)!);
@@ -536,8 +536,8 @@ public sealed class CliJsonOutputTests
       Assert.Equal(0, await Program.ExecuteAsync(["hello", "--quiet"], CancellationToken.None));
       Assert.Equal(0, await Program.ExecuteAsync(["goodbye", "--quiet"], CancellationToken.None));
 
-      var latestPath = Path.Combine(tempDir, "artifacts", "manifests", "latest.json");
-      var helloPath = Path.Combine(tempDir, "artifacts", "manifests", "hello.json");
+      var latestPath = Path.Join(tempDir, "artifacts", "manifests", "latest.json");
+      var helloPath = Path.Join(tempDir, "artifacts", "manifests", "hello.json");
 
       Assert.True(File.Exists(aggregatePath));
       Assert.False(File.Exists(latestPath));
@@ -564,7 +564,7 @@ public sealed class CliJsonOutputTests
   [Fact]
   public async Task GitHubActionsProviderWritesVariablesToGitHubEnvFile()
   {
-    var tempDir = Path.Combine(Path.GetTempPath(), $"rexo-cli-gh-env-{Guid.NewGuid():N}");
+    var tempDir = Path.Join(Path.GetTempPath(), $"rexo-cli-gh-env-{Guid.NewGuid():N}");
     Directory.CreateDirectory(tempDir);
 
     var originalDirectory = Environment.CurrentDirectory;
@@ -574,11 +574,11 @@ public sealed class CliJsonOutputTests
 
     try
     {
-      var envFile = Path.Combine(tempDir, "github.env");
+      var envFile = Path.Join(tempDir, "github.env");
       await File.WriteAllTextAsync(envFile, string.Empty);
 
       await File.WriteAllTextAsync(
-          Path.Combine(tempDir, "rexo.json"),
+          Path.Join(tempDir, "rexo.json"),
           """
           {
             "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -636,7 +636,7 @@ public sealed class CliJsonOutputTests
   [Fact]
   public async Task GitHubActionsProviderCanWriteVariablesToGitHubOutputFile()
   {
-    var tempDir = Path.Combine(Path.GetTempPath(), $"rexo-cli-gh-output-{Guid.NewGuid():N}");
+    var tempDir = Path.Join(Path.GetTempPath(), $"rexo-cli-gh-output-{Guid.NewGuid():N}");
     Directory.CreateDirectory(tempDir);
 
     var originalDirectory = Environment.CurrentDirectory;
@@ -646,11 +646,11 @@ public sealed class CliJsonOutputTests
 
     try
     {
-      var outputFile = Path.Combine(tempDir, "github.output");
+      var outputFile = Path.Join(tempDir, "github.output");
       await File.WriteAllTextAsync(outputFile, string.Empty);
 
       await File.WriteAllTextAsync(
-          Path.Combine(tempDir, "rexo.json"),
+          Path.Join(tempDir, "rexo.json"),
           """
           {
             "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",

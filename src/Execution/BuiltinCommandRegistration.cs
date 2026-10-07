@@ -411,8 +411,8 @@ public static class BuiltinCommandRegistration
                         await AddToolFindingAsync("maven", "mvn", "--version", "Install Maven.", findings, cancellationToken);
                         break;
                     case "gradle":
-                        if (File.Exists(Path.Combine(workingDirectory, "gradlew")) ||
-                            File.Exists(Path.Combine(workingDirectory, "gradlew.bat")))
+                        if (File.Exists(Path.Join(workingDirectory, "gradlew")) ||
+                            File.Exists(Path.Join(workingDirectory, "gradlew.bat")))
                         {
                             findings.Add(new CheckFinding("tool.wrapper", "ok", "Gradle wrapper detected."));
                         }
@@ -1441,7 +1441,7 @@ public static class BuiltinCommandRegistration
         // If using gitversion provider, write GitVersion.yml if absent
         if (string.Equals(config.Versioning?.Provider, "gitversion", StringComparison.OrdinalIgnoreCase))
         {
-            var gvPath = Path.Combine(workingDir, "GitVersion.yml");
+            var gvPath = Path.Join(workingDir, "GitVersion.yml");
             if (!File.Exists(gvPath))
             {
                 materialized.Add(gvPath);
@@ -1816,7 +1816,7 @@ public static class BuiltinCommandRegistration
                 $"Invalid --policy value '{policyTemplate}'. Available: {string.Join(", ", EmbeddedPolicyTemplates.TemplateNames)}");
         }
 
-        var configDir = Path.Combine(workingDir, ".rexo");
+        var configDir = Path.Join(workingDir, ".rexo");
 
         string? instructionsTargetPath = null;
         if (withInstructions)
@@ -2014,7 +2014,7 @@ public static class BuiltinCommandRegistration
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
         var candidateDirectory = Path.GetDirectoryName(Path.GetFullPath(path));
-        var rexoDirectory = Path.GetFullPath(Path.Combine(workingDir, ".rexo"));
+        var rexoDirectory = Path.GetFullPath(Path.Join(workingDir, ".rexo"));
         return string.Equals(candidateDirectory, rexoDirectory, pathComparison);
     }
 
@@ -2199,13 +2199,13 @@ public static class BuiltinCommandRegistration
         var targets = new List<(string Path, string Content)>();
         if (provider is "github" or "both")
         {
-            var githubPath = Path.Combine(workingDir, ".github", "workflows", "rexo-release.yml");
+            var githubPath = Path.Join(workingDir, ".github", "workflows", "rexo-release.yml");
             targets.Add((githubPath, BuildGitHubActionsCiTemplate()));
         }
 
         if (provider is "azdo" or "both")
         {
-            var azdoPath = Path.Combine(workingDir, ".azuredevops", "rexo-release.yml");
+            var azdoPath = Path.Join(workingDir, ".azuredevops", "rexo-release.yml");
             targets.Add((azdoPath, BuildAzureDevOpsCiTemplate()));
         }
 
@@ -2261,30 +2261,30 @@ public static class BuiltinCommandRegistration
         var primaryDockerfile = hasDockerfile ? dockerfileCandidates[0] : null;
 
         // Detect all ecosystem signals (independent of each other)
-        var hasPyproject = File.Exists(Path.Combine(workingDir, "pyproject.toml"));
-        var hasRequirements = File.Exists(Path.Combine(workingDir, "requirements.txt"));
+        var hasPyproject = File.Exists(Path.Join(workingDir, "pyproject.toml"));
+        var hasRequirements = File.Exists(Path.Join(workingDir, "requirements.txt"));
         var hasSetupPy = Directory.EnumerateFiles(workingDir, "*.py", SearchOption.TopDirectoryOnly).Any();
         var isPython = hasPyproject || hasRequirements || hasSetupPy;
 
-        var isGo = File.Exists(Path.Combine(workingDir, "go.mod"));
+        var isGo = File.Exists(Path.Join(workingDir, "go.mod"));
 
         var csprojFiles = Directory.EnumerateFiles(workingDir, "*.csproj", SearchOption.AllDirectories).ToList();
         var isDotnet = Directory.EnumerateFiles(workingDir, "*.sln", SearchOption.TopDirectoryOnly).Any()
             || csprojFiles.Count > 0;
         var dotnetLibrary = isDotnet && csprojFiles.Count > 0 && csprojFiles.All(IsLibraryProject);
 
-        var hasPackageJson = File.Exists(Path.Combine(workingDir, "package.json"));
+        var hasPackageJson = File.Exists(Path.Join(workingDir, "package.json"));
         var isNode = hasPackageJson;
 
-        var hasPomXml = File.Exists(Path.Combine(workingDir, "pom.xml"));
-        var hasBuildGradle = File.Exists(Path.Combine(workingDir, "build.gradle"))
-            || File.Exists(Path.Combine(workingDir, "build.gradle.kts"));
-        var hasGemfile = File.Exists(Path.Combine(workingDir, "Gemfile"))
+        var hasPomXml = File.Exists(Path.Join(workingDir, "pom.xml"));
+        var hasBuildGradle = File.Exists(Path.Join(workingDir, "build.gradle"))
+            || File.Exists(Path.Join(workingDir, "build.gradle.kts"));
+        var hasGemfile = File.Exists(Path.Join(workingDir, "Gemfile"))
             || Directory.EnumerateFiles(workingDir, "*.gemspec", SearchOption.TopDirectoryOnly).Any();
         var hasTerraform = Directory.EnumerateFiles(workingDir, "*.tf", SearchOption.TopDirectoryOnly).Any();
-        var hasHelmChart = File.Exists(Path.Combine(workingDir, "Chart.yaml"));
-        var hasDockerCompose = File.Exists(Path.Combine(workingDir, "docker-compose.yml"))
-            || File.Exists(Path.Combine(workingDir, "docker-compose.yaml"));
+        var hasHelmChart = File.Exists(Path.Join(workingDir, "Chart.yaml"));
+        var hasDockerCompose = File.Exists(Path.Join(workingDir, "docker-compose.yml"))
+            || File.Exists(Path.Join(workingDir, "docker-compose.yaml"));
 
         // Determine primary template (ordered by priority)
         string template;

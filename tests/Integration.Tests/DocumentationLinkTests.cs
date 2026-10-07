@@ -70,7 +70,7 @@ public sealed class DocumentationLinkTests
     private static string FindRepositoryRoot()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "solution.slnx")))
+        while (directory is not null && !File.Exists(Path.Join(directory.FullName, "solution.slnx")))
         {
             directory = directory.Parent;
         }

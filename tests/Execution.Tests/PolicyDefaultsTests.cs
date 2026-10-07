@@ -16,11 +16,11 @@ public sealed class PolicyDefaultsTests
 
     private static async Task<RepoConfig> LoadAsync(string extra)
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-policy-defaults-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-policy-defaults-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         try
         {
-            var path = Path.Combine(dir, "rexo.json");
+            var path = Path.Join(dir, "rexo.json");
             await File.WriteAllTextAsync(path, $$"""
                 {
                   "$schema": "{{SchemaUri}}",

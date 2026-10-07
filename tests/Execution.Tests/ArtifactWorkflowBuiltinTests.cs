@@ -105,9 +105,9 @@ public sealed class ArtifactWorkflowBuiltinTests
     [Fact]
     public async Task BuildManifestCapturesHashAndLocationForLocalArtifactFiles()
     {
-        var repositoryRoot = Path.Combine(Path.GetTempPath(), $"rexo-artifact-manifest-{Guid.NewGuid():N}");
+        var repositoryRoot = Path.Join(Path.GetTempPath(), $"rexo-artifact-manifest-{Guid.NewGuid():N}");
         Directory.CreateDirectory(repositoryRoot);
-        var artifactPath = Path.Combine(repositoryRoot, "package.zip");
+        var artifactPath = Path.Join(repositoryRoot, "package.zip");
         const string artifactContent = "immutable artifact bytes";
         await File.WriteAllTextAsync(artifactPath, artifactContent);
 
@@ -146,7 +146,7 @@ public sealed class ArtifactWorkflowBuiltinTests
         var original = Environment.GetEnvironmentVariable(envName);
         Environment.SetEnvironmentVariable(envName, "mapped-plan-secret");
 
-        var repositoryRoot = Path.Combine(Path.GetTempPath(), $"rexo-plan-secrets-{Guid.NewGuid():N}");
+        var repositoryRoot = Path.Join(Path.GetTempPath(), $"rexo-plan-secrets-{Guid.NewGuid():N}");
         Directory.CreateDirectory(repositoryRoot);
 
         try

@@ -8,11 +8,11 @@ public sealed class CliBootstrapperParityTests
     [Fact]
     public async Task BuildServicesAsyncAppliesPolicySecretRoutesOnlyOnce()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-policy-secret-routes-{Guid.NewGuid():N}");
-        var rexoDir = Path.Combine(dir, ".rexo");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-policy-secret-routes-{Guid.NewGuid():N}");
+        var rexoDir = Path.Join(dir, ".rexo");
         Directory.CreateDirectory(rexoDir);
-        var configPath = Path.Combine(rexoDir, "rexo.json");
-        var policyPath = Path.Combine(rexoDir, "policy.json");
+        var configPath = Path.Join(rexoDir, "rexo.json");
+        var policyPath = Path.Join(rexoDir, "policy.json");
         var originalPolicySources = Environment.GetEnvironmentVariable("REXO_POLICY_SOURCES");
         Environment.SetEnvironmentVariable("REXO_POLICY_SOURCES", null);
 
@@ -63,10 +63,10 @@ public sealed class CliBootstrapperParityTests
     [Fact]
     public async Task BuildServicesAsyncThrowsWhenArtifactTypeIsUnsupported()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-parity-artifact-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-parity-artifact-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
-        var configPath = Path.Combine(dir, "rexo.json");
+        var configPath = Path.Join(dir, "rexo.json");
         await File.WriteAllTextAsync(configPath, """
         {
           "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",

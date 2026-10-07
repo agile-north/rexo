@@ -7,12 +7,12 @@ public sealed class ConfigFileLocatorTests
     [Fact]
     public void FindConfigPathPrefersRexoOverRepo()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-locator-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-locator-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         try
         {
-            var repoPath = Path.Combine(dir, "repo.json");
-            var rexoPath = Path.Combine(dir, "rexo.json");
+            var repoPath = Path.Join(dir, "repo.json");
+            var rexoPath = Path.Join(dir, "rexo.json");
             File.WriteAllText(repoPath, "{}");
             File.WriteAllText(rexoPath, "{}");
 
@@ -29,12 +29,12 @@ public sealed class ConfigFileLocatorTests
     [Fact]
     public void FindConfigPathFindsDotRexoLocation()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-locator-{Guid.NewGuid():N}");
-        var hiddenDir = Path.Combine(dir, ".rexo");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-locator-{Guid.NewGuid():N}");
+        var hiddenDir = Path.Join(dir, ".rexo");
         Directory.CreateDirectory(hiddenDir);
         try
         {
-            var rexoPath = Path.Combine(hiddenDir, "rexo.json");
+            var rexoPath = Path.Join(hiddenDir, "rexo.json");
             File.WriteAllText(rexoPath, "{}");
 
             var found = ConfigFileLocator.FindConfigPath(dir);
@@ -125,15 +125,15 @@ public sealed class ConfigFileLocatorTests
     [Fact]
     public void FindPolicyPathPrefersDotRexoThenDotRepoFallback()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-policy-locator-{Guid.NewGuid():N}");
-        var dotRexo = Path.Combine(dir, ".rexo");
-        var dotRepo = Path.Combine(dir, ".repo");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-policy-locator-{Guid.NewGuid():N}");
+        var dotRexo = Path.Join(dir, ".rexo");
+        var dotRepo = Path.Join(dir, ".repo");
         Directory.CreateDirectory(dotRexo);
         Directory.CreateDirectory(dotRepo);
         try
         {
-            var dotRepoPolicy = Path.Combine(dotRepo, "policy.json");
-            var dotRexoPolicy = Path.Combine(dotRexo, "policy.json");
+            var dotRepoPolicy = Path.Join(dotRepo, "policy.json");
+            var dotRexoPolicy = Path.Join(dotRexo, "policy.json");
             File.WriteAllText(dotRepoPolicy, "{}");
             File.WriteAllText(dotRexoPolicy, "{}");
 

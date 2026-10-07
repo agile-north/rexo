@@ -88,9 +88,9 @@ public sealed class ConfigBuilderTests
     [Fact]
     public async Task LoadPoliciesFromSourcesAsyncLoadsLocalFilePolicyAndMerges()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-policy-src-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-policy-src-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
-        var policyFile = Path.Combine(dir, "team.policy.json");
+        var policyFile = Path.Join(dir, "team.policy.json");
 
         await File.WriteAllTextAsync(policyFile,
             """
@@ -129,11 +129,11 @@ public sealed class ConfigBuilderTests
     [Fact]
     public async Task LoadPoliciesFromSourcesAsyncMergesMultipleSourcesInOrder()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-policy-multi-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-policy-multi-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
-        var base1 = Path.Combine(dir, "base.policy.json");
-        var override1 = Path.Combine(dir, "override.policy.json");
+        var base1 = Path.Join(dir, "base.policy.json");
+        var override1 = Path.Join(dir, "override.policy.json");
 
         await File.WriteAllTextAsync(base1,
             """
@@ -210,9 +210,9 @@ public sealed class ConfigBuilderTests
     [Fact]
     public async Task LoadPoliciesFromSourcesAsyncFailsWhenConfiguredSourceCannotBeLoaded()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-policy-missing-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-policy-missing-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
-        var missingPolicy = Path.Combine(dir, "missing.policy.json");
+        var missingPolicy = Path.Join(dir, "missing.policy.json");
 
         try
         {
@@ -235,9 +235,9 @@ public sealed class ConfigBuilderTests
     [Fact]
     public async Task PolicyLockfilePinsSourceContentAndUpdateRefreshesHash()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-policy-lock-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(dir, ".rexo"));
-        var policyPath = Path.Combine(dir, "team.policy.json");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-policy-lock-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(dir, ".rexo"));
+        var policyPath = Path.Join(dir, "team.policy.json");
         const string policyTemplate =
             """
             {
@@ -253,7 +253,7 @@ public sealed class ConfigBuilderTests
         try
         {
             var lockPath = await PolicySourceLoader.UpdateLockfileAsync([policyPath], dir, CancellationToken.None);
-            Assert.Equal(Path.Combine(".rexo", "rexo.lock.yaml"), lockPath);
+            Assert.Equal(Path.Join(".rexo", "rexo.lock.yaml"), lockPath);
             var lockfile = await PolicySourceLoader.ReadLockfileAsync(dir, CancellationToken.None);
             Assert.NotNull(lockfile);
             Assert.Single(lockfile!.Policies);
@@ -280,9 +280,9 @@ public sealed class ConfigBuilderTests
     [InlineData("schemaVersion: \"1.0\"\npolicies:\n  - null\n", "non-empty source")]
     public async Task PolicyLockfileRejectsMalformedEntries(string lockText, string expectedMessage)
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-policy-lock-invalid-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(dir, ".rexo"));
-        await File.WriteAllTextAsync(Path.Combine(dir, ".rexo", "rexo.lock.yaml"), lockText);
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-policy-lock-invalid-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(dir, ".rexo"));
+        await File.WriteAllTextAsync(Path.Join(dir, ".rexo", "rexo.lock.yaml"), lockText);
 
         try
         {

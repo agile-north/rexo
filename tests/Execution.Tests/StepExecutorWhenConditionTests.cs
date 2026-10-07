@@ -32,11 +32,11 @@ public sealed class StepExecutorWhenConditionTests
 
     private static async Task<(string ToolsDir, string LogPath)> CreateFakeDockerAsync()
     {
-        var toolsDir = Path.Combine(Path.GetTempPath(), $"rexo-fake-docker-{Guid.NewGuid():N}");
+        var toolsDir = Path.Join(Path.GetTempPath(), $"rexo-fake-docker-{Guid.NewGuid():N}");
         Directory.CreateDirectory(toolsDir);
 
-        var logPath = Path.Combine(toolsDir, "docker.log");
-        var cmdPath = Path.Combine(toolsDir, "docker.cmd");
+        var logPath = Path.Join(toolsDir, "docker.log");
+        var cmdPath = Path.Join(toolsDir, "docker.cmd");
 
         await File.WriteAllTextAsync(cmdPath, """
                         @echo off
@@ -84,7 +84,7 @@ public sealed class StepExecutorWhenConditionTests
         buffer.Append("dockerfileContent=");
         buffer.AppendLine(dockerfileContent);
 
-        var dockerIgnorePath = Path.Combine(buildContextPath, ".dockerignore");
+        var dockerIgnorePath = Path.Join(buildContextPath, ".dockerignore");
         if (File.Exists(dockerIgnorePath))
         {
             var dockerIgnoreContent = await File.ReadAllTextAsync(dockerIgnorePath);
@@ -415,7 +415,7 @@ public sealed class StepExecutorWhenConditionTests
     public async Task RunStepRendersTemplatedOutputFilePath()
     {
         var executor = CreateExecutor();
-        var root = Path.Combine(Path.GetTempPath(), $"rexo-output-file-{Guid.NewGuid():N}");
+        var root = Path.Join(Path.GetTempPath(), $"rexo-output-file-{Guid.NewGuid():N}");
         Directory.CreateDirectory(root);
 
         try
@@ -446,7 +446,7 @@ public sealed class StepExecutorWhenConditionTests
 
             var result = await executor.ExecuteAsync(step, context, CancellationToken.None);
 
-            var expectedPath = Path.Combine(root, "generated", "1.2.3", "output.txt");
+            var expectedPath = Path.Join(root, "generated", "1.2.3", "output.txt");
             Assert.True(File.Exists(expectedPath));
             Assert.Equal(expectedPath, result.Outputs["outputFile"]);
             Assert.Equal("templated-output", await File.ReadAllTextAsync(expectedPath));
@@ -585,14 +585,14 @@ public sealed class StepExecutorWhenConditionTests
     {
         await ContainerEnvMutationGate.WaitAsync();
         var originalDockerCommand = Environment.GetEnvironmentVariable("REXO_DOCKER_COMMAND");
-        var repositoryRoot = Path.Combine(Path.GetTempPath(), $"rexo-missing-docker-{Guid.NewGuid():N}");
+        var repositoryRoot = Path.Join(Path.GetTempPath(), $"rexo-missing-docker-{Guid.NewGuid():N}");
         Directory.CreateDirectory(repositoryRoot);
 
         try
         {
             Environment.SetEnvironmentVariable(
                 "REXO_DOCKER_COMMAND",
-                Path.Combine(repositoryRoot, "missing-docker.exe"));
+                Path.Join(repositoryRoot, "missing-docker.exe"));
             var step = new StepDefinition(
                 Id: "required-container",
                 Run: "echo must-not-run-on-host",
@@ -629,14 +629,14 @@ public sealed class StepExecutorWhenConditionTests
     {
         await ContainerEnvMutationGate.WaitAsync();
         var originalDockerCommand = Environment.GetEnvironmentVariable("REXO_DOCKER_COMMAND");
-        var repositoryRoot = Path.Combine(Path.GetTempPath(), $"rexo-host-fallback-{Guid.NewGuid():N}");
+        var repositoryRoot = Path.Join(Path.GetTempPath(), $"rexo-host-fallback-{Guid.NewGuid():N}");
         Directory.CreateDirectory(repositoryRoot);
 
         try
         {
             Environment.SetEnvironmentVariable(
                 "REXO_DOCKER_COMMAND",
-                Path.Combine(repositoryRoot, "missing-docker.exe"));
+                Path.Join(repositoryRoot, "missing-docker.exe"));
             var step = new StepDefinition(
                 Id: "host-fallback",
                 Run: "echo host-fallback-ran",
@@ -678,8 +678,8 @@ public sealed class StepExecutorWhenConditionTests
 
         var executor = CreateExecutor();
         var (toolsDir, logPath) = await CreateFakeDockerAsync();
-        var dockerCommandPath = Path.Combine(toolsDir, "docker.cmd");
-        var repoDir = Path.Combine(Path.GetTempPath(), $"rexo-step-container-repo-{Guid.NewGuid():N}");
+        var dockerCommandPath = Path.Join(toolsDir, "docker.cmd");
+        var repoDir = Path.Join(Path.GetTempPath(), $"rexo-step-container-repo-{Guid.NewGuid():N}");
         Directory.CreateDirectory(repoDir);
 
         var originalPath = Environment.GetEnvironmentVariable("PATH");
@@ -691,7 +691,7 @@ public sealed class StepExecutorWhenConditionTests
 
         try
         {
-            await File.WriteAllTextAsync(Path.Combine(repoDir, "Dockerfile"), "FROM scratch\n");
+            await File.WriteAllTextAsync(Path.Join(repoDir, "Dockerfile"), "FROM scratch\n");
 
             var context = ExecutionContext.Empty(repoDir);
             var step = new StepDefinition(
@@ -749,8 +749,8 @@ public sealed class StepExecutorWhenConditionTests
 
         var executor = CreateExecutor();
         var (toolsDir, logPath) = await CreateFakeDockerAsync();
-        var dockerCommandPath = Path.Combine(toolsDir, "docker.cmd");
-        var repoDir = Path.Combine(Path.GetTempPath(), $"rexo-step-container-hash-{Guid.NewGuid():N}");
+        var dockerCommandPath = Path.Join(toolsDir, "docker.cmd");
+        var repoDir = Path.Join(Path.GetTempPath(), $"rexo-step-container-hash-{Guid.NewGuid():N}");
         Directory.CreateDirectory(repoDir);
 
         var originalPath = Environment.GetEnvironmentVariable("PATH");
@@ -762,7 +762,7 @@ public sealed class StepExecutorWhenConditionTests
 
         try
         {
-            await File.WriteAllTextAsync(Path.Combine(repoDir, "Dockerfile"), "FROM scratch\n");
+            await File.WriteAllTextAsync(Path.Join(repoDir, "Dockerfile"), "FROM scratch\n");
 
             var context = ExecutionContext.Empty(repoDir);
             var step = new StepDefinition(
@@ -790,7 +790,7 @@ public sealed class StepExecutorWhenConditionTests
             Assert.Contains("build ", firstLog, StringComparison.Ordinal);
 
             var expectedHash = await ComputeExpectedContainerHashAsync(
-                Path.Combine(repoDir, "Dockerfile"),
+                Path.Join(repoDir, "Dockerfile"),
                 repoDir);
             Environment.SetEnvironmentVariable("REXO_FAKE_IMAGE_HASH", expectedHash);
 

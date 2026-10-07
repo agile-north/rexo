@@ -7,7 +7,7 @@ silencing an analyzer.
 ## Paths
 
 - Never hard-code a platform directory separator in path assertions. Build expected paths with
-  `Path.Combine` and use `Path.DirectorySeparatorChar` when a separator is part of the assertion.
+  `Path.Join` and use `Path.DirectorySeparatorChar` when a separator is part of the assertion.
 - `Path.Combine(root, laterPart)` treats a rooted `laterPart` as a new path and discards `root`.
   Do not rely on that behavior implicitly. If a setting may be absolute, branch explicitly:
 
@@ -26,6 +26,7 @@ silencing an analyzer.
 - Use `Path.Join` for append-only joins even when later components are literals, generated file
   names, hashes, or already checked with `Path.IsPathRooted`. Review every join in a touched file,
   including temporary files, caches, and fallback branches, not just the reported line.
+  This rule applies to test fixtures and expected paths as well as production code.
 - Add tests for both relative and rooted inputs when both are supported. Keep path expectations
   platform-neutral so the same test passes on Windows and Unix.
 

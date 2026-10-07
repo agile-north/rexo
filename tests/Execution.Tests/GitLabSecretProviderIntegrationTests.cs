@@ -67,7 +67,7 @@ public sealed class GitLabSecretProviderIntegrationTests
                 }
             });
 
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-gitlab-{Guid.NewGuid():N}");
+        var tempRoot = Path.Join(Path.GetTempPath(), $"rexo-gitlab-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempRoot);
 
         var originalCiJobToken = Environment.GetEnvironmentVariable("CI_JOB_TOKEN");
@@ -160,7 +160,7 @@ public sealed class GitLabSecretProviderIntegrationTests
                 }
             });
 
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-gitlab-{Guid.NewGuid():N}");
+        var tempRoot = Path.Join(Path.GetTempPath(), $"rexo-gitlab-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempRoot);
 
         var originalOidc = Environment.GetEnvironmentVariable("REXO_TEST_OIDC_TOKEN");

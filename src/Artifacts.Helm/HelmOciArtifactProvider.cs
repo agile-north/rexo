@@ -35,7 +35,7 @@ public sealed class HelmOciArtifactProvider : IArtifactProvider
         CancellationToken cancellationToken)
     {
         var chartPath = GetSetting(artifact, "chartPath") ?? "chart";
-        var output = GetSetting(artifact, "output") ?? Path.Combine("artifacts", "charts");
+        var output = GetSetting(artifact, "output") ?? Path.Join("artifacts", "charts");
         var chartName = GetSetting(artifact, "chart") ?? artifact.Name;
         var version = context.Version?.SemVer;
 
@@ -112,7 +112,7 @@ public sealed class HelmOciArtifactProvider : IArtifactProvider
         CancellationToken cancellationToken)
     {
         var chartName = GetSetting(artifact, "chart") ?? artifact.Name;
-        var output = GetSetting(artifact, "output") ?? Path.Combine("artifacts", "charts");
+        var output = GetSetting(artifact, "output") ?? Path.Join("artifacts", "charts");
         var version = context.Version?.SemVer;
 
         var fileEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);

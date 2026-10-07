@@ -123,9 +123,9 @@ public sealed class GenericArtifactProvider : IArtifactProvider
             Directory.CreateDirectory(absoluteDestination);
 
             var files = Directory.GetFiles(absoluteOutput, $"{artifact.Name}-*");
-            foreach (var file in files)
+            foreach (var (file, destFile) in files
+                .Select(file => (Source: file, Destination: System.IO.Path.Join(absoluteDestination, System.IO.Path.GetFileName(file)))))
             {
-                var destFile = System.IO.Path.Join(absoluteDestination, System.IO.Path.GetFileName(file));
                 File.Copy(file, destFile, overwrite: true);
                 Console.WriteLine($"  Copied: {destFile}");
             }

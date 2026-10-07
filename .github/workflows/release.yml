@@ -48,6 +48,11 @@ jobs:
       - name: Bootstrap local Rexo CLI
         run: dotnet publish src/Cli/Cli.csproj --configuration Release --output artifacts/rx-bootstrap
 
+      - name: Check repository readiness
+        env:
+          GITVERSION_SEMVER: ${{ steps.gitversion.outputs.semVer }}
+        run: dotnet artifacts/rx-bootstrap/Rexo.Cli.dll --non-interactive check
+
       - name: NuGet login (OIDC -> temporary API key)
         id: nuget-login
         if: ${{ env.NUGET_ORG_USER != '' }}
@@ -97,12 +102,12 @@ jobs:
           fail-on-error: true
 
       - name: Generate coverage summary
-        if: ${{ always() && hashFiles('artifacts/coverage/**/*.cobertura.xml') != '' }}
+        if: ${{ always() && hashFiles('artifacts/test-results/**/*.cobertura.xml') != '' }}
         run: |
           dotnet tool install --global dotnet-reportgenerator-globaltool
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
           reportgenerator \
-            -reports:"artifacts/coverage/**/*.cobertura.xml" \
+            -reports:"artifacts/test-results/**/coverage.cobertura.xml" \
             -targetdir:"CoverageReport" \
             -reporttypes:"Cobertura;MarkdownSummaryGithub"
           cat CoverageReport/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
@@ -122,7 +127,7 @@ jobs:
           name: release-coverage-report
           path: |
             CoverageReport/**
-            artifacts/coverage/**
+            artifacts/test-results/**/coverage.cobertura.xml
           if-no-files-found: warn
 
       - name: Publish schema branch (schema/v<major.minor>, moving)

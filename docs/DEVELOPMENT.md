@@ -17,6 +17,16 @@ dotnet test solution.slnx -c Release
 
 ## Repository release workflow
 
+PR CI continuously exercises the same policy-backed lifecycle using
+`pwsh -File scripts\Test-SelfHost.ps1`. It bootstraps the checked-out source into an isolated
+directory, runs a basic readiness gate, executes `release` without `--push`, and checks the
+package and run manifest. No publishing credentials are needed. This does not certify the full
+readiness or deployment roadmap; see [ROADMAP.md](ROADMAP.md).
+The repository config uses `~/` output paths relative to `outputs.root` (`artifacts`).
+TRX and XPlat coverage attachments share `artifacts/test-results`; merged analyzer output
+lives in `artifacts/sarif`. The acceptance runner requires fresh reports and a newly built
+package, so leftover local outputs cannot satisfy the gate.
+
 The repository release workflow publishes a temporary bootstrap CLI from the checked-out source tree
 to an isolated output directory, then runs the repository's `.rexo/rexo.yaml` release command. The
 separate bootstrap path lets that command rebuild the CLI on Windows without locking its build

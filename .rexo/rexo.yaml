@@ -25,10 +25,10 @@ vars:
 outputs:
   root: artifacts
   tests:
-    results: test-results
-    coverage: coverage
+    results: ~/test-results
+    coverage: ~/test-results
   analysis:
-    sarif: sarif
+    sarif: ~/sarif
 artifacts:
   - type: nuget
     name: Rexo.Cli

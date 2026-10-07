@@ -42,8 +42,10 @@ public sealed class CliSmokeTests
         Assert.Equal(0, exitCode);
     }
 
-    [Fact]
-    public async Task ReleaseWorkflowYamlParsesAndUsesIsolatedLocalBootstrap()
+    [Theory]
+    [InlineData("release.yml", "pack-and-publish")]
+    [InlineData("build.yml", "build")]
+    public async Task WorkflowsParseAndUseSourceBuiltRexo(string fileName, string jobName)
     {
         DirectoryInfo? directory = new(AppContext.BaseDirectory);
         while (directory is not null && !File.Exists(Path.Join(directory.FullName, "solution.slnx")))
@@ -52,13 +54,13 @@ public sealed class CliSmokeTests
         }
 
         Assert.NotNull(directory);
-        var workflowPath = Path.Join(directory!.FullName, ".github", "workflows", "release.yml");
+        var workflowPath = Path.Join(directory!.FullName, ".github", "workflows", fileName);
         var workflowText = await File.ReadAllTextAsync(workflowPath);
         using var workflow = JsonDocument.Parse(YamlJsonConverter.ToJson(workflowText, workflowPath));
 
         var steps = workflow.RootElement
             .GetProperty("jobs")
-            .GetProperty("pack-and-publish")
+            .GetProperty(jobName)
             .GetProperty("steps")
             .EnumerateArray()
             .ToArray();
@@ -67,8 +69,34 @@ public sealed class CliSmokeTests
             .Where(name => name is not null)
             .ToArray();
 
-        Assert.Contains("Bootstrap local Rexo CLI", names);
-        Assert.Contains("Build, test, and pack with Rexo (no publisher configured)", names);
+        if (fileName == "release.yml")
+        {
+            Assert.Contains("Bootstrap local Rexo CLI", names);
+            Assert.Contains("Build, test, and pack with Rexo (no publisher configured)", names);
+            var bootstrapIndex = Array.IndexOf(names, "Bootstrap local Rexo CLI");
+            var readinessIndex = Array.IndexOf(names, "Check repository readiness");
+            var loginIndex = Array.IndexOf(names, "NuGet login (OIDC -> temporary API key)");
+            Assert.True(readinessIndex > bootstrapIndex && readinessIndex < loginIndex);
+            var readiness = Assert.Single(steps, step => step.GetProperty("name").GetString() == "Check repository readiness");
+            Assert.Contains("artifacts/rx-bootstrap/Rexo.Cli.dll --non-interactive check", readiness.GetProperty("run").GetString(), StringComparison.Ordinal);
+        }
+        else
+        {
+            var acceptance = Assert.Single(steps, step => step.GetProperty("name").GetString() == "Source-built Rexo self-host acceptance (no publication)");
+            Assert.Equal("pwsh", acceptance.GetProperty("shell").GetString());
+            Assert.Equal("./scripts/Test-SelfHost.ps1", acceptance.GetProperty("run").GetString());
+            var script = await File.ReadAllTextAsync(Path.Join(directory.FullName, "scripts", "Test-SelfHost.ps1"));
+            Assert.Contains("& dotnet $cli --non-interactive check", script, StringComparison.Ordinal);
+            Assert.Contains("& dotnet $cli --non-interactive --json-file $resultPath release", script, StringComparison.Ordinal);
+            Assert.DoesNotContain("--push", script, StringComparison.Ordinal);
+            var evidence = Assert.Single(steps, step => step.GetProperty("name").GetString() == "Upload self-host acceptance evidence");
+            Assert.Contains("artifacts/selfhost/**", evidence.GetProperty("with").GetProperty("path").GetString(), StringComparison.Ordinal);
+            Assert.Contains("artifacts/packages/*.nupkg", evidence.GetProperty("with").GetProperty("path").GetString(), StringComparison.Ordinal);
+        }
+        var reporter = Assert.Single(steps, step => step.GetProperty("name").GetString() == "Publish test results to GitHub Checks");
+        Assert.Equal("artifacts/test-results/**/*.trx", reporter.GetProperty("with").GetProperty("path").GetString());
+        var coverage = Assert.Single(steps, step => step.GetProperty("name").GetString() == "Generate coverage summary");
+        Assert.Contains("artifacts/test-results/**/coverage.cobertura.xml", coverage.GetProperty("run").GetString(), StringComparison.Ordinal);
         Assert.All(steps, step =>
         {
             if (step.TryGetProperty("run", out var run))

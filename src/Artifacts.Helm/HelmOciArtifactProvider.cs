@@ -35,11 +35,12 @@ public sealed class HelmOciArtifactProvider : IArtifactProvider
         CancellationToken cancellationToken)
     {
         var chartPath = GetSetting(artifact, "chartPath") ?? "chart";
-        var output = GetSetting(artifact, "output") ?? Path.Combine("artifacts", "charts");
+        var output = GetSetting(artifact, "output") ?? Path.Join("artifacts", "charts");
         var chartName = GetSetting(artifact, "chart") ?? artifact.Name;
         var version = context.Version?.SemVer;
 
-        Directory.CreateDirectory(Path.Combine(context.RepositoryRoot, output));
+        var outputPath = ResolveRepositoryPath(context.RepositoryRoot, output);
+        Directory.CreateDirectory(outputPath);
 
         var args = new List<string>
         {
@@ -87,7 +88,7 @@ public sealed class HelmOciArtifactProvider : IArtifactProvider
         var packagePath = TryFindPackagePath(context.RepositoryRoot, output, chartName, version);
         if (string.IsNullOrWhiteSpace(packagePath) && !string.IsNullOrWhiteSpace(version))
         {
-            packagePath = Path.Combine(context.RepositoryRoot, output, $"{chartName}-{version}.tgz");
+            packagePath = Path.Join(outputPath, $"{chartName}-{version}.tgz");
         }
 
         return new ArtifactBuildResult(artifact.Name, true, packagePath);
@@ -111,7 +112,7 @@ public sealed class HelmOciArtifactProvider : IArtifactProvider
         CancellationToken cancellationToken)
     {
         var chartName = GetSetting(artifact, "chart") ?? artifact.Name;
-        var output = GetSetting(artifact, "output") ?? Path.Combine("artifacts", "charts");
+        var output = GetSetting(artifact, "output") ?? Path.Join("artifacts", "charts");
         var version = context.Version?.SemVer;
 
         var fileEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
@@ -310,7 +311,7 @@ public sealed class HelmOciArtifactProvider : IArtifactProvider
 
     private static string? TryFindPackagePath(string repoRoot, string output, string chartName, string? version)
     {
-        var outputPath = Path.Combine(repoRoot, output);
+        var outputPath = ResolveRepositoryPath(repoRoot, output);
         if (!Directory.Exists(outputPath))
         {
             return null;
@@ -318,7 +319,7 @@ public sealed class HelmOciArtifactProvider : IArtifactProvider
 
         if (!string.IsNullOrWhiteSpace(version))
         {
-            var expected = Path.Combine(outputPath, $"{chartName}-{version}.tgz");
+            var expected = Path.Join(outputPath, $"{chartName}-{version}.tgz");
             if (File.Exists(expected))
             {
                 return expected;
@@ -330,6 +331,12 @@ public sealed class HelmOciArtifactProvider : IArtifactProvider
             .OrderByDescending(File.GetLastWriteTimeUtc)
             .FirstOrDefault();
     }
+
+    private static string ResolveRepositoryPath(string repositoryRoot, string path) =>
+        Path.GetFullPath(
+            Path.IsPathRooted(path)
+                ? path
+                : Path.Join(repositoryRoot, path));
 
     private static string? ResolveRegistryHostForLogin(
         ArtifactConfig artifact,

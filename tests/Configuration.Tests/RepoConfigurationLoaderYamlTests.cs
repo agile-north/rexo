@@ -10,10 +10,10 @@ public sealed class RepoConfigurationLoaderYamlTests
     {
       var originalOverlay = Environment.GetEnvironmentVariable("REXO_OVERLAY");
       Environment.SetEnvironmentVariable("REXO_OVERLAY", null);
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-yaml-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-yaml-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
-    var schemaPath = Path.Combine(dir, "rexo.schema.json");
-    var configPath = Path.Combine(dir, "rexo.yml");
+    var schemaPath = Path.Join(dir, "rexo.schema.json");
+    var configPath = Path.Join(dir, "rexo.yml");
 
         await File.WriteAllTextAsync(
             schemaPath,
@@ -66,9 +66,9 @@ public sealed class RepoConfigurationLoaderYamlTests
     var originalOverlay = Environment.GetEnvironmentVariable("REXO_OVERLAY");
     Environment.SetEnvironmentVariable("REXO_OVERLAY", null);
 
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-yaml-hidden-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-yaml-hidden-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
-    var configPath = Path.Combine(dir, "rexo.yml");
+    var configPath = Path.Join(dir, "rexo.yml");
 
     await File.WriteAllTextAsync(
         configPath,
@@ -168,9 +168,9 @@ public sealed class RepoConfigurationLoaderYamlTests
   [Fact]
     public async Task LoadPolicyAsyncParsesYaml()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-policy-yaml-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-policy-yaml-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
-        var policyPath = Path.Combine(dir, "policy.yml");
+        var policyPath = Path.Join(dir, "policy.yml");
 
         await File.WriteAllTextAsync(
             policyPath,
@@ -207,9 +207,9 @@ public sealed class RepoConfigurationLoaderYamlTests
     [Fact]
     public async Task LoadPolicyAsyncAllowsEmptyPolicy()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-policy-empty-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-policy-empty-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
-        var policyPath = Path.Combine(dir, "policy.yml");
+        var policyPath = Path.Join(dir, "policy.yml");
 
         await File.WriteAllTextAsync(
             policyPath,
@@ -237,10 +237,10 @@ public sealed class RepoConfigurationLoaderYamlTests
     [Fact]
       public async Task LoadPolicyAsyncThrowsWhenRequiredCapabilityIsUnsupported()
       {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-policy-capability-yaml-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-policy-capability-yaml-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
-          var schemaPath = Path.Combine(dir, "policy.schema.json");
-        var policyPath = Path.Combine(dir, "policy.yml");
+          var schemaPath = Path.Join(dir, "policy.schema.json");
+        var policyPath = Path.Join(dir, "policy.yml");
 
           await File.WriteAllTextAsync(
               schemaPath,

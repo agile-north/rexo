@@ -39,7 +39,7 @@ public sealed class MavenArtifactProvider : IArtifactProvider
         return new ArtifactBuildResult(
             artifact.Name,
             result.ExitCode == 0,
-            result.ExitCode == 0 ? Path.Combine(workDir, "target") : null);
+            result.ExitCode == 0 ? Path.Join(workDir, "target") : null);
     }
 
     public Task<ArtifactTagResult> TagAsync(

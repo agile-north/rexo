@@ -224,7 +224,7 @@ public sealed class PushGateTests
     public async Task PushWritesManifestToConfiguredOutputRoot()
     {
         var provider = new RecordingArtifactProvider("docker");
-        var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-output-root-{Guid.NewGuid():N}");
+        var repoRoot = Path.Join(Path.GetTempPath(), $"rexo-output-root-{Guid.NewGuid():N}");
         Directory.CreateDirectory(repoRoot);
 
         try
@@ -254,7 +254,7 @@ public sealed class PushGateTests
                 repoRoot);
 
             Assert.True(result.Success);
-            Assert.True(File.Exists(Path.Combine(repoRoot, "output", "manifest.json")));
+            Assert.True(File.Exists(Path.Join(repoRoot, "output", "manifest.json")));
         }
         finally
         {
@@ -269,7 +269,7 @@ public sealed class PushGateTests
     public async Task PushDoesNotWriteManifestWhenEmitRuntimeFilesDisabled()
     {
         var provider = new RecordingArtifactProvider("docker");
-        var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-emit-off-{Guid.NewGuid():N}");
+        var repoRoot = Path.Join(Path.GetTempPath(), $"rexo-emit-off-{Guid.NewGuid():N}");
         Directory.CreateDirectory(repoRoot);
 
         try
@@ -299,7 +299,7 @@ public sealed class PushGateTests
                 repoRoot);
 
             Assert.True(result.Success);
-            Assert.False(File.Exists(Path.Combine(repoRoot, "output", "manifest.json")));
+            Assert.False(File.Exists(Path.Join(repoRoot, "output", "manifest.json")));
         }
         finally
         {

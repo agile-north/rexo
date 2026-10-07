@@ -43,6 +43,7 @@ internal sealed class RepoStepContainerConfigJsonConverter : JsonConverter<RepoS
         {
             Use = dto.Use,
             Extends = dto.Extends,
+            Fallback = dto.Fallback,
         };
     }
 
@@ -59,6 +60,7 @@ internal sealed class RepoStepContainerConfigJsonConverter : JsonConverter<RepoS
             Dockerfile = value.Dockerfile,
             Context = value.Context,
             Build = value.Build,
+            Fallback = value.Fallback,
         };
 
         JsonSerializer.Serialize(writer, dto, options);
@@ -101,5 +103,9 @@ internal sealed class RepoStepContainerConfigJsonConverter : JsonConverter<RepoS
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         [JsonPropertyName("build")]
         public RepoStepContainerBuildConfig? Build { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("fallback")]
+        public string? Fallback { get; set; }
     }
 }

@@ -23,7 +23,7 @@ public sealed class SecretsExecutionTests
                 },
             });
 
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        var tempRoot = Path.Join(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempRoot);
 
         var original = Environment.GetEnvironmentVariable("REXO_TEST_REQUIRED_SECRET");
@@ -72,7 +72,7 @@ public sealed class SecretsExecutionTests
                 },
             });
 
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        var tempRoot = Path.Join(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempRoot);
 
         try
@@ -118,7 +118,7 @@ public sealed class SecretsExecutionTests
                 },
             });
 
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        var tempRoot = Path.Join(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempRoot);
 
         try
@@ -179,7 +179,7 @@ public sealed class SecretsExecutionTests
                 },
             });
 
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        var tempRoot = Path.Join(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempRoot);
 
         try
@@ -223,7 +223,7 @@ public sealed class SecretsExecutionTests
                 },
             });
 
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        var tempRoot = Path.Join(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempRoot);
 
         try
@@ -267,7 +267,7 @@ public sealed class SecretsExecutionTests
                 },
             });
 
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        var tempRoot = Path.Join(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempRoot);
 
         try
@@ -319,7 +319,7 @@ public sealed class SecretsExecutionTests
                 },
             });
 
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        var tempRoot = Path.Join(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempRoot);
 
         var originalSecret = Environment.GetEnvironmentVariable(envName);
@@ -354,7 +354,7 @@ public sealed class SecretsExecutionTests
                 },
             });
 
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        var tempRoot = Path.Join(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempRoot);
 
         var original = Environment.GetEnvironmentVariable("REXO_TEST_TEMPLATE_SECRET");
@@ -397,7 +397,7 @@ public sealed class SecretsExecutionTests
                 },
             });
 
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        var tempRoot = Path.Join(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempRoot);
 
         var original = Environment.GetEnvironmentVariable("REXO_TEST_MAPPED_SECRET");
@@ -441,7 +441,7 @@ public sealed class SecretsExecutionTests
                 },
             });
 
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        var tempRoot = Path.Join(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempRoot);
 
         var original = Environment.GetEnvironmentVariable("REXO_TEST_MAPPED_SECRET_ALIASES");
@@ -504,7 +504,7 @@ public sealed class SecretsExecutionTests
                 },
             });
 
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        var tempRoot = Path.Join(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempRoot);
 
         var originalCi = Environment.GetEnvironmentVariable("GITHUB_ACTIONS");
@@ -567,7 +567,7 @@ public sealed class SecretsExecutionTests
                 },
             });
 
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        var tempRoot = Path.Join(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempRoot);
 
         var originalCi = Environment.GetEnvironmentVariable("GITHUB_ACTIONS");
@@ -619,7 +619,7 @@ public sealed class SecretsExecutionTests
                 },
             });
 
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        var tempRoot = Path.Join(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempRoot);
 
         var originalCi = Environment.GetEnvironmentVariable("GITHUB_ACTIONS");
@@ -670,7 +670,7 @@ public sealed class SecretsExecutionTests
                 },
             });
 
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        var tempRoot = Path.Join(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempRoot);
 
         var originalCi = Environment.GetEnvironmentVariable("TF_BUILD");
@@ -724,7 +724,7 @@ public sealed class SecretsExecutionTests
                 },
             });
 
-        var tempRoot = Path.Combine(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        var tempRoot = Path.Join(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempRoot);
 
         var originalGitlabCi = Environment.GetEnvironmentVariable("GITLAB_CI");

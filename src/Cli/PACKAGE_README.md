@@ -140,8 +140,24 @@ rx list
 rx explain build
 rx config sources
 rx config resolved --json
+rx config resolved --provenance
+rx config explain versioning.provider
 rx doctor
+rx check
+rx graph release --format mermaid
+rx completion powershell
+rx update
+rx restore
 ```
+
+`rx check` is non-publishing readiness diagnostics; `rx plan --push` (when the selected policy
+provides it) reports release-flow push eligibility without publishing. `rx update` refreshes remote
+policy content hashes in `.rexo/rexo.lock.yaml`; `rx restore` verifies the lock without updating it.
+
+For local promotion, configure an `environments.<name>.path`, build with `--json-file`, then run
+`rx promote <run-manifest.json> <environment>`. This currently supports exactly one locally
+available file artifact with a verified SHA-256. It does not deploy remotely or promote mutable
+registry tags. `--dry-run` validates the promotion request without writing promotion objects.
 
 ## Configuration Discovery
 
@@ -162,7 +178,7 @@ YAML and JSON are validated against the same schema. Add a
 - Use `rx` directly to run configured commands.
 - Use `rx run <command>` if you want explicit run semantics.
 - Use `--json` or `--json-file <path>` for machine-readable output.
-- Full JSON and manifest field semantics: [Output Contract](../../docs/configuration/output-contract.md).
+- Full JSON and manifest field semantics: [Output Contract](https://github.com/agile-north/rexo/blob/__REXO_DOC_TAG__/docs/configuration/output-contract.md).
 
 ## Documentation
 

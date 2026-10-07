@@ -21,6 +21,17 @@ Controls dry-run mode for the current run.
 
 `runtime.push.dryRun` can be used to force push-related commands into dry-run mode even when the global runtime flag is off.
 
+Dry-run is not a sandbox for arbitrary configured commands: `run` steps still execute unless the command
+uses `{{options.dry-run}}` to guard them. Built-in artifact pushes, policy-lock updates, artifact
+promotion, CI scaffolding, and config materialization honor dry-run by avoiding their respective
+external or persistent writes; read-only checks and planning continue normally.
+
+## Interactive and color output
+
+- `--non-interactive` disables prompts and prevents `rx ui` from opening.
+- `NO_COLOR` disables ANSI colors by default when set to a non-empty value.
+- `--no-color` and `--color` override the environment preference for one invocation.
+
 ## `runtime.commands`
 
 Controls command delegation depth and the fallback merge behavior for same-name command collisions.

@@ -10,6 +10,7 @@
     <ProjectReference Include="..\..\src\Artifacts.Helm\Artifacts.Helm.csproj" />
     <ProjectReference Include="..\..\src\Artifacts.Docker\Artifacts.Docker.csproj" />
     <ProjectReference Include="..\..\src\Artifacts.NuGet\Artifacts.NuGet.csproj" />
+    <ProjectReference Include="..\..\src\Artifacts.Generic\Artifacts.Generic.csproj" />
     <Using Include="Xunit" />
   </ItemGroup>
   <ItemGroup>

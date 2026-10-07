@@ -9,11 +9,72 @@
 
 ```bash
 git clone <repo-url>
-cd repoOS
+cd rexo
 dotnet restore
 dotnet build solution.slnx -c Release
 dotnet test solution.slnx -c Release
 ```
+
+## Repository release workflow
+
+The single `repository-lifecycle` workflow (`release.yml`) has one job (`verify`,
+retaining the required-check name). It bootstraps the current source and calls the normal
+`rx release` lifecycle once, with identical arguments on every event.
+The configured release command gates pushing on `REXO_PUBLISH`, PR context and
+`runtime.push` branch policy; post-push tagging requires an actual successful push.
+Actions selects/authenticates the publisher; PRs and default manual runs do not select one.
+Rexo owns verification, building, tagging and pushing;
+there is no second build, publishing job, artifact transfer or lifecycle wrapper.
+The job has release permissions, including on same-repository PRs; it no longer provides
+the previous read-only job boundary. Publisher login and release mutations remain
+event/branch-gated. Non-publishing runs do not verify real publisher authentication.
+
+`workflow-validation` runs pinned actionlint over all workflows, including shell checks.
+Require `workflow-validation` and `verify` in the `main` branch rules,
+with branches up to date, before merging workflow changes. Repository rules are maintained
+in GitHub settings, not by the workflow itself.
+
+There is no separate build workflow: PRs, branch pushes and manual rehearsals share
+the same job, with one isolated source bootstrap.
+Rexo's embedded policies and `.rexo/rexo.yaml` own restore/build/test/analyze/package
+orchestration. `rx ci coverage` restores the pinned local report tool and generates
+coverage summaries using the config's output paths; Actions only appends the summary
+to GitHub and uploads evidence. The local tool version lives in `.config/dotnet-tools.json`.
+Prepared-artifact and evidence-validation primitives remain available for consumers that
+need a multi-stage pipeline, but this repository does not use them in its normal lifecycle.
+
+To reproduce PR verification locally from the repository root:
+
+```powershell
+dotnet publish src\Cli\Cli.csproj -c Release --output artifacts\rx-bootstrap
+dotnet artifacts\rx-bootstrap\Rexo.Cli.dll --non-interactive --json-file artifacts/selfhost/release.json release
+```
+
+Set `GITVERSION_SEMVER` to select a version; local execution otherwise uses the configured
+fallback. No publishing credentials are needed. This does not certify the full
+readiness or deployment roadmap; see [ROADMAP.md](ROADMAP.md).
+The repository config uses `~/` output paths relative to `outputs.root` (`artifacts`).
+TRX and XPlat coverage attachments share `artifacts/test-results`; merged analyzer output
+lives in `artifacts/sarif`. CI uploads the lifecycle output in one evidence artifact.
+
+The repository release workflow publishes a temporary bootstrap CLI from the checked-out source tree
+to an isolated output directory, then runs the repository's `.rexo/rexo.yaml` release command. The
+separate bootstrap path lets that command rebuild the CLI on Windows without locking its build
+outputs. It does not install an older published Rexo tool to build the current source.
+
+Configure at most one publishing mode:
+
+- Set the `NUGET_ORG_USER` Actions secret to use NuGet.org trusted publishing through OIDC.
+- Otherwise, set the `PUBLISH_TO_GITHUB_PACKAGES` Actions variable to `true` to publish through
+  GitHub Packages using `GITHUB_TOKEN`.
+- If neither is configured, Rexo still builds, tests, and packs the CLI, but the workflow skips
+  package publishing, tagging, schema-branch publication, and GitHub Release creation.
+  If both modes are configured, NuGet.org takes precedence.
+
+The self-hosted version comes from GitVersion and is passed to the local CLI as
+`GITVERSION_SEMVER`. Never add publishing credentials to repository configuration. NuGet push
+output masks API keys, but `dotnet nuget push` receives them as process arguments; use a dedicated
+CI identity and avoid sharing the runner with untrusted processes.
 
 ## Build rules
 
@@ -23,7 +84,8 @@ The build is strict:
 - `AnalysisLevel=latest-recommended` — Roslyn CA rules enforced
 - `GenerateDocumentationFile=true` for all `src/` projects (CS1591 suppressed)
 
-Run this before every commit:
+The integration suite also checks that repository-local Markdown links resolve. Run this before
+every commit:
 
 ```bash
 dotnet build solution.slnx -c Release && dotnet test solution.slnx -c Release --no-build
@@ -32,6 +94,9 @@ dotnet build solution.slnx -c Release && dotnet test solution.slnx -c Release --
 ---
 
 ## Coding Conventions
+
+See [CODE_STYLE.md](CODE_STYLE.md) for examples and guidance on platform-neutral paths,
+rooted-path handling, cleanup exceptions, LINQ transforms, and condition flow.
 
 | Rule | Detail |
 | --- | --- |
@@ -174,8 +239,8 @@ Workflows in `.github/workflows/`:
 
 | File | Triggers |
 | --- | --- |
-| `build.yml` | All pushes and PRs — build + test |
-| `release.yml` | Tags — publish dotnet tool to NuGet |
+| `release.yml` | Release-branch PRs/pushes and manual dispatch — Rexo verification, then gated publication |
+| `workflow-validation.yml` | PRs to main and manual dispatch — workflow and shell lint |
 | `codeql.yml` | Scheduled — security scanning |
 
 ---

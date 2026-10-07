@@ -248,13 +248,13 @@ public sealed class NuGetArtifactProviderTests
         Environment.SetEnvironmentVariable(sourceEnvName, "https://api.nuget.org/v3/index.json");
         Environment.SetEnvironmentVariable(keyEnvName, "test-key");
 
-        var repositoryRoot = Path.Combine(Path.GetTempPath(), $"rexo-nuget-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(repositoryRoot, "artifacts", "packages"));
+        var repositoryRoot = Path.Join(Path.GetTempPath(), $"rexo-nuget-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(repositoryRoot, "artifacts", "packages"));
 
         try
         {
             File.WriteAllText(
-                Path.Combine(repositoryRoot, "artifacts", "packages", "Rexo.Core.1.2.3-alpha.4.snupkg"),
+                Path.Join(repositoryRoot, "artifacts", "packages", "Rexo.Core.1.2.3-alpha.4.snupkg"),
                 "symbols");
 
             var invocations = new List<string>();
@@ -324,13 +324,13 @@ public sealed class NuGetArtifactProviderTests
         Environment.SetEnvironmentVariable(sourceEnvName, "https://api.nuget.org/v3/index.json");
         Environment.SetEnvironmentVariable(keyEnvName, "test-key");
 
-        var repositoryRoot = Path.Combine(Path.GetTempPath(), $"rexo-nuget-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(repositoryRoot, "artifacts", "packages"));
+        var repositoryRoot = Path.Join(Path.GetTempPath(), $"rexo-nuget-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(repositoryRoot, "artifacts", "packages"));
 
         try
         {
             File.WriteAllText(
-                Path.Combine(repositoryRoot, "artifacts", "packages", "Common.RuntimeLicensing.symbols.nupkg"),
+                Path.Join(repositoryRoot, "artifacts", "packages", "Common.RuntimeLicensing.symbols.nupkg"),
                 "symbols");
 
             var invocations = new List<string>();
@@ -397,16 +397,16 @@ public sealed class NuGetArtifactProviderTests
         const string keyEnvName = "NUGET_API_KEY";
         var originalSource = Environment.GetEnvironmentVariable(sourceEnvName);
         var originalApiKey = Environment.GetEnvironmentVariable(keyEnvName);
-        var repositoryRoot = Path.Combine(Path.GetTempPath(), $"rexo-nuget-collision-{Guid.NewGuid():N}");
+        var repositoryRoot = Path.Join(Path.GetTempPath(), $"rexo-nuget-collision-{Guid.NewGuid():N}");
 
         Environment.SetEnvironmentVariable(sourceEnvName, "https://api.nuget.org/v3/index.json");
         Environment.SetEnvironmentVariable(keyEnvName, "test-key");
 
         try
         {
-            Directory.CreateDirectory(Path.Combine(repositoryRoot, "artifacts", "packages"));
-            File.WriteAllText(Path.Combine(repositoryRoot, "artifacts", "packages", "Common.RuntimeLicensing.1.2.3-alpha.4.nupkg"), "pkg");
-            File.WriteAllText(Path.Combine(repositoryRoot, "artifacts", "packages", "Common.RuntimeLicensing.AspNetCore.1.2.3-alpha.4.nupkg"), "pkg");
+            Directory.CreateDirectory(Path.Join(repositoryRoot, "artifacts", "packages"));
+            File.WriteAllText(Path.Join(repositoryRoot, "artifacts", "packages", "Common.RuntimeLicensing.1.2.3-alpha.4.nupkg"), "pkg");
+            File.WriteAllText(Path.Join(repositoryRoot, "artifacts", "packages", "Common.RuntimeLicensing.AspNetCore.1.2.3-alpha.4.nupkg"), "pkg");
 
             var invocations = new List<string>();
             var provider = new NuGetArtifactProvider(
@@ -451,7 +451,7 @@ public sealed class NuGetArtifactProviderTests
         const string keyEnvName = "NUGET_API_KEY";
         var originalSource = Environment.GetEnvironmentVariable(sourceEnvName);
         var originalApiKey = Environment.GetEnvironmentVariable(keyEnvName);
-        var repositoryRoot = Path.Combine(Path.GetTempPath(), $"rexo-nuget-diverse-{Guid.NewGuid():N}");
+        var repositoryRoot = Path.Join(Path.GetTempPath(), $"rexo-nuget-diverse-{Guid.NewGuid():N}");
 
         Environment.SetEnvironmentVariable(sourceEnvName, "https://api.nuget.org/v3/index.json");
         Environment.SetEnvironmentVariable(keyEnvName, "test-key");
@@ -463,10 +463,10 @@ public sealed class NuGetArtifactProviderTests
                 .Concat(DiverseNonPackageFiles)
                 .ToArray();
 
-            Directory.CreateDirectory(Path.Combine(repositoryRoot, "artifacts", "packages"));
-            foreach (var candidate in candidateFiles)
+            Directory.CreateDirectory(Path.Join(repositoryRoot, "artifacts", "packages"));
+            foreach (var fullPath in candidateFiles
+                .Select(candidate => Path.Join(repositoryRoot, candidate.Replace('/', Path.DirectorySeparatorChar))))
             {
-                var fullPath = Path.Combine(repositoryRoot, candidate.Replace('/', Path.DirectorySeparatorChar));
                 var fullDir = Path.GetDirectoryName(fullPath);
                 if (!string.IsNullOrWhiteSpace(fullDir))
                 {
@@ -521,21 +521,21 @@ public sealed class NuGetArtifactProviderTests
         const string keyEnvName = "NUGET_API_KEY";
         var originalSource = Environment.GetEnvironmentVariable(sourceEnvName);
         var originalApiKey = Environment.GetEnvironmentVariable(keyEnvName);
-        var repositoryRoot = Path.Combine(Path.GetTempPath(), $"rexo-nuget-discovery-{Guid.NewGuid():N}");
+        var repositoryRoot = Path.Join(Path.GetTempPath(), $"rexo-nuget-discovery-{Guid.NewGuid():N}");
 
         Environment.SetEnvironmentVariable(sourceEnvName, "https://api.nuget.org/v3/index.json");
         Environment.SetEnvironmentVariable(keyEnvName, "test-key");
 
         try
         {
-            var packagesPath = Path.Combine(repositoryRoot, "artifacts", "packages");
+            var packagesPath = Path.Join(repositoryRoot, "artifacts", "packages");
             Directory.CreateDirectory(packagesPath);
 
-            File.WriteAllText(Path.Combine(packagesPath, "Common.RuntimeLicensing.2.0.0.nupkg"), "pkg");
-            File.WriteAllText(Path.Combine(packagesPath, "Common.RuntimeLicensing.1.2.3-alpha.4.nupkg"), "pkg");
-            File.WriteAllText(Path.Combine(packagesPath, "Common.RuntimeLicensing.symbols.2.0.0.nupkg"), "symbols");
-            File.WriteAllText(Path.Combine(packagesPath, "Common.RuntimeLicensing.alpha.nupkg"), "not-a-version");
-            File.WriteAllText(Path.Combine(packagesPath, "Common.RuntimeLicensing.AspNetCore.1.2.3-alpha.4.nupkg"), "other-artifact");
+            File.WriteAllText(Path.Join(packagesPath, "Common.RuntimeLicensing.2.0.0.nupkg"), "pkg");
+            File.WriteAllText(Path.Join(packagesPath, "Common.RuntimeLicensing.1.2.3-alpha.4.nupkg"), "pkg");
+            File.WriteAllText(Path.Join(packagesPath, "Common.RuntimeLicensing.symbols.2.0.0.nupkg"), "symbols");
+            File.WriteAllText(Path.Join(packagesPath, "Common.RuntimeLicensing.alpha.nupkg"), "not-a-version");
+            File.WriteAllText(Path.Join(packagesPath, "Common.RuntimeLicensing.AspNetCore.1.2.3-alpha.4.nupkg"), "other-artifact");
 
             var invocations = new List<string>();
             var provider = new NuGetArtifactProvider(

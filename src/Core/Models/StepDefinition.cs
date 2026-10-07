@@ -32,7 +32,8 @@ public sealed record StepContainerDefinition(
     string? Entrypoint = null,
     string? Dockerfile = null,
     string? Context = null,
-    StepContainerBuildDefinition? Build = null);
+    StepContainerBuildDefinition? Build = null,
+    string Fallback = "error");
 
 public sealed record StepContainerBuildDefinition(
     string? Target = null,

@@ -2,6 +2,7 @@ namespace Rexo.Execution;
 
 using System.Net.Http;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Xml.Linq;
 using Rexo.Configuration;
 using Rexo.Ci;
@@ -11,15 +12,27 @@ using Rexo.Core.Models;
 using Rexo.Execution.Secrets;
 using Rexo.Git;
 using Rexo.Policies;
+using Rexo.Versioning;
 
 public static class BuiltinCommandRegistration
 {
     private static readonly JsonSerializerOptions IndentedJsonOptions = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions GraphJsonOptions = new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    };
     private static readonly HttpClient HttpClient = new();
     private static readonly string[] InitTemplateChoices = ["dotnet", "node", "python", "go", "java", "ruby", "generic", "blank"];
     private static readonly string[] InitSchemaSourceChoices = ["remote", "local"];
     private static readonly string[] InitFormatChoices = ["yaml", "json"];
     private static readonly string[] InitYesNoChoices = ["yes", "no"];
+    private static readonly string[] RexoConfigExtensions = [".yaml", ".yml", ".json"];
+    private static readonly string[] CompletionBuiltinNames =
+    [
+        "version", "list", "explain", "doctor", "check", "graph", "completion", "restore", "update", "promote",
+        "capabilities", "init", "new", "run", "config", "policies", "secrets", "ui",
+    ];
     private const string DefaultInstructionsPath = ".github/instructions/rexo.instructions.md";
     private const string InstructionsTemplateUrl = RepoConfigurationLoader.RawGitHubBaseUrl + "release/next/docs/rexo.instructions.md";
 
@@ -32,6 +45,15 @@ public static class BuiltinCommandRegistration
 
         registry.Register("doctor", async (invocation, ct) =>
             await RunDoctorAsync(invocation, config, ct));
+
+        registry.Register("check", async (invocation, ct) =>
+            await RunCheckAsync(invocation, config, ct));
+
+        registry.Register("graph", (invocation, _) =>
+            Task.FromResult(RunGraph(invocation, config)));
+
+        registry.Register("completion", (invocation, _) =>
+            Task.FromResult(RunCompletion(invocation, config)));
 
         registry.Register("secrets doctor", async (invocation, ct) =>
             await RunSecretsDoctorAsync(invocation, config, ct));
@@ -92,6 +114,7 @@ public static class BuiltinCommandRegistration
         CancellationToken cancellationToken)
     {
         var checks = new List<(string Name, bool Passed, string? Detail)>();
+        checks.Add(("rexo", true, $"CLI {GetVersion()}, config schema {config?.SchemaVersion ?? "not loaded"}"));
 
         // Git
         var gitInfo = await GitDetector.DetectAsync(invocation.WorkingDirectory, cancellationToken);
@@ -220,9 +243,9 @@ public static class BuiltinCommandRegistration
             var configDirectory = Path.GetDirectoryName(configPath) ?? invocation.WorkingDirectory;
             string[] schemaPathCandidates =
             [
-                Path.Combine(configDirectory, RepoConfigurationLoader.SupportedRexoSchemaPath),
-                Path.Combine(configDirectory, "..", RepoConfigurationLoader.SupportedRexoSchemaPath),
-                Path.Combine(configDirectory, ".rexo", RepoConfigurationLoader.SupportedRexoSchemaPath),
+                Path.Join(configDirectory, RepoConfigurationLoader.SupportedRexoSchemaPath),
+                Path.Join(configDirectory, "..", RepoConfigurationLoader.SupportedRexoSchemaPath),
+                Path.Join(configDirectory, ".rexo", RepoConfigurationLoader.SupportedRexoSchemaPath),
             ];
             var schemaPath = schemaPathCandidates.FirstOrDefault(File.Exists);
 
@@ -230,6 +253,16 @@ public static class BuiltinCommandRegistration
                 ? ("schema", true, $"local rexo schema ({Path.GetFullPath(schemaPath)})")
                 : ("schema", true, "embedded fallback (no local rexo.schema.json found)"));
         }
+
+        var configuredPolicySourceCount = GetConfiguredPolicySources(config).Count;
+        var policyLockPath = Path.Join(invocation.WorkingDirectory, ".rexo", "rexo.lock.yaml");
+        var localPolicyPath = ConfigFileLocator.FindPolicyPath(invocation.WorkingDirectory);
+        checks.Add((
+            "policy",
+            true,
+            $"{configuredPolicySourceCount.ToString(System.Globalization.CultureInfo.InvariantCulture)} remote source(s); " +
+            $"{(localPolicyPath is null ? "no local policy" : $"local policy {Path.GetRelativePath(invocation.WorkingDirectory, localPolicyPath)}")}; " +
+            $"{(File.Exists(policyLockPath) ? "lockfile present" : "lockfile absent")}"));
 
         // CI context
         var ciInfo = CiDetector.Detect();
@@ -244,6 +277,456 @@ public static class BuiltinCommandRegistration
 
         return new CommandResult("doctor", allPassed, allPassed ? 0 : 9, message,
             new Dictionary<string, object?>());
+    }
+
+    private static async Task<CommandResult> RunCheckAsync(
+        CommandInvocation invocation,
+        RepoConfig? config,
+        CancellationToken cancellationToken)
+    {
+        var findings = new List<CheckFinding>();
+        var strict = IsTrue(invocation.Options, "strict");
+        var workingDirectory = invocation.WorkingDirectory;
+        var configPath = ConfigFileLocator.FindConfigPath(workingDirectory);
+
+        if (config is null || configPath is null)
+        {
+            findings.Add(new CheckFinding(
+                "config.missing",
+                "error",
+                "Effective repository configuration was not loaded."));
+        }
+        else
+        {
+            findings.Add(new CheckFinding(
+                "config.loaded",
+                "ok",
+                $"Using {Path.GetRelativePath(workingDirectory, configPath)}."));
+        }
+
+        foreach (var warning in ConfigFileLocator.GetShadowedFileWarnings(workingDirectory))
+        {
+            findings.Add(new CheckFinding("config.duplicate", "warning", warning));
+        }
+
+        if (config?.Versioning is { } versioning)
+        {
+            var configuredProvider = versioning.Provider.ToLowerInvariant();
+            var provider = configuredProvider == "auto"
+                ? AutoVersionProvider.DetectProvider(workingDirectory)
+                : configuredProvider;
+            if (configuredProvider is not ("auto" or "fixed" or "env" or "git" or "gitversion" or "minver" or "nbgv"))
+            {
+                findings.Add(new CheckFinding(
+                    "version.provider.unknown",
+                    "error",
+                    $"Version provider '{versioning.Provider}' is not supported."));
+            }
+            else
+            {
+                var detail = configuredProvider == "auto"
+                    ? $"Configured provider: auto (detected {provider})."
+                    : $"Configured provider: {provider}.";
+                findings.Add(new CheckFinding("version.provider", "ok", detail));
+            }
+
+            switch (provider)
+            {
+                case "env":
+                {
+                    var environmentName = versioning.Settings?.TryGetValue("variable", out var configuredName) == true
+                        ? configuredName
+                        : null;
+                    environmentName = string.IsNullOrWhiteSpace(environmentName) ? "VERSION" : environmentName;
+                    var fileEnvironment = RepositoryEnvironmentFiles.Load(workingDirectory);
+                    var hasEnvironmentValue =
+                        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(environmentName)) ||
+                        fileEnvironment.TryGetValue(environmentName, out var fileValue) &&
+                        !string.IsNullOrWhiteSpace(fileValue);
+                    findings.Add(hasEnvironmentValue
+                        ? new CheckFinding("version.environment.available", "ok", $"Version environment variable '{environmentName}' is available; its value is not displayed.")
+                        : versioning.Fallback is not null
+                            ? new CheckFinding("version.environment.fallback", "info", $"Version environment variable '{environmentName}' is unavailable; the configured fallback will be used.")
+                            : new CheckFinding("version.environment.missing", "warning", $"Version environment variable '{environmentName}' is unavailable; the provider will use its default fallback."));
+                    break;
+                }
+                case "gitversion":
+                {
+                    var gitVersion = await IsToolAvailableAsync("gitversion", "/version", cancellationToken);
+                    if (!gitVersion.ok)
+                    {
+                        gitVersion = await IsToolAvailableAsync("dotnet-gitversion", "/version", cancellationToken);
+                    }
+
+                    findings.Add(gitVersion.ok
+                        ? new CheckFinding("tool.available", "ok", $"gitversion: {gitVersion.version}")
+                        : new CheckFinding("tool.missing", "warning", "gitversion is not available. Install GitVersion.Tool."));
+                    break;
+                }
+                case "minver":
+                    await AddToolFindingAsync("minver", "dotnet", "minver --version", "Install minver-cli.", findings, cancellationToken);
+                    break;
+                case "nbgv":
+                    await AddToolFindingAsync("nbgv", "nbgv", "--version", "Install nbgv.", findings, cancellationToken);
+                    break;
+            }
+        }
+
+        if (config?.Artifacts is { Count: > 0 })
+        {
+            foreach (var artifact in config.Artifacts)
+            {
+                AddArtifactSourcePathFindings(artifact, workingDirectory, findings);
+            }
+
+            foreach (var artifactType in config.Artifacts.Select(artifact => artifact.Type).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                switch (artifactType.ToLowerInvariant())
+                {
+                    case "docker":
+                        await AddToolFindingAsync("docker", "docker", "--version", "Install Docker CLI.", findings, cancellationToken);
+                        break;
+                    case "docker-compose":
+                        await AddToolFindingAsync("docker compose", "docker", "compose version", "Install Docker Compose.", findings, cancellationToken);
+                        break;
+                    case "helm":
+                    case "helm-oci":
+                        await AddToolFindingAsync("helm", "helm", "version --short", "Install Helm.", findings, cancellationToken);
+                        break;
+                    case "npm":
+                        await AddToolFindingAsync("npm", "npm", "--version", "Install Node.js and npm.", findings, cancellationToken);
+                        break;
+                    case "pypi":
+                        var python = await IsToolAvailableAsync("python", "--version", cancellationToken);
+                        if (!python.ok)
+                        {
+                            python = await IsToolAvailableAsync("python3", "--version", cancellationToken);
+                        }
+
+                        findings.Add(python.ok
+                            ? new CheckFinding("tool.available", "ok", $"python: {python.version}")
+                            : new CheckFinding("tool.missing", "warning", "Python is not available; install Python to build PyPI artifacts."));
+                        break;
+                    case "maven":
+                        await AddToolFindingAsync("maven", "mvn", "--version", "Install Maven.", findings, cancellationToken);
+                        break;
+                    case "gradle":
+                        if (File.Exists(Path.Join(workingDirectory, "gradlew")) ||
+                            File.Exists(Path.Join(workingDirectory, "gradlew.bat")))
+                        {
+                            findings.Add(new CheckFinding("tool.wrapper", "ok", "Gradle wrapper detected."));
+                        }
+                        else
+                        {
+                            await AddToolFindingAsync("gradle", "gradle", "--version", "Install Gradle or add the Gradle wrapper.", findings, cancellationToken);
+                        }
+
+                        break;
+                    case "rubygems":
+                        await AddToolFindingAsync("gem", "gem", "--version", "Install RubyGems.", findings, cancellationToken);
+                        break;
+                    case "terraform":
+                        await AddToolFindingAsync("terraform", "terraform", "--version", "Install Terraform.", findings, cancellationToken);
+                        break;
+                    case "nuget":
+                        await AddToolFindingAsync("dotnet", "dotnet", "--version", "Install the .NET SDK.", findings, cancellationToken);
+                        break;
+                    default:
+                        findings.Add(new CheckFinding(
+                            "artifact.provider.unknown",
+                            "error",
+                            $"Artifact provider '{artifactType}' is not recognized by this CLI."));
+                        break;
+                }
+            }
+        }
+
+        if (config?.Commands?.Values.Any(CommandUsesContainer) == true)
+        {
+            await AddToolFindingAsync("docker", "docker", "--version", "Install Docker or explicitly opt out of container execution.", findings, cancellationToken);
+        }
+
+        if (config?.Artifacts is { Count: > 0 })
+        {
+            var gitInfo = await GitDetector.DetectAsync(workingDirectory, cancellationToken);
+            var ciInfo = CiDetector.Detect();
+            var mappedSecrets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var artifact in config.Artifacts)
+            {
+                var blockers = ConfigCommandLoader.GetPushPolicyBlockers(
+                    config,
+                    artifact,
+                    ciInfo.IsPullRequest,
+                    gitInfo.IsClean,
+                    gitInfo.Branch);
+                findings.Add(blockers.Count == 0
+                    ? new CheckFinding("artifact.push.policy", "ok", $"Artifact '{artifact.Name ?? artifact.Type}' is not blocked by configured push policy.")
+                    : new CheckFinding(
+                        "artifact.push.policy",
+                        "info",
+                        $"Artifact '{artifact.Name ?? artifact.Type}' is policy-blocked: {string.Join("; ", blockers)}."));
+
+                if (artifact.Type.ToLowerInvariant() is not ("docker" or "nuget" or "helm-oci"))
+                {
+                    continue;
+                }
+
+                var credentials = ConfigCommandLoader.GetCredentialChecks(artifact, workingDirectory, mappedSecrets);
+                if (credentials.Count == 0)
+                {
+                    findings.Add(new CheckFinding(
+                        "artifact.credentials.unchecked",
+                        "info",
+                        $"Credential preflight is not implemented for artifact '{artifact.Name ?? artifact.Type}'."));
+                    continue;
+                }
+
+                foreach (var credential in credentials)
+                {
+                    findings.Add(credential.Available
+                        ? new CheckFinding(
+                            "artifact.credentials.available",
+                            "info",
+                            $"Artifact '{artifact.Name ?? artifact.Type}': {credential.Detail}")
+                        : new CheckFinding(
+                            "artifact.credentials.unavailable",
+                            config.Secrets?.Items?.Count > 0 ? "info" : "warning",
+                            config.Secrets?.Items?.Count > 0
+                                ? $"Direct environment preflight did not find credentials for artifact '{artifact.Name ?? artifact.Type}'; configured secret providers were not resolved."
+                                : $"Artifact '{artifact.Name ?? artifact.Type}': {credential.Detail}"));
+                }
+            }
+        }
+
+        var policySources = GetConfiguredPolicySources(config);
+        if (policySources.Count > 0)
+        {
+            var policyLockPath = Path.Join(workingDirectory, ".rexo", "rexo.lock.yaml");
+            var requireLocked = string.Equals(
+                Environment.GetEnvironmentVariable("REXO_POLICY_REQUIRE_LOCKED"),
+                "true",
+                StringComparison.OrdinalIgnoreCase);
+            if (!File.Exists(policyLockPath))
+            {
+                findings.Add(new CheckFinding(
+                    "policy.lockfile",
+                    requireLocked ? "error" : "warning",
+                    requireLocked
+                        ? "Strict policy locking is enabled but .rexo/rexo.lock.yaml is missing. Run 'rx update'."
+                        : "No policy lockfile is present. Run 'rx update' to pin policy source content."));
+            }
+            else
+            {
+                HashSet<string>? lockedSources = null;
+                try
+                {
+                    lockedSources = await ReadLockedPolicySourcesAsync(policyLockPath, cancellationToken);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or JsonException)
+                {
+                    findings.Add(new CheckFinding(
+                        "policy.lockfile.invalid",
+                        "error",
+                        $"Policy lockfile could not be read: {ex.Message}"));
+                }
+
+                if (lockedSources is not null)
+                {
+                    var missingSourceCount = policySources.Count(source =>
+                        !lockedSources.Contains(source));
+                    findings.Add(missingSourceCount == 0
+                        ? new CheckFinding(
+                            "policy.lockfile",
+                            "ok",
+                            $"Policy lockfile present at {Path.GetRelativePath(workingDirectory, policyLockPath)} with coverage for all configured sources.")
+                        : new CheckFinding(
+                            "policy.lockfile.coverage",
+                            requireLocked ? "error" : "warning",
+                            $"{missingSourceCount.ToString(System.Globalization.CultureInfo.InvariantCulture)} configured policy source(s) lack lock entries. Run 'rx update' to refresh lock coverage."));
+                }
+            }
+        }
+
+        var secrets = config?.Secrets;
+        if (secrets?.Items?.Any(item => item.Value.Required ?? secrets.Defaults?.Required ?? true) == true)
+        {
+            findings.Add(new CheckFinding(
+                "secrets.preflight",
+                "info",
+                "Required secret values were not resolved by this non-mutating check; run 'rx secrets preflight' to verify availability."));
+        }
+
+        if (config?.Runtime?.Push is { } push)
+        {
+            findings.Add(push.Enabled == false
+                ? new CheckFinding("push.disabled", "info", "Artifact pushes are disabled by runtime.push.enabled.")
+                : new CheckFinding("push.requires-confirmation", "info", "Artifact publishing is not attempted by rx check; use the configured release flow to evaluate push eligibility."));
+        }
+
+        if (config?.Artifacts is { Count: > 0 })
+        {
+            findings.Add(new CheckFinding(
+                "push.preflight",
+                "info",
+                "Credential checks report presence only and do not resolve configured secret providers. Use 'rx plan --push' for release-flow eligibility details; no publish or registry request was made."));
+        }
+
+        var hasErrors = findings.Any(finding => finding.Severity == "error");
+        var hasWarnings = findings.Any(finding => finding.Severity == "warning");
+        var success = !hasErrors && (!strict || !hasWarnings);
+        var lines = findings.Select(finding =>
+            $"  [{finding.Severity.ToUpperInvariant()}] {finding.Code}: {finding.Message}");
+        var summary = $"Repository check {(success ? "passed" : "failed")}: " +
+            $"{findings.Count(finding => finding.Severity == "error")} error(s), " +
+            $"{findings.Count(finding => finding.Severity == "warning")} warning(s)." +
+            (strict ? " Strict mode is enabled." : string.Empty);
+
+        return new CommandResult(
+            "check",
+            success,
+            success ? 0 : 9,
+            $"{summary}{Environment.NewLine}{string.Join(Environment.NewLine, lines)}",
+            new Dictionary<string, object?>
+            {
+                ["summary"] = summary,
+                ["strict"] = strict,
+                ["findings"] = findings,
+            });
+    }
+
+    private static async Task AddToolFindingAsync(
+        string name,
+        string tool,
+        string arguments,
+        string remediation,
+        List<CheckFinding> findings,
+        CancellationToken cancellationToken)
+    {
+        var result = await IsToolAvailableAsync(tool, arguments, cancellationToken);
+        findings.Add(result.ok
+            ? new CheckFinding("tool.available", "ok", $"{name}: {result.version}")
+            : new CheckFinding("tool.missing", "warning", $"{name} is not available. {remediation}"));
+    }
+
+    private static async Task<HashSet<string>> ReadLockedPolicySourcesAsync(
+        string lockfilePath,
+        CancellationToken cancellationToken)
+    {
+        var text = await File.ReadAllTextAsync(lockfilePath, cancellationToken);
+        var json = YamlJsonConverter.IsYamlPath(lockfilePath)
+            ? YamlJsonConverter.ToJson(text, lockfilePath)
+            : text;
+        using var document = JsonDocument.Parse(json);
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidDataException("Policy lockfile must contain a JSON/YAML object.");
+        }
+
+        var policies = document.RootElement.EnumerateObject()
+            .FirstOrDefault(property => property.Name.Equals("policies", StringComparison.OrdinalIgnoreCase))
+            .Value;
+        if (policies.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidDataException("Policy lockfile property 'policies' must be an array.");
+        }
+
+        var sources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var policy in policies.EnumerateArray())
+        {
+            if (policy.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var source = policy.EnumerateObject()
+                .FirstOrDefault(property => property.Name.Equals("source", StringComparison.OrdinalIgnoreCase))
+                .Value;
+            var sourceText = source.ValueKind == JsonValueKind.String ? source.GetString() : null;
+            if (!string.IsNullOrWhiteSpace(sourceText))
+            {
+                sources.Add(sourceText);
+            }
+        }
+
+        return sources;
+    }
+
+    private static void AddArtifactSourcePathFindings(
+        RepoArtifactConfig artifact,
+        string workingDirectory,
+        List<CheckFinding> findings)
+    {
+        if (artifact.Settings is null)
+        {
+            return;
+        }
+
+        foreach (var (settingName, settingValue) in artifact.Settings)
+        {
+            var isFile = settingName.Equals("project", StringComparison.OrdinalIgnoreCase);
+            var isDirectory = settingName.Equals("directory", StringComparison.OrdinalIgnoreCase) ||
+                settingName.Equals("context", StringComparison.OrdinalIgnoreCase) ||
+                settingName.Equals("chartPath", StringComparison.OrdinalIgnoreCase) ||
+                settingName.Equals("chart-directory", StringComparison.OrdinalIgnoreCase) ||
+                (artifact.Type.Equals("helm", StringComparison.OrdinalIgnoreCase) &&
+                 settingName.Equals("chart", StringComparison.OrdinalIgnoreCase));
+            if ((!isFile && !isDirectory) || settingValue.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            var configuredPath = settingValue.GetString();
+            if (string.IsNullOrWhiteSpace(configuredPath) || configuredPath.Contains("{{", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var resolvedPath = Path.GetFullPath(
+                Path.IsPathRooted(configuredPath)
+                    ? configuredPath
+                    : Path.Join(workingDirectory, configuredPath));
+            var exists = isFile ? File.Exists(resolvedPath) : Directory.Exists(resolvedPath);
+            findings.Add(exists
+                ? new CheckFinding(
+                    "artifact.source.available",
+                    "ok",
+                    $"Artifact '{artifact.Name ?? artifact.Type}' source {settingName} exists: {Path.GetRelativePath(workingDirectory, resolvedPath)}.")
+                : new CheckFinding(
+                    "artifact.source.missing",
+                    "error",
+                    $"Artifact '{artifact.Name ?? artifact.Type}' source {settingName} does not exist: {configuredPath}."));
+        }
+    }
+
+    private static bool CommandUsesContainer(RepoCommandConfig command) =>
+        command.Steps.Any(step => StepUsesContainer(step, command.Container)) ||
+        command.Before?.Any(step => StepUsesContainer(step, command.Container)) == true ||
+        command.After?.Any(step => StepUsesContainer(step, command.Container)) == true;
+
+    private static IReadOnlyList<string> GetConfiguredPolicySources(RepoConfig? config)
+    {
+        var sources = config?.PolicySources?.ToList() ?? [];
+        var environmentSources = Environment.GetEnvironmentVariable("REXO_POLICY_SOURCES");
+        if (!string.IsNullOrWhiteSpace(environmentSources))
+        {
+            sources.AddRange(environmentSources.Split(
+                [';', ','],
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        }
+
+        return sources.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    private static bool StepUsesContainer(RepoStepConfig step, RepoStepContainerConfig? commandContainer)
+    {
+        if (step.Run is null)
+        {
+            return false;
+        }
+
+        var container = step.Container ?? commandContainer;
+        return container is not null &&
+            !string.Equals(container.Use, RepoStepContainerConfig.NoneReference, StringComparison.OrdinalIgnoreCase);
     }
 
     private static CommandResult RunList(
@@ -261,6 +744,12 @@ public static class BuiltinCommandRegistration
         lines.Add("  explain <command>    Explain a command (or alias)");
         lines.Add("  explain version      Show version provider configuration");
         lines.Add("  doctor               Check environment and configuration");
+        lines.Add("  check                Safely assess repository readiness");
+        lines.Add("  graph <command>      Show the effective steps for a command");
+        lines.Add("  completion <shell>   Generate shell completion scripts");
+        lines.Add("  restore              Verify configured policy sources against the lockfile");
+        lines.Add("  update               Resolve and refresh the policy lockfile");
+        lines.Add("  promote              Promote a verified local file artifact");
         lines.Add("  secrets doctor       Validate and summarize configured secrets");
         lines.Add("  secrets preflight    Alias for secrets doctor");
         lines.Add("  capabilities         Show runtime capability contract and supported features");
@@ -269,7 +758,9 @@ public static class BuiltinCommandRegistration
         lines.Add("  new                  Alias for init");
         lines.Add("  run <command>        Run a config-defined command");
         lines.Add("  config resolved      Show the fully-merged configuration");
+        lines.Add("      --provenance     Include repository source files (with sensitive values redacted)");
         lines.Add("  config sources       Show config file sources in merge order");
+        lines.Add("  config explain       Show an effective property value");
         lines.Add("  config materialize   Write the merged config to a file");
         lines.Add("  policies list        List available embedded policies");
         lines.Add("  policies show        Show an embedded policy's JSON");
@@ -334,6 +825,201 @@ public static class BuiltinCommandRegistration
             });
     }
 
+    private static CommandResult RunGraph(CommandInvocation invocation, RepoConfig? config)
+    {
+        if (!invocation.Args.TryGetValue("command", out var requestedName) ||
+            string.IsNullOrWhiteSpace(requestedName))
+        {
+            return CommandResult.Fail("graph", 1, "Usage: rx graph <command> [--format text|json|mermaid]");
+        }
+
+        if (config?.Commands is null)
+        {
+            return CommandResult.Fail("graph", 1, "No configured commands are available.");
+        }
+
+        var commandName = requestedName;
+        if (config.Aliases?.TryGetValue(commandName, out var aliasTarget) == true)
+        {
+            commandName = aliasTarget;
+        }
+
+        if (!config.Commands.TryGetValue(commandName, out var command))
+        {
+            return CommandResult.Fail("graph", 8, $"Command '{requestedName}' was not found in the effective configuration.");
+        }
+
+        var nodes = new List<GraphStep>();
+        AddGraphSteps(nodes, command.Before, command.Container, "before");
+        AddGraphSteps(nodes, command.Steps, command.Container, "steps");
+        AddGraphSteps(nodes, command.After, command.Container, "after");
+
+        var format = invocation.Options.TryGetValue("format", out var requestedFormat)
+            ? requestedFormat?.ToLowerInvariant()
+            : "text";
+        if (format is not ("text" or "json" or "mermaid"))
+        {
+            return CommandResult.Fail("graph", 1, $"Unsupported graph format '{format}'. Use text, json, or mermaid.");
+        }
+
+        var message = format switch
+        {
+            "json" => JsonSerializer.Serialize(
+                new { command = commandName, description = command.Description, steps = nodes },
+                GraphJsonOptions),
+            "mermaid" => RenderGraphMermaid(commandName, nodes),
+            _ => RenderGraphText(commandName, command.Description, nodes),
+        };
+
+        return new CommandResult(
+            "graph",
+            true,
+            0,
+            message,
+            new Dictionary<string, object?>
+            {
+                ["command"] = commandName,
+                ["description"] = command.Description,
+                ["steps"] = nodes,
+                ["format"] = format,
+            });
+    }
+
+    private static void AddGraphSteps(
+        List<GraphStep> nodes,
+        IReadOnlyList<RepoStepConfig>? steps,
+        RepoStepContainerConfig? commandContainer,
+        string phase)
+    {
+        if (steps is null)
+        {
+            return;
+        }
+
+        for (var index = 0; index < steps.Count; index++)
+        {
+            var step = steps[index];
+            var container = step.Container ?? commandContainer;
+            var kind = step.Uses is not null ? "builtin"
+                : step.Command is not null ? "command"
+                : step.Run is not null ? "run"
+                : "condition";
+            var target = step.Uses ?? step.Command;
+            var containerName = container is null ||
+                string.Equals(container.Use, RepoStepContainerConfig.NoneReference, StringComparison.OrdinalIgnoreCase)
+                    ? null
+                    : container.Use ?? container.Image ?? (container.Dockerfile is not null ? "built" : "container");
+
+            nodes.Add(new GraphStep(
+                step.Id ?? $"{phase}-{(index + 1).ToString(System.Globalization.CultureInfo.InvariantCulture)}",
+                phase,
+                kind,
+                target,
+                step.When,
+                step.Parallel == true,
+                step.AlwaysRun == true,
+                containerName));
+        }
+    }
+
+    private static string RenderGraphText(string command, string? description, IReadOnlyList<GraphStep> steps)
+    {
+        var lines = new List<string> { $"Command graph: {command}" };
+        if (!string.IsNullOrWhiteSpace(description))
+        {
+            lines.Add($"  {description}");
+        }
+
+        foreach (var step in steps)
+        {
+            var details = new List<string> { step.Kind };
+            if (step.Target is not null) details.Add(step.Target);
+            if (step.Condition is not null) details.Add($"when: {step.Condition}");
+            if (step.Parallel) details.Add("parallel");
+            if (step.AlwaysRun) details.Add("always-run");
+            if (step.Container is not null) details.Add($"container: {step.Container}");
+            lines.Add($"  {step.Phase}/{step.Id}: {string.Join(" | ", details)}");
+        }
+
+        if (steps.Count == 0)
+        {
+            lines.Add("  (no steps)");
+        }
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private static string RenderGraphMermaid(string command, IReadOnlyList<GraphStep> steps)
+    {
+        var lines = new List<string> { "flowchart TD", $"  start([\"{EscapeMermaid(command)}\"])" };
+        var previous = "start";
+        for (var index = 0; index < steps.Count; index++)
+        {
+            var step = steps[index];
+            var nodeId = $"step{(index + 1).ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+            var label = $"{step.Phase}/{step.Id}: {step.Kind}" +
+                (step.Target is null ? string.Empty : $" {step.Target}") +
+                (step.Condition is null ? string.Empty : $" (when {step.Condition})") +
+                (step.Parallel ? " [parallel]" : string.Empty) +
+                (step.AlwaysRun ? " [always-run]" : string.Empty) +
+                (step.Container is null ? string.Empty : $" [container {step.Container}]");
+            lines.Add($"  {previous} --> {nodeId}[\"{EscapeMermaid(label)}\"]");
+            previous = nodeId;
+        }
+
+        if (steps.Count == 0)
+        {
+            lines.Add("  start --> done([\"No steps\"])");
+        }
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private static string EscapeMermaid(string value) =>
+        value.Replace("\"", "'", StringComparison.Ordinal)
+            .Replace("\r", " ", StringComparison.Ordinal)
+            .Replace("\n", " ", StringComparison.Ordinal);
+
+    private sealed record GraphStep(
+        string Id,
+        string Phase,
+        string Kind,
+        string? Target,
+        string? Condition,
+        bool Parallel,
+        bool AlwaysRun,
+        string? Container);
+
+    private static CommandResult RunCompletion(CommandInvocation invocation, RepoConfig? config)
+    {
+        if (!invocation.Args.TryGetValue("shell", out var shell) || string.IsNullOrWhiteSpace(shell))
+        {
+            return CommandResult.Fail("completion", 1, "Usage: rx completion <bash|zsh|fish|powershell>");
+        }
+
+        var commands = CompletionBuiltinNames
+            .Concat(config?.Commands?.Keys.AsEnumerable() ?? Enumerable.Empty<string>())
+            .Concat(config?.Aliases?.Keys.AsEnumerable() ?? Enumerable.Empty<string>())
+            .Where(command => command.All(character =>
+                char.IsAsciiLetterOrDigit(character) || character is '_' or '-' or '.'))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(command => command, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var words = string.Join(' ', commands);
+        var script = shell.ToLowerInvariant() switch
+        {
+            "bash" => $"complete -W \"{words}\" rx",
+            "zsh" => $"#compdef rx\ncompctl -k \"({words})\" rx",
+            "fish" => $"complete -c rx -f -a '{words}'",
+            "powershell" => $"Register-ArgumentCompleter -Native -CommandName rx -ScriptBlock {{ param($wordToComplete) @('{string.Join("','", commands)}') | Where-Object {{ $_ -like \"$wordToComplete*\" }} }}",
+            _ => null,
+        };
+
+        return script is null
+            ? CommandResult.Fail("completion", 1, $"Unsupported shell '{shell}'. Use bash, zsh, fish, or powershell.")
+            : CommandResult.Ok("completion", script);
+    }
+
     private static CommandResult RunExplain(CommandInvocation invocation, RepoConfig? config)
     {
         // The command name is passed as the first arg
@@ -343,7 +1029,7 @@ public static class BuiltinCommandRegistration
         }
 
         // Check built-ins (including sub-commands)
-        var builtins = new[] { "version", "list", "explain", "doctor", "secrets", "secrets doctor", "secrets preflight", "capabilities", "init", "new", "run", "help", "ui",
+        var builtins = new[] { "version", "list", "explain", "doctor", "check", "graph", "completion", "secrets", "secrets doctor", "secrets preflight", "capabilities", "init", "new", "run", "help", "ui",
             "config", "config resolved", "config sources", "config materialize",
             "explain version", "policies", "policies list", "policies show" };
         if (builtins.Contains(commandName, StringComparer.OrdinalIgnoreCase))
@@ -750,27 +1436,31 @@ public static class BuiltinCommandRegistration
 
         var materialized = new List<string>();
         var workingDir = invocation.WorkingDirectory;
+        var dryRun = IsTrue(invocation.Options, "dry-run");
 
         // If using gitversion provider, write GitVersion.yml if absent
         if (string.Equals(config.Versioning?.Provider, "gitversion", StringComparison.OrdinalIgnoreCase))
         {
-            var gvPath = Path.Combine(workingDir, "GitVersion.yml");
+            var gvPath = Path.Join(workingDir, "GitVersion.yml");
             if (!File.Exists(gvPath))
             {
-                const string gvContent = """
-                    mode: ContinuousDeployment
-                    branches: {}
-                    ignore:
-                      sha: []
-                    """;
-                await File.WriteAllTextAsync(gvPath, gvContent, cancellationToken);
                 materialized.Add(gvPath);
-                Console.WriteLine($"  Materialized: {gvPath}");
+                if (!dryRun)
+                {
+                    const string gvContent = """
+                        mode: ContinuousDeployment
+                        branches: {}
+                        ignore:
+                          sha: []
+                        """;
+                    await File.WriteAllTextAsync(gvPath, gvContent, cancellationToken);
+                    Console.WriteLine($"  Materialized: {gvPath}");
+                }
             }
         }
 
         var message = materialized.Count > 0
-            ? $"Materialized {materialized.Count} file(s): {string.Join(", ", materialized)}"
+            ? $"{(dryRun ? "Dry run: would materialize" : "Materialized")} {materialized.Count} file(s): {string.Join(", ", materialized)}"
             : "Nothing to materialize.";
 
         return CommandResult.Ok("config materialize", message);
@@ -848,24 +1538,64 @@ public static class BuiltinCommandRegistration
         string versionArg,
         CancellationToken cancellationToken)
     {
+        var psi = new System.Diagnostics.ProcessStartInfo(tool, versionArg)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        };
+        System.Diagnostics.Process? startedProcess;
         try
         {
-            var psi = new System.Diagnostics.ProcessStartInfo(tool, versionArg)
-            {
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-            };
-            using var process = System.Diagnostics.Process.Start(psi);
-            if (process is null) return (false, null);
-            var output = await process.StandardOutput.ReadToEndAsync(cancellationToken);
-            await process.WaitForExitAsync(cancellationToken);
-            return (process.ExitCode == 0, output.Trim().Split('\n')[0].Trim());
+            startedProcess = System.Diagnostics.Process.Start(psi);
         }
-        catch (Exception)
+        catch (Exception ex) when (
+            ex is System.ComponentModel.Win32Exception or
+                FileNotFoundException or
+                InvalidOperationException)
         {
             return (false, "not found");
+        }
+
+        if (startedProcess is null)
+        {
+            return (false, null);
+        }
+
+        using (startedProcess)
+        {
+            var process = startedProcess;
+            var standardOutputTask = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
+            var standardErrorTask = process.StandardError.ReadToEndAsync(CancellationToken.None);
+            try
+            {
+                await process.WaitForExitAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                if (!process.HasExited)
+                {
+                    try
+                    {
+                        process.Kill(entireProcessTree: true);
+                    }
+                    catch (InvalidOperationException ex) when (process.HasExited)
+                    {
+                        Console.Error.WriteLine(
+                            $"  Process {process.Id} already exited during cancellation: {ex.Message}");
+                    }
+                }
+
+                await process.WaitForExitAsync(CancellationToken.None);
+                await Task.WhenAll(standardOutputTask, standardErrorTask);
+                throw;
+            }
+
+            var output = await standardOutputTask;
+            var error = await standardErrorTask;
+            var detail = string.IsNullOrWhiteSpace(output) ? error : output;
+            return (process.ExitCode == 0, detail.Trim().Split('\n')[0].Trim());
         }
     }
 
@@ -1086,7 +1816,7 @@ public static class BuiltinCommandRegistration
                 $"Invalid --policy value '{policyTemplate}'. Available: {string.Join(", ", EmbeddedPolicyTemplates.TemplateNames)}");
         }
 
-        var configDir = Path.Combine(workingDir, ".rexo");
+        var configDir = Path.Join(workingDir, ".rexo");
 
         string? instructionsTargetPath = null;
         if (withInstructions)
@@ -1105,7 +1835,7 @@ public static class BuiltinCommandRegistration
                 return CommandResult.Fail("init", 1, "Invalid --instructions-path value. Use a repository-relative path.");
             }
 
-            instructionsTargetPath = Path.GetFullPath(Path.Combine(workingDir, relativeInstructionsPath));
+            instructionsTargetPath = Path.GetFullPath(Path.Join(workingDir, relativeInstructionsPath));
             var repoRoot = Path.GetFullPath(workingDir + Path.DirectorySeparatorChar);
             if (!instructionsTargetPath.StartsWith(repoRoot, StringComparison.OrdinalIgnoreCase))
             {
@@ -1146,7 +1876,7 @@ public static class BuiltinCommandRegistration
         string? policySchemaPath = null;
         if (schemaSource.Equals("local", StringComparison.OrdinalIgnoreCase))
         {
-            rexoSchemaPath = Path.Combine(workingDir, ".rexo", RepoConfigurationLoader.SupportedRexoSchemaPath);
+            rexoSchemaPath = Path.Join(workingDir, ".rexo", RepoConfigurationLoader.SupportedRexoSchemaPath);
             if (File.Exists(rexoSchemaPath) && !force)
             {
                 return CommandResult.Fail("init", 1, $"Target schema already exists at '{rexoSchemaPath}'. Use --force to overwrite.");
@@ -1158,7 +1888,7 @@ public static class BuiltinCommandRegistration
 
             if (withPolicy)
             {
-                policySchemaPath = Path.Combine(workingDir, ".rexo", RepoConfigurationLoader.SupportedPolicySchemaPath);
+                policySchemaPath = Path.Join(workingDir, ".rexo", RepoConfigurationLoader.SupportedPolicySchemaPath);
                 if (File.Exists(policySchemaPath) && !force)
                 {
                     return CommandResult.Fail("init", 1, $"Target schema already exists at '{policySchemaPath}'. Use --force to overwrite.");
@@ -1191,6 +1921,16 @@ public static class BuiltinCommandRegistration
             policyJson = ApplySchemaMetadata(policyJson, policySchemaValue);
             var policyContent = useYaml ? YamlJsonConverter.FromJson(policyJson, policySchemaValue) : policyJson;
             await File.WriteAllTextAsync(policyPath, policyContent, cancellationToken);
+        }
+
+        var removedVariants = new List<string>();
+        if (force)
+        {
+            removedVariants.AddRange(RemoveSupersededRexoVariants(workingDir, "rexo", configPath));
+            if (withPolicy)
+            {
+                removedVariants.AddRange(RemoveSupersededRexoVariants(workingDir, "policy", policyPath!));
+            }
         }
 
         if (withInstructions)
@@ -1227,14 +1967,55 @@ public static class BuiltinCommandRegistration
             withInstructions ? $"Initialized instructions: {instructionsTargetPath}" : "Instructions file: not created",
             withDockerArtifact ? "Initialized docker artifact: yes" : "Initialized docker artifact: no",
             detection.HasDockerfile ? $"Packaging hint: Dockerfile detected. Consider adding a docker artifact to .rexo/rexo{configExtension}." : "Packaging hint: none detected",
-            "Policy template tips: run 'rx policies list' and 'rx policies show <name>'",
-            "Next steps:",
-            $"  1. Review and edit .rexo/rexo{configExtension} for your workflow.",
-            "  2. Run 'rx list' and then 'rx build' (or your configured command).",
-            "  Docs: https://github.com/agile-north/rexo/blob/release/next/docs/CONFIGURATION.md",
         };
 
+        lines.AddRange(removedVariants.Select(path => $"Removed superseded config: {path}"));
+        lines.AddRange(ConfigFileLocator.FindAllConfigPaths(workingDir)
+            .Where(path => !IsInRexoDirectory(path, workingDir))
+            .Select(path => $"Preserved out-of-slot config candidate: {Path.GetRelativePath(workingDir, path)}"));
+        lines.Add("Policy template tips: run 'rx policies list' and 'rx policies show <name>'");
+        lines.Add("Next steps:");
+        lines.Add($"  1. Review and edit .rexo/rexo{configExtension} for your workflow.");
+        lines.Add("  2. Run 'rx list' and then 'rx build' (or your configured command).");
+        lines.Add("  Docs: https://github.com/agile-north/rexo/blob/release/next/docs/CONFIGURATION.md");
+
         return CommandResult.Ok("init", string.Join(Environment.NewLine, lines));
+    }
+
+    private static IReadOnlyList<string> RemoveSupersededRexoVariants(
+        string workingDir,
+        string fileStem,
+        string selectedPath)
+    {
+        var selectedFullPath = Path.GetFullPath(selectedPath);
+        var pathComparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        var removed = new List<string>();
+
+        foreach (var candidate in RexoConfigExtensions
+            .Select(extension => Path.GetFullPath(Path.Join(workingDir, ".rexo", fileStem + extension))))
+        {
+            if (string.Equals(candidate, selectedFullPath, pathComparison) || !File.Exists(candidate))
+            {
+                continue;
+            }
+
+            File.Delete(candidate);
+            removed.Add(Path.GetRelativePath(workingDir, candidate));
+        }
+
+        return removed;
+    }
+
+    private static bool IsInRexoDirectory(string path, string workingDir)
+    {
+        var pathComparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        var candidateDirectory = Path.GetDirectoryName(Path.GetFullPath(path));
+        var rexoDirectory = Path.GetFullPath(Path.Join(workingDir, ".rexo"));
+        return string.Equals(candidateDirectory, rexoDirectory, pathComparison);
     }
 
     private static CommandResult RunInitDetect(CommandInvocation invocation, InitDetection detection)
@@ -1415,32 +2196,41 @@ public static class BuiltinCommandRegistration
             return CommandResult.Fail("init", 1, "Invalid --provider value. Use github|azdo|both.");
         }
 
-        var createdFiles = new List<string>();
-
+        var targets = new List<(string Path, string Content)>();
         if (provider is "github" or "both")
         {
-            var githubPath = Path.Combine(workingDir, ".github", "workflows", "rexo-release.yml");
-            if (File.Exists(githubPath) && !force)
-            {
-                return CommandResult.Fail("init", 1, $"Target CI file already exists at '{githubPath}'. Use --force to overwrite.");
-            }
-
-            Directory.CreateDirectory(Path.GetDirectoryName(githubPath)!);
-            await File.WriteAllTextAsync(githubPath, BuildGitHubActionsCiTemplate(), cancellationToken);
-            createdFiles.Add(githubPath);
+            var githubPath = Path.Join(workingDir, ".github", "workflows", "rexo-release.yml");
+            targets.Add((githubPath, BuildGitHubActionsCiTemplate()));
         }
 
         if (provider is "azdo" or "both")
         {
-            var azdoPath = Path.Combine(workingDir, ".azuredevops", "rexo-release.yml");
-            if (File.Exists(azdoPath) && !force)
-            {
-                return CommandResult.Fail("init", 1, $"Target CI file already exists at '{azdoPath}'. Use --force to overwrite.");
-            }
+            var azdoPath = Path.Join(workingDir, ".azuredevops", "rexo-release.yml");
+            targets.Add((azdoPath, BuildAzureDevOpsCiTemplate()));
+        }
 
-            Directory.CreateDirectory(Path.GetDirectoryName(azdoPath)!);
-            await File.WriteAllTextAsync(azdoPath, BuildAzureDevOpsCiTemplate(), cancellationToken);
-            createdFiles.Add(azdoPath);
+        var existingTarget = targets.FirstOrDefault(target => File.Exists(target.Path) && !force);
+        if (existingTarget.Path is not null)
+        {
+            return CommandResult.Fail(
+                "init",
+                1,
+                $"Target CI file already exists at '{existingTarget.Path}'. Use --force to overwrite.");
+        }
+
+        var dryRun = IsTrue(options, "dry-run");
+        if (dryRun)
+        {
+            return CommandResult.Ok(
+                "init",
+                $"Dry run: would initialize CI scaffolding for provider: {provider}{Environment.NewLine}" +
+                $"Generated files:{Environment.NewLine}{string.Join(Environment.NewLine, targets.Select(target => $"  - {target.Path}"))}");
+        }
+
+        foreach (var target in targets)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(target.Path)!);
+            await File.WriteAllTextAsync(target.Path, target.Content, cancellationToken);
         }
 
         var lines = new List<string>
@@ -1449,7 +2239,7 @@ public static class BuiltinCommandRegistration
             "Generated files:",
         };
 
-        lines.AddRange(createdFiles.Select(path => $"  - {path}"));
+        lines.AddRange(targets.Select(target => $"  - {target.Path}"));
         lines.Add("Next steps:");
         lines.Add("  1. Ensure a dotnet tool manifest includes rx (dotnet tool restore succeeds)." );
         lines.Add("  2. Configure registry/feed credentials in CI secrets/variables." );
@@ -1471,30 +2261,30 @@ public static class BuiltinCommandRegistration
         var primaryDockerfile = hasDockerfile ? dockerfileCandidates[0] : null;
 
         // Detect all ecosystem signals (independent of each other)
-        var hasPyproject = File.Exists(Path.Combine(workingDir, "pyproject.toml"));
-        var hasRequirements = File.Exists(Path.Combine(workingDir, "requirements.txt"));
+        var hasPyproject = File.Exists(Path.Join(workingDir, "pyproject.toml"));
+        var hasRequirements = File.Exists(Path.Join(workingDir, "requirements.txt"));
         var hasSetupPy = Directory.EnumerateFiles(workingDir, "*.py", SearchOption.TopDirectoryOnly).Any();
         var isPython = hasPyproject || hasRequirements || hasSetupPy;
 
-        var isGo = File.Exists(Path.Combine(workingDir, "go.mod"));
+        var isGo = File.Exists(Path.Join(workingDir, "go.mod"));
 
         var csprojFiles = Directory.EnumerateFiles(workingDir, "*.csproj", SearchOption.AllDirectories).ToList();
         var isDotnet = Directory.EnumerateFiles(workingDir, "*.sln", SearchOption.TopDirectoryOnly).Any()
             || csprojFiles.Count > 0;
         var dotnetLibrary = isDotnet && csprojFiles.Count > 0 && csprojFiles.All(IsLibraryProject);
 
-        var hasPackageJson = File.Exists(Path.Combine(workingDir, "package.json"));
+        var hasPackageJson = File.Exists(Path.Join(workingDir, "package.json"));
         var isNode = hasPackageJson;
 
-        var hasPomXml = File.Exists(Path.Combine(workingDir, "pom.xml"));
-        var hasBuildGradle = File.Exists(Path.Combine(workingDir, "build.gradle"))
-            || File.Exists(Path.Combine(workingDir, "build.gradle.kts"));
-        var hasGemfile = File.Exists(Path.Combine(workingDir, "Gemfile"))
+        var hasPomXml = File.Exists(Path.Join(workingDir, "pom.xml"));
+        var hasBuildGradle = File.Exists(Path.Join(workingDir, "build.gradle"))
+            || File.Exists(Path.Join(workingDir, "build.gradle.kts"));
+        var hasGemfile = File.Exists(Path.Join(workingDir, "Gemfile"))
             || Directory.EnumerateFiles(workingDir, "*.gemspec", SearchOption.TopDirectoryOnly).Any();
         var hasTerraform = Directory.EnumerateFiles(workingDir, "*.tf", SearchOption.TopDirectoryOnly).Any();
-        var hasHelmChart = File.Exists(Path.Combine(workingDir, "Chart.yaml"));
-        var hasDockerCompose = File.Exists(Path.Combine(workingDir, "docker-compose.yml"))
-            || File.Exists(Path.Combine(workingDir, "docker-compose.yaml"));
+        var hasHelmChart = File.Exists(Path.Join(workingDir, "Chart.yaml"));
+        var hasDockerCompose = File.Exists(Path.Join(workingDir, "docker-compose.yml"))
+            || File.Exists(Path.Join(workingDir, "docker-compose.yaml"));
 
         // Determine primary template (ordered by priority)
         string template;
@@ -2207,4 +2997,9 @@ public static class BuiltinCommandRegistration
 
         return null;
     }
+
+    private sealed record CheckFinding(
+        [property: JsonPropertyName("code")] string Code,
+        [property: JsonPropertyName("severity")] string Severity,
+        [property: JsonPropertyName("message")] string Message);
 }

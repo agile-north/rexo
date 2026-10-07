@@ -24,6 +24,10 @@ rx init --stack blank --yes
 
 # Run a configured command
 rx hello
+
+# Inspect effective repository readiness and the configured command graph
+rx check
+rx graph release --format mermaid
 ```
 
 ### Standard lifecycle (opt-in)
@@ -74,6 +78,7 @@ Generated YAML starts with a `# yaml-language-server: $schema=...` modeline, so 
 **Configuration & Behavior:**
 
 - [Configuration Reference](docs/configuration/README.md) — Schema, structure, defaults
+- [CLI workflow commands](docs/configuration/README.md#cli-workflow-and-safety) — check, explain, graph, shell completion, policy locks, and local artifact promotion
 - [Commands & Steps](docs/configuration/commands.md) — Commands, options, merge semantics
 - [Versioning](docs/configuration/versioning.md) — Version providers, auto-detection
 - [Runtime Settings](docs/configuration/runtime.md) — Output, push policy, tests, analysis
@@ -210,4 +215,3 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Security
 
 See [SECURITY.md](SECURITY.md).
-

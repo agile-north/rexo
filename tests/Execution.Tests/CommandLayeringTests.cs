@@ -35,7 +35,7 @@ public sealed class CommandLayeringTests
 
     private static async Task<RepoConfig> LoadTempConfigAsync(string dir, string json, CancellationToken ct = default)
     {
-        var path = Path.Combine(dir, "rexo.json");
+        var path = Path.Join(dir, "rexo.json");
         await File.WriteAllTextAsync(path, json, ct);
         return await RepoConfigurationLoader.LoadAsync(path, ct);
     }
@@ -59,11 +59,11 @@ public sealed class CommandLayeringTests
 
     private static async Task<(string ToolsDir, string LogPath)> CreateFakeDockerAsync()
     {
-        var toolsDir = Path.Combine(Path.GetTempPath(), $"rexo-fake-docker-{Guid.NewGuid():N}");
+        var toolsDir = Path.Join(Path.GetTempPath(), $"rexo-fake-docker-{Guid.NewGuid():N}");
         Directory.CreateDirectory(toolsDir);
 
-        var logPath = Path.Combine(toolsDir, "docker.log");
-        var cmdPath = Path.Combine(toolsDir, "docker.cmd");
+        var logPath = Path.Join(toolsDir, "docker.log");
+        var cmdPath = Path.Join(toolsDir, "docker.cmd");
 
         await File.WriteAllTextAsync(cmdPath, """
                         @echo off
@@ -102,7 +102,7 @@ public sealed class CommandLayeringTests
     [Fact]
     public async Task StandardOnlyExtendsBuildHasBuildArtifactsStep()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-layer-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-layer-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         try
         {
@@ -126,7 +126,7 @@ public sealed class CommandLayeringTests
     [Fact]
     public async Task StandardOnlyExtendsBuildHasNoDotnetRunStep()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-layer-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-layer-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         try
         {
@@ -151,7 +151,7 @@ public sealed class CommandLayeringTests
     [Fact]
     public async Task DotnetAndStandardExtendsTestStepsDoNotContainSelfRef()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-layer-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-layer-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         try
         {
@@ -187,7 +187,7 @@ public sealed class CommandLayeringTests
     [Fact]
     public async Task DotnetAndStandardExtendsAnalyzeStepsDoNotContainSelfRef()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-layer-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-layer-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         try
         {
@@ -237,7 +237,7 @@ public sealed class CommandLayeringTests
     [Fact]
     public async Task DotnetAndStandardExtendsTestPreservesCoverageModeAndCustomizationVars()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-layer-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-layer-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         try
         {
@@ -276,7 +276,7 @@ public sealed class CommandLayeringTests
     [Fact]
     public async Task DotnetAndStandardExtendsBuildComposesViaStandardContinuation()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-layer-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-layer-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         try
         {
@@ -308,7 +308,7 @@ public sealed class CommandLayeringTests
     [Fact]
     public async Task RepoBuildCommandOverridesEmbeddedBuilds()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-layer-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-layer-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         try
         {
@@ -348,10 +348,10 @@ public sealed class CommandLayeringTests
 
                 await ContainerEnvMutationGate.WaitAsync();
 
-                var dir = Path.Combine(Path.GetTempPath(), $"rexo-container-template-{Guid.NewGuid():N}");
+                var dir = Path.Join(Path.GetTempPath(), $"rexo-container-template-{Guid.NewGuid():N}");
                 Directory.CreateDirectory(dir);
                 var (toolsDir, logPath) = await CreateFakeDockerAsync();
-                var dockerCommandPath = Path.Combine(toolsDir, "docker.cmd");
+                var dockerCommandPath = Path.Join(toolsDir, "docker.cmd");
 
                 var originalPath = Environment.GetEnvironmentVariable("PATH");
                 var originalDockerCommand = Environment.GetEnvironmentVariable("REXO_DOCKER_COMMAND");
@@ -362,7 +362,7 @@ public sealed class CommandLayeringTests
 
                 try
                 {
-                        await File.WriteAllTextAsync(Path.Combine(dir, "Dockerfile"), "FROM scratch\n");
+                        await File.WriteAllTextAsync(Path.Join(dir, "Dockerfile"), "FROM scratch\n");
                         var json = """
                         {
                             "$schema": "__SCHEMA_URI__",
@@ -408,9 +408,9 @@ public sealed class CommandLayeringTests
                             "aliases": {}
                         }
                         """.Replace("__SCHEMA_URI__", SchemaUri, StringComparison.Ordinal);
-                        await File.WriteAllTextAsync(Path.Combine(dir, "rexo.json"), json);
+                        await File.WriteAllTextAsync(Path.Join(dir, "rexo.json"), json);
 
-                        var config = await RepoConfigurationLoader.LoadAsync(Path.Combine(dir, "rexo.json"), CancellationToken.None);
+                        var config = await RepoConfigurationLoader.LoadAsync(Path.Join(dir, "rexo.json"), CancellationToken.None);
                         var registry = new CommandRegistry();
                         var executor = new DefaultCommandExecutor(registry);
                         var loader = CreateLoader();

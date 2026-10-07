@@ -10,11 +10,11 @@ public sealed class RepoConfigurationLoaderTests
     [Fact]
     public async Task LoadAsyncParsesMinimalConfig()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"repo-{Guid.NewGuid():N}.json");
+        var path = Path.Join(Path.GetTempPath(), $"repo-{Guid.NewGuid():N}.json");
         var root = Path.GetDirectoryName(path)!;
     Directory.CreateDirectory(root);
     await File.WriteAllTextAsync(
-          Path.Combine(root, "rexo.schema.json"),
+          Path.Join(root, "rexo.schema.json"),
             """
             {
               "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -56,7 +56,7 @@ public sealed class RepoConfigurationLoaderTests
     finally
     {
             File.Delete(path);
-      var schemaPath = Path.Combine(root, "rexo.schema.json");
+      var schemaPath = Path.Join(root, "rexo.schema.json");
       if (File.Exists(schemaPath)) File.Delete(schemaPath);
     }
   }
@@ -64,10 +64,10 @@ public sealed class RepoConfigurationLoaderTests
   [Fact]
   public async Task LoadAsyncParsesConfigUsingEmbeddedSchemaWhenNoLocalSchemaExists()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-embedded-schema-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-embedded-schema-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
 
-    var configPath = Path.Combine(dir, "rexo.json");
+    var configPath = Path.Join(dir, "rexo.json");
     await File.WriteAllTextAsync(configPath, """
         {
           "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -102,10 +102,10 @@ public sealed class RepoConfigurationLoaderTests
   [Fact]
   public async Task LoadAsyncParsesRuntimeOutputSettings()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-output-settings-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-output-settings-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
 
-    var configPath = Path.Combine(dir, "rexo.json");
+    var configPath = Path.Join(dir, "rexo.json");
     await File.WriteAllTextAsync(configPath, """
           {
             "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -144,10 +144,10 @@ public sealed class RepoConfigurationLoaderTests
     [Fact]
     public async Task LoadAsyncParsesStructuredCiScopeSelectors()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-ci-scope-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-ci-scope-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
-        var configPath = Path.Combine(dir, "rexo.json");
+        var configPath = Path.Join(dir, "rexo.json");
         await File.WriteAllTextAsync(configPath, """
           {
             "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -198,10 +198,10 @@ public sealed class RepoConfigurationLoaderTests
     [Fact]
   public async Task LoadAsyncParsesStructuredPushRules()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-push-rules-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-push-rules-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
 
-    var configPath = Path.Combine(dir, "rexo.json");
+    var configPath = Path.Join(dir, "rexo.json");
     await File.WriteAllTextAsync(configPath, """
           {
             "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -247,10 +247,10 @@ public sealed class RepoConfigurationLoaderTests
   [Fact]
   public async Task LoadAsyncParsesRuntimeOutput()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-artifacts-output-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-artifacts-output-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
 
-    var configPath = Path.Combine(dir, "rexo.json");
+    var configPath = Path.Join(dir, "rexo.json");
     await File.WriteAllTextAsync(configPath, """
           {
             "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -289,7 +289,7 @@ public sealed class RepoConfigurationLoaderTests
     [Fact]
     public async Task LoadAsyncThrowsWhenSchemaVersionMissing()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"repo-{Guid.NewGuid():N}.json");
+        var path = Path.Join(Path.GetTempPath(), $"repo-{Guid.NewGuid():N}.json");
         await File.WriteAllTextAsync(path, """
         {
           "$schema": "rexo.schema.json",
@@ -322,7 +322,7 @@ public sealed class RepoConfigurationLoaderTests
     [Fact]
     public async Task LoadAsyncThrowsWhenSchemaVersionUnsupported()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"repo-{Guid.NewGuid():N}.json");
+        var path = Path.Join(Path.GetTempPath(), $"repo-{Guid.NewGuid():N}.json");
         await File.WriteAllTextAsync(path, """
         {
           "$schema": "rexo.schema.json",
@@ -356,7 +356,7 @@ public sealed class RepoConfigurationLoaderTests
     [Fact]
     public async Task LoadAsyncThrowsWhenSchemaUriUnsupported()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"repo-{Guid.NewGuid():N}.json");
+        var path = Path.Join(Path.GetTempPath(), $"repo-{Guid.NewGuid():N}.json");
         await File.WriteAllTextAsync(path, """
         {
           "$schema": "https://example.com/repo.schema.json",
@@ -390,7 +390,7 @@ public sealed class RepoConfigurationLoaderTests
     [Fact]
     public async Task LoadAsyncSkipsSchemaValidationWhenEnvVarEnabled()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"repo-{Guid.NewGuid():N}.json");
+        var path = Path.Join(Path.GetTempPath(), $"repo-{Guid.NewGuid():N}.json");
         var previous = Environment.GetEnvironmentVariable(RepoConfigurationLoader.DisableSchemaValidationEnvVar);
         await File.WriteAllTextAsync(path, """
         {
@@ -430,7 +430,7 @@ public sealed class RepoConfigurationLoaderTests
     [Fact]
     public async Task LoadAsyncThrowsWhenRequiredCapabilityIsUnsupported()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"repo-{Guid.NewGuid():N}.json");
+        var path = Path.Join(Path.GetTempPath(), $"repo-{Guid.NewGuid():N}.json");
         await File.WriteAllTextAsync(path, """
         {
           "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -468,7 +468,7 @@ public sealed class RepoConfigurationLoaderTests
     [Fact]
     public async Task LoadAsyncAcceptsKnownRequiredCapability()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"repo-{Guid.NewGuid():N}.json");
+        var path = Path.Join(Path.GetTempPath(), $"repo-{Guid.NewGuid():N}.json");
         await File.WriteAllTextAsync(path, """
         {
           "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -506,7 +506,7 @@ public sealed class RepoConfigurationLoaderTests
   [Fact]
   public async Task LoadAsyncMergesExtendsConfig()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-extends-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-extends-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
 
     var minimalSchema = """
@@ -525,9 +525,9 @@ public sealed class RepoConfigurationLoaderTests
             }
             """;
 
-    await File.WriteAllTextAsync(Path.Combine(dir, "rexo.schema.json"), minimalSchema);
+    await File.WriteAllTextAsync(Path.Join(dir, "rexo.schema.json"), minimalSchema);
 
-    var basePath = Path.Combine(dir, "base.json");
+    var basePath = Path.Join(dir, "base.json");
     await File.WriteAllTextAsync(basePath, """
             {
               "$schema": "rexo.schema.json",
@@ -540,7 +540,7 @@ public sealed class RepoConfigurationLoaderTests
             }
             """);
 
-    var childPath = Path.Combine(dir, "child.json");
+    var childPath = Path.Join(dir, "child.json");
     await File.WriteAllTextAsync(childPath, $$"""
             {
               "$schema": "rexo.schema.json",
@@ -571,10 +571,10 @@ public sealed class RepoConfigurationLoaderTests
   [Fact]
   public async Task LoadAsyncMergesOutputsSettingsAndVarsAcrossExtends()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-extends-outputs-settings-vars-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-extends-outputs-settings-vars-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
 
-    var basePath = Path.Combine(dir, "base.json");
+    var basePath = Path.Join(dir, "base.json");
     await File.WriteAllTextAsync(basePath, """
       {
         "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -600,7 +600,7 @@ public sealed class RepoConfigurationLoaderTests
       }
       """);
 
-    var childPath = Path.Combine(dir, "child.json");
+    var childPath = Path.Join(dir, "child.json");
     await File.WriteAllTextAsync(childPath, """
       {
         "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -653,10 +653,10 @@ public sealed class RepoConfigurationLoaderTests
   [Fact]
   public async Task LoadAsyncMergesPolicySourcesAcrossExtends()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-extends-policy-sources-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-extends-policy-sources-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
 
-    var basePath = Path.Combine(dir, "base.json");
+    var basePath = Path.Join(dir, "base.json");
     await File.WriteAllTextAsync(basePath, """
       {
         "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -668,7 +668,7 @@ public sealed class RepoConfigurationLoaderTests
       }
       """);
 
-    var childPath = Path.Combine(dir, "child.json");
+    var childPath = Path.Join(dir, "child.json");
     await File.WriteAllTextAsync(childPath, """
       {
         "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -698,7 +698,7 @@ public sealed class RepoConfigurationLoaderTests
   [Fact]
   public async Task LoadAsyncThrowsOnCircularExtends()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-circular-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-circular-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
 
     var minimalSchema = """
@@ -717,10 +717,10 @@ public sealed class RepoConfigurationLoaderTests
             }
             """;
 
-    await File.WriteAllTextAsync(Path.Combine(dir, "rexo.schema.json"), minimalSchema);
+    await File.WriteAllTextAsync(Path.Join(dir, "rexo.schema.json"), minimalSchema);
 
-    var aPath = Path.Combine(dir, "a.json");
-    var bPath = Path.Combine(dir, "b.json");
+    var aPath = Path.Join(dir, "a.json");
+    var bPath = Path.Join(dir, "b.json");
 
     await File.WriteAllTextAsync(aPath, $$"""
             {
@@ -764,7 +764,7 @@ public sealed class RepoConfigurationLoaderTests
   [Fact]
   public async Task LoadAsyncAppliesEnvironmentOverlay()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-overlay-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-overlay-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
 
     var minimalSchema = """
@@ -782,9 +782,9 @@ public sealed class RepoConfigurationLoaderTests
               }
             }
             """;
-    await File.WriteAllTextAsync(Path.Combine(dir, "rexo.schema.json"), minimalSchema);
+    await File.WriteAllTextAsync(Path.Join(dir, "rexo.schema.json"), minimalSchema);
 
-    var repoPath = Path.Combine(dir, "repo.json");
+    var repoPath = Path.Join(dir, "repo.json");
     await File.WriteAllTextAsync(repoPath, """
             {
               "$schema": "rexo.schema.json",
@@ -796,7 +796,7 @@ public sealed class RepoConfigurationLoaderTests
             }
             """);
 
-    var overlayPath = Path.Combine(dir, "overlay.json");
+    var overlayPath = Path.Join(dir, "overlay.json");
     await File.WriteAllTextAsync(overlayPath, """
             {
               "$schema": "rexo.schema.json",
@@ -826,7 +826,7 @@ public sealed class RepoConfigurationLoaderTests
   [Fact]
   public async Task LoadAsyncIgnoresOverlayWhenFileDoesNotExist()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-overlay-missing-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-overlay-missing-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
 
     var minimalSchema = """
@@ -843,9 +843,9 @@ public sealed class RepoConfigurationLoaderTests
               }
             }
             """;
-    await File.WriteAllTextAsync(Path.Combine(dir, "rexo.schema.json"), minimalSchema);
+    await File.WriteAllTextAsync(Path.Join(dir, "rexo.schema.json"), minimalSchema);
 
-    var repoPath = Path.Combine(dir, "repo.json");
+    var repoPath = Path.Join(dir, "repo.json");
     await File.WriteAllTextAsync(repoPath, """
             {
               "$schema": "rexo.schema.json",
@@ -874,7 +874,7 @@ public sealed class RepoConfigurationLoaderTests
   [Fact]
   public async Task LoadAsyncMergesCommandsDictionaryChildWins()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-cmdmerge-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-cmdmerge-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
 
     var minimalSchema = """
@@ -892,9 +892,9 @@ public sealed class RepoConfigurationLoaderTests
               }
             }
             """;
-    await File.WriteAllTextAsync(Path.Combine(dir, "rexo.schema.json"), minimalSchema);
+    await File.WriteAllTextAsync(Path.Join(dir, "rexo.schema.json"), minimalSchema);
 
-    var basePath = Path.Combine(dir, "base.json");
+    var basePath = Path.Join(dir, "base.json");
     await File.WriteAllTextAsync(basePath, """
             {
               "$schema": "rexo.schema.json",
@@ -908,7 +908,7 @@ public sealed class RepoConfigurationLoaderTests
             }
             """);
 
-    var childPath = Path.Combine(dir, "child.json");
+    var childPath = Path.Join(dir, "child.json");
     await File.WriteAllTextAsync(childPath, $$"""
             {
               "$schema": "rexo.schema.json",
@@ -940,10 +940,10 @@ public sealed class RepoConfigurationLoaderTests
   [Fact]
   public async Task LoadAsyncEmbeddedExtendsMergesStandardCommands()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-embedded-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-embedded-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
 
-    var configPath = Path.Combine(dir, "rexo.json");
+    var configPath = Path.Join(dir, "rexo.json");
     await File.WriteAllTextAsync(configPath, """
       {
         "$schema": "rexo.schema.json",
@@ -957,7 +957,7 @@ public sealed class RepoConfigurationLoaderTests
       """);
 
     // Provide a local schema that does not require commands (relaxed)
-    await File.WriteAllTextAsync(Path.Combine(dir, "rexo.schema.json"), """
+    await File.WriteAllTextAsync(Path.Join(dir, "rexo.schema.json"), """
       {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -984,10 +984,10 @@ public sealed class RepoConfigurationLoaderTests
     [Fact]
     public async Task LoadAsyncGitTagPolicyAddsPostPushCommand()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-git-tag-post-push-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-git-tag-post-push-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
-        var configPath = Path.Combine(dir, "rexo.json");
+        var configPath = Path.Join(dir, "rexo.json");
         await File.WriteAllTextAsync(configPath, """
       {
         "$schema": "rexo.schema.json",
@@ -997,7 +997,7 @@ public sealed class RepoConfigurationLoaderTests
       }
       """);
 
-        await File.WriteAllTextAsync(Path.Combine(dir, "rexo.schema.json"), """
+        await File.WriteAllTextAsync(Path.Join(dir, "rexo.schema.json"), """
       {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1031,10 +1031,10 @@ public sealed class RepoConfigurationLoaderTests
     {
         // standard.build includes a same-name continuation step, so dotnet.build is
         // inlined between version resolution and artifact tagging.
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-embedded-standard-dotnet-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-embedded-standard-dotnet-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
-        var configPath = Path.Combine(dir, "rexo.json");
+        var configPath = Path.Join(dir, "rexo.json");
         await File.WriteAllTextAsync(configPath, """
       {
         "$schema": "rexo.schema.json",
@@ -1044,7 +1044,7 @@ public sealed class RepoConfigurationLoaderTests
       }
       """);
 
-    await File.WriteAllTextAsync(Path.Combine(dir, "rexo.schema.json"), """
+    await File.WriteAllTextAsync(Path.Join(dir, "rexo.schema.json"), """
       {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1076,10 +1076,10 @@ public sealed class RepoConfigurationLoaderTests
   public async Task LoadAsyncEmbeddedStandardThenDotnetIncludesDotnetTestViaStandardContinuation()
   {
     // standard.test has a same-name continuation step, so dotnet.test steps ARE inlined.
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-embedded-standard-dotnet-test-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-embedded-standard-dotnet-test-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
 
-    var configPath = Path.Combine(dir, "rexo.json");
+    var configPath = Path.Join(dir, "rexo.json");
     await File.WriteAllTextAsync(configPath, """
       {
         "$schema": "rexo.schema.json",
@@ -1089,7 +1089,7 @@ public sealed class RepoConfigurationLoaderTests
       }
       """);
 
-    await File.WriteAllTextAsync(Path.Combine(dir, "rexo.schema.json"), """
+    await File.WriteAllTextAsync(Path.Join(dir, "rexo.schema.json"), """
       {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1118,10 +1118,10 @@ public sealed class RepoConfigurationLoaderTests
   {
         // When release -> build (cross-command call), it should execute the resolved build command,
         // including the dotnet overlay inserted into the standard continuation point.
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-embedded-standard-dotnet-release-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-embedded-standard-dotnet-release-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
-        var configPath = Path.Combine(dir, "rexo.json");
+        var configPath = Path.Join(dir, "rexo.json");
         await File.WriteAllTextAsync(configPath, """
       {
         "$schema": "rexo.schema.json",
@@ -1131,7 +1131,7 @@ public sealed class RepoConfigurationLoaderTests
       }
       """);
 
-    await File.WriteAllTextAsync(Path.Combine(dir, "rexo.schema.json"), """
+    await File.WriteAllTextAsync(Path.Join(dir, "rexo.schema.json"), """
       {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1170,10 +1170,10 @@ public sealed class RepoConfigurationLoaderTests
   [Fact]
   public async Task LoadAsyncArtifactOnlyConfigDoesNotApplyStandardTemplateImplicitly()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-implicit-standard-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-implicit-standard-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
 
-    var configPath = Path.Combine(dir, "rexo.json");
+    var configPath = Path.Join(dir, "rexo.json");
     await File.WriteAllTextAsync(configPath, """
       {
         "$schema": "rexo.schema.json",
@@ -1185,7 +1185,7 @@ public sealed class RepoConfigurationLoaderTests
       }
       """);
 
-    await File.WriteAllTextAsync(Path.Combine(dir, "rexo.schema.json"), """
+    await File.WriteAllTextAsync(Path.Join(dir, "rexo.schema.json"), """
       {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1215,10 +1215,10 @@ public sealed class RepoConfigurationLoaderTests
   [Fact]
   public async Task LoadAsyncParsesBooleanOptionDefault()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-bool-default-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-bool-default-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
 
-    var configPath = Path.Combine(dir, "rexo.json");
+    var configPath = Path.Join(dir, "rexo.json");
     await File.WriteAllTextAsync(configPath, """
       {
         "$schema": "rexo.schema.json",
@@ -1242,7 +1242,7 @@ public sealed class RepoConfigurationLoaderTests
       }
       """);
 
-    await File.WriteAllTextAsync(Path.Combine(dir, "rexo.schema.json"), """
+    await File.WriteAllTextAsync(Path.Join(dir, "rexo.schema.json"), """
       {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1273,10 +1273,10 @@ public sealed class RepoConfigurationLoaderTests
   [Fact]
   public async Task LoadAsyncParsesCommandMergeAndWhenExists()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-merge-whenexists-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-merge-whenexists-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
 
-    var configPath = Path.Combine(dir, "rexo.json");
+    var configPath = Path.Join(dir, "rexo.json");
     await File.WriteAllTextAsync(configPath, """
       {
         "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -1313,10 +1313,10 @@ public sealed class RepoConfigurationLoaderTests
   [Fact]
   public async Task LoadAsyncParsesCommandHooksAndMaxDepth()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-hooks-depth-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-hooks-depth-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
 
-    var configPath = Path.Combine(dir, "rexo.json");
+    var configPath = Path.Join(dir, "rexo.json");
     await File.WriteAllTextAsync(configPath, """
       {
         "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -1369,10 +1369,10 @@ public sealed class RepoConfigurationLoaderTests
     [Fact]
     public async Task LoadAsyncAppliesRuntimeCommandDefaultMergeModeAppend()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-default-merge-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-default-merge-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
-        await File.WriteAllTextAsync(Path.Combine(dir, "rexo.schema.json"), """
+        await File.WriteAllTextAsync(Path.Join(dir, "rexo.schema.json"), """
       {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1380,7 +1380,7 @@ public sealed class RepoConfigurationLoaderTests
       }
       """);
 
-        await File.WriteAllTextAsync(Path.Combine(dir, "base.json"), """
+        await File.WriteAllTextAsync(Path.Join(dir, "base.json"), """
       {
         "$schema": "rexo.schema.json",
         "schemaVersion": "1.0",
@@ -1395,7 +1395,7 @@ public sealed class RepoConfigurationLoaderTests
       }
       """);
 
-        var childPath = Path.Combine(dir, "repo.json");
+        var childPath = Path.Join(dir, "repo.json");
         await File.WriteAllTextAsync(childPath, """
       {
         "$schema": "rexo.schema.json",
@@ -1438,10 +1438,10 @@ public sealed class RepoConfigurationLoaderTests
     [Fact]
     public async Task LoadAsyncParsesRunStepContainer()
     {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-step-container-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-step-container-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
 
-    var configPath = Path.Combine(dir, "rexo.json");
+    var configPath = Path.Join(dir, "rexo.json");
     await File.WriteAllTextAsync(configPath, """
       {
         "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -1501,10 +1501,10 @@ public sealed class RepoConfigurationLoaderTests
   [Fact]
   public async Task LoadAsyncRejectsContainerOnUsesStep()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-step-container-invalid-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-step-container-invalid-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
 
-    var configPath = Path.Combine(dir, "rexo.json");
+    var configPath = Path.Join(dir, "rexo.json");
     await File.WriteAllTextAsync(configPath, """
       {
         "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -1543,10 +1543,10 @@ public sealed class RepoConfigurationLoaderTests
   [Fact]
   public async Task LoadAsyncRejectsInvalidCommandMergeValue()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-invalid-merge-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-invalid-merge-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
 
-    var configPath = Path.Combine(dir, "rexo.json");
+    var configPath = Path.Join(dir, "rexo.json");
     await File.WriteAllTextAsync(configPath, """
       {
         "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -1735,11 +1735,11 @@ public sealed class RepoConfigurationLoaderTests
     [Fact]
   public async Task ExtendsWithAppendMergeAppendsStepsAfterBase()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-append-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-append-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
-    await File.WriteAllTextAsync(Path.Combine(dir, "rexo.schema.json"), MinimalSchema);
+    await File.WriteAllTextAsync(Path.Join(dir, "rexo.schema.json"), MinimalSchema);
 
-    var basePath = Path.Combine(dir, "base.json");
+    var basePath = Path.Join(dir, "base.json");
     await File.WriteAllTextAsync(basePath, """
       {
         "$schema": "rexo.schema.json",
@@ -1752,7 +1752,7 @@ public sealed class RepoConfigurationLoaderTests
       }
       """);
 
-    var childPath = Path.Combine(dir, "child.json");
+    var childPath = Path.Join(dir, "child.json");
     await File.WriteAllTextAsync(childPath, """
       {
         "$schema": "rexo.schema.json",
@@ -1784,11 +1784,11 @@ public sealed class RepoConfigurationLoaderTests
   [Fact]
   public async Task ExtendsWithPrependMergeInsertsStepsBeforeBase()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-prepend-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-prepend-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
-    await File.WriteAllTextAsync(Path.Combine(dir, "rexo.schema.json"), MinimalSchema);
+    await File.WriteAllTextAsync(Path.Join(dir, "rexo.schema.json"), MinimalSchema);
 
-    var basePath = Path.Combine(dir, "base.json");
+    var basePath = Path.Join(dir, "base.json");
     await File.WriteAllTextAsync(basePath, """
       {
         "$schema": "rexo.schema.json",
@@ -1801,7 +1801,7 @@ public sealed class RepoConfigurationLoaderTests
       }
       """);
 
-    var childPath = Path.Combine(dir, "child.json");
+    var childPath = Path.Join(dir, "child.json");
     await File.WriteAllTextAsync(childPath, """
       {
         "$schema": "rexo.schema.json",
@@ -1833,11 +1833,11 @@ public sealed class RepoConfigurationLoaderTests
   [Fact]
   public async Task ExtendsWithWrapMergeExpandsContinuationStepWithBaseSteps()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-wrap-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-wrap-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
-    await File.WriteAllTextAsync(Path.Combine(dir, "rexo.schema.json"), MinimalSchema);
+    await File.WriteAllTextAsync(Path.Join(dir, "rexo.schema.json"), MinimalSchema);
 
-    var basePath = Path.Combine(dir, "base.json");
+    var basePath = Path.Join(dir, "base.json");
     await File.WriteAllTextAsync(basePath, """
       {
         "$schema": "rexo.schema.json",
@@ -1850,7 +1850,7 @@ public sealed class RepoConfigurationLoaderTests
       }
       """);
 
-    var childPath = Path.Combine(dir, "child.json");
+    var childPath = Path.Join(dir, "child.json");
     await File.WriteAllTextAsync(childPath, """
       {
         "$schema": "rexo.schema.json",
@@ -1890,11 +1890,11 @@ public sealed class RepoConfigurationLoaderTests
   [Fact]
   public async Task ExtendsWrapWithNoContinuationStepFallsBackToAppend()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-wrap-no-marker-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-wrap-no-marker-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
-    await File.WriteAllTextAsync(Path.Combine(dir, "rexo.schema.json"), MinimalSchema);
+    await File.WriteAllTextAsync(Path.Join(dir, "rexo.schema.json"), MinimalSchema);
 
-    var basePath = Path.Combine(dir, "base.json");
+    var basePath = Path.Join(dir, "base.json");
     await File.WriteAllTextAsync(basePath, """
       {
         "$schema": "rexo.schema.json",
@@ -1907,7 +1907,7 @@ public sealed class RepoConfigurationLoaderTests
       }
       """);
 
-    var childPath = Path.Combine(dir, "child.json");
+    var childPath = Path.Join(dir, "child.json");
     await File.WriteAllTextAsync(childPath, """
       {
         "$schema": "rexo.schema.json",
@@ -1945,11 +1945,11 @@ public sealed class RepoConfigurationLoaderTests
   [Fact]
   public async Task ExtendsWithLayerModeBaseWins()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-layer-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-layer-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
-    await File.WriteAllTextAsync(Path.Combine(dir, "rexo.schema.json"), MinimalSchema);
+    await File.WriteAllTextAsync(Path.Join(dir, "rexo.schema.json"), MinimalSchema);
 
-    var basePath = Path.Combine(dir, "base.json");
+    var basePath = Path.Join(dir, "base.json");
     await File.WriteAllTextAsync(basePath, """
       {
         "$schema": "rexo.schema.json",
@@ -1962,7 +1962,7 @@ public sealed class RepoConfigurationLoaderTests
       }
       """);
 
-    var childPath = Path.Combine(dir, "child.json");
+    var childPath = Path.Join(dir, "child.json");
     await File.WriteAllTextAsync(childPath, """
       {
         "$schema": "rexo.schema.json",
@@ -1994,11 +1994,11 @@ public sealed class RepoConfigurationLoaderTests
   [Fact]
   public async Task ExtendsWithReplaceModeDefaultChildWinsAsUsual()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-replace-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-replace-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
-    await File.WriteAllTextAsync(Path.Combine(dir, "rexo.schema.json"), MinimalSchema);
+    await File.WriteAllTextAsync(Path.Join(dir, "rexo.schema.json"), MinimalSchema);
 
-    var basePath = Path.Combine(dir, "base.json");
+    var basePath = Path.Join(dir, "base.json");
     await File.WriteAllTextAsync(basePath, """
       {
         "$schema": "rexo.schema.json",
@@ -2011,7 +2011,7 @@ public sealed class RepoConfigurationLoaderTests
       }
       """);
 
-    var childPath = Path.Combine(dir, "child.json");
+    var childPath = Path.Join(dir, "child.json");
     await File.WriteAllTextAsync(childPath, """
       {
         "$schema": "rexo.schema.json",
@@ -2043,10 +2043,10 @@ public sealed class RepoConfigurationLoaderTests
   [Fact]
   public async Task ExtendsWithStepOpsCanCombineRemoveReplacePrependAppendInDeterministicOrder()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-stepops-combined-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-stepops-combined-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
 
-    var basePath = Path.Combine(dir, "base.json");
+    var basePath = Path.Join(dir, "base.json");
     await File.WriteAllTextAsync(basePath, """
       {
         "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -2065,7 +2065,7 @@ public sealed class RepoConfigurationLoaderTests
       }
       """);
 
-    var childPath = Path.Combine(dir, "child.json");
+    var childPath = Path.Join(dir, "child.json");
     await File.WriteAllTextAsync(childPath, """
       {
         "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -2117,10 +2117,10 @@ public sealed class RepoConfigurationLoaderTests
   [Fact]
   public async Task ExtendsWithStepOpsAndNoMatchDoesNotFail()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-stepops-no-match-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-stepops-no-match-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
 
-    var basePath = Path.Combine(dir, "base.json");
+    var basePath = Path.Join(dir, "base.json");
     await File.WriteAllTextAsync(basePath, """
       {
         "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -2137,7 +2137,7 @@ public sealed class RepoConfigurationLoaderTests
       }
       """);
 
-    var childPath = Path.Combine(dir, "child.json");
+    var childPath = Path.Join(dir, "child.json");
     await File.WriteAllTextAsync(childPath, """
       {
         "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -2176,10 +2176,10 @@ public sealed class RepoConfigurationLoaderTests
   [Fact]
   public async Task ExtendsWithMergeEnvelopeStepsCanCombineOperationsInDeterministicOrder()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-merge-envelope-ops-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-merge-envelope-ops-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
 
-    var basePath = Path.Combine(dir, "base.json");
+    var basePath = Path.Join(dir, "base.json");
     await File.WriteAllTextAsync(basePath, """
       {
         "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -2198,7 +2198,7 @@ public sealed class RepoConfigurationLoaderTests
       }
       """);
 
-    var childPath = Path.Combine(dir, "child.json");
+    var childPath = Path.Join(dir, "child.json");
     await File.WriteAllTextAsync(childPath, """
       {
         "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -2253,10 +2253,10 @@ public sealed class RepoConfigurationLoaderTests
   [Fact]
   public async Task MergeEnvelopeStepsTakePrecedenceOverLegacyStepOps()
   {
-    var dir = Path.Combine(Path.GetTempPath(), $"rexo-merge-envelope-precedence-{Guid.NewGuid():N}");
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-merge-envelope-precedence-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
 
-    var basePath = Path.Combine(dir, "base.json");
+    var basePath = Path.Join(dir, "base.json");
     await File.WriteAllTextAsync(basePath, """
       {
         "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
@@ -2273,7 +2273,7 @@ public sealed class RepoConfigurationLoaderTests
       }
       """);
 
-    var childPath = Path.Combine(dir, "child.json");
+    var childPath = Path.Join(dir, "child.json");
     await File.WriteAllTextAsync(childPath, """
       {
         "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",

@@ -82,9 +82,10 @@ internal static class SecretProcessRunner
                 var arr = System.Text.Json.JsonSerializer.Deserialize<string[]>(trimmed);
                 return arr ?? Array.Empty<string>();
             }
-            catch
+            catch (System.Text.Json.JsonException ex)
             {
-                // Fall through to command-line parsing.
+                Console.Error.WriteLine(
+                    $"  Warning: process arguments are not a valid JSON string array; using command-line parsing ({ex.GetType().Name}).");
             }
         }
 

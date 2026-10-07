@@ -3,6 +3,7 @@ namespace Rexo.Cli;
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Rexo.Configuration;
 using Rexo.Configuration.Models;
 
@@ -11,13 +12,22 @@ internal static class PolicySourceLoader
     private const string PolicySourcesEnv = "REXO_POLICY_SOURCES";
     private const string PolicyTrustEnv = "REXO_POLICY_TRUST";
     private const string RequirePinnedEnv = "REXO_POLICY_REQUIRE_PINNED";
+    private const string RequireLockedEnv = "REXO_POLICY_REQUIRE_LOCKED";
     private const string NuGetPolicySourceEnv = "REXO_NUGET_POLICY_SOURCE";
+    private const string LockfileRelativePath = ".rexo/rexo.lock.yaml";
     private static readonly HttpClient HttpClient = new();
+    private static readonly JsonSerializerOptions LockJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+    };
 
     public static async Task<PolicyConfig> LoadPoliciesFromEnvironmentAsync(
         string workingDir,
         bool debug,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool ignoreLock = false,
+        bool requireLock = false)
     {
         var sourcesValue = Environment.GetEnvironmentVariable(PolicySourcesEnv);
         if (string.IsNullOrWhiteSpace(sourcesValue))
@@ -30,34 +40,48 @@ internal static class PolicySourceLoader
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
-        return await LoadPoliciesFromSourcesAsync(sources, workingDir, debug, cancellationToken);
+        return await LoadPoliciesFromSourcesAsync(sources, workingDir, debug, cancellationToken, ignoreLock, requireLock);
     }
 
     public static async Task<PolicyConfig> LoadPoliciesFromSourcesAsync(
         IReadOnlyList<string> sources,
         string workingDir,
         bool debug,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool ignoreLock = false,
+        bool requireLock = false)
     {
         if (sources.Count == 0)
         {
             return new PolicyConfig();
         }
 
+        var lockfile = ignoreLock ? null : await ReadLockfileAsync(workingDir, cancellationToken);
+        var requireLocked = requireLock ||
+            string.Equals(Environment.GetEnvironmentVariable(RequireLockedEnv), "true", StringComparison.OrdinalIgnoreCase);
+        if (requireLocked && lockfile is null)
+        {
+            throw new InvalidOperationException($"A policy lockfile is required. Run 'rx update' to create {LockfileRelativePath}.");
+        }
+
         var merged = new PolicyConfig();
 
         foreach (var source in sources)
         {
+            var extension = source.EndsWith(".yml", StringComparison.OrdinalIgnoreCase) ||
+                            source.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase)
+                ? ".yaml"
+                : ".json";
+            var tempPolicy = Path.Join(Path.GetTempPath(), $"rexo-policy-{ComputeSha256Hex(source)}{extension}");
             try
             {
                 var content = await LoadPolicyContentAsync(source, workingDir, cancellationToken);
-                var extension = source.EndsWith(".yml", StringComparison.OrdinalIgnoreCase) ||
-                                source.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase)
-                    ? ".yaml"
-                    : ".json";
-                var tempPolicy = Path.Combine(Path.GetTempPath(), $"rexo-policy-{ComputeSha256Hex(source)}{extension}");
-                await File.WriteAllTextAsync(tempPolicy, content, cancellationToken);
+                if (!ignoreLock)
+                {
+                    VerifyLockedContent(source, content, lockfile, requireLocked);
+                }
 
+                await File.WriteAllTextAsync(tempPolicy, content, cancellationToken);
                 var config = await RepoConfigurationLoader.LoadPolicyAsync(tempPolicy, cancellationToken);
                 if (config is not null)
                 {
@@ -69,16 +93,141 @@ internal static class PolicySourceLoader
                     Console.WriteLine($"[debug] Loaded remote policy source: {source}");
                 }
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                if (debug)
+                throw new InvalidOperationException($"Failed to load policy source '{source}': {ex.Message}", ex);
+            }
+            finally
+            {
+                if (File.Exists(tempPolicy))
                 {
-                    Console.WriteLine($"[debug] Remote policy source skipped ({source}): {ex.Message}");
+                    File.Delete(tempPolicy);
                 }
             }
         }
 
         return merged;
+    }
+
+    public static async Task<string> UpdateLockfileAsync(
+        IReadOnlyList<string> sources,
+        string workingDir,
+        CancellationToken cancellationToken,
+        bool dryRun = false)
+    {
+        var entries = new List<PolicyLockEntry>();
+        foreach (var source in sources.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            RejectCredentialsInSource(source);
+            var content = await LoadPolicyContentAsync(source, workingDir, cancellationToken);
+            entries.Add(new PolicyLockEntry(source, ComputeSha256Hex(content)));
+        }
+
+        var lockfile = new PolicyLockfile { Policies = entries };
+        var json = JsonSerializer.Serialize(lockfile, LockJsonOptions);
+        var yaml = YamlJsonConverter.FromJson(json);
+        var lockPath = Path.Join(workingDir, LockfileRelativePath.Replace('/', Path.DirectorySeparatorChar));
+        if (dryRun)
+        {
+            return Path.GetRelativePath(workingDir, lockPath);
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
+        var temporaryPath = lockPath + ".tmp";
+        try
+        {
+            await File.WriteAllTextAsync(temporaryPath, yaml, cancellationToken);
+            File.Move(temporaryPath, lockPath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+            {
+                File.Delete(temporaryPath);
+            }
+        }
+
+        return Path.GetRelativePath(workingDir, lockPath);
+    }
+
+    public static async Task<PolicyLockfile?> ReadLockfileAsync(string workingDir, CancellationToken cancellationToken)
+    {
+        var lockPath = Path.Join(workingDir, LockfileRelativePath.Replace('/', Path.DirectorySeparatorChar));
+        if (!File.Exists(lockPath))
+        {
+            return null;
+        }
+
+        var text = await File.ReadAllTextAsync(lockPath, cancellationToken);
+        var json = YamlJsonConverter.IsYamlPath(lockPath)
+            ? YamlJsonConverter.ToJson(text, lockPath)
+            : text;
+        var lockfile = JsonSerializer.Deserialize<PolicyLockfile>(json, LockJsonOptions)
+            ?? throw new InvalidOperationException($"Policy lockfile '{lockPath}' is empty or invalid.");
+        if (lockfile.SchemaVersion != "1.0")
+        {
+            throw new InvalidOperationException($"Unsupported policy lockfile schemaVersion '{lockfile.SchemaVersion}'.");
+        }
+
+        if (lockfile.Policies is null)
+        {
+            throw new InvalidOperationException("Policy lockfile property 'policies' must be an array.");
+        }
+
+        var sources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var policy in lockfile.Policies)
+        {
+            if (policy is null || string.IsNullOrWhiteSpace(policy.Source))
+            {
+                throw new InvalidOperationException("Policy lockfile entries must include a non-empty source.");
+            }
+
+            RejectCredentialsInSource(policy.Source);
+            if (policy.Sha256 is null || policy.Sha256.Length != 64 || !policy.Sha256.All(Uri.IsHexDigit))
+            {
+                throw new InvalidOperationException($"Policy lockfile contains an invalid SHA-256 for '{policy.Source}'.");
+            }
+
+            if (!sources.Add(policy.Source))
+            {
+                throw new InvalidOperationException($"Policy lockfile contains duplicate source '{policy.Source}'.");
+            }
+        }
+
+        return lockfile;
+    }
+
+    private static void VerifyLockedContent(
+        string source,
+        string content,
+        PolicyLockfile? lockfile,
+        bool requireLocked)
+    {
+        var entry = lockfile?.Policies.FirstOrDefault(policy =>
+            policy.Source.Equals(source, StringComparison.OrdinalIgnoreCase));
+        if (entry is null)
+        {
+            if (requireLocked)
+            {
+                throw new InvalidOperationException($"Policy source '{source}' is not present in the policy lockfile.");
+            }
+
+            return;
+        }
+
+        var actualHash = ComputeSha256Hex(content);
+        if (!actualHash.Equals(entry.Sha256, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Policy lockfile SHA-256 mismatch for source '{source}'.");
+        }
+    }
+
+    private static void RejectCredentialsInSource(string source)
+    {
+        if (Uri.TryCreate(source, UriKind.Absolute, out var uri) && !string.IsNullOrEmpty(uri.UserInfo))
+        {
+            throw new InvalidOperationException("Policy source URLs containing user information cannot be written to a lockfile.");
+        }
     }
 
     private static async Task<string> LoadPolicyContentAsync(string source, string workingDir, CancellationToken cancellationToken)
@@ -102,7 +251,7 @@ internal static class PolicySourceLoader
         // fallback: local file source listed in env
         var fullPath = Path.IsPathRooted(source)
             ? source
-            : Path.GetFullPath(Path.Combine(workingDir, source));
+            : Path.GetFullPath(Path.Join(workingDir, source));
         return await File.ReadAllTextAsync(fullPath, cancellationToken);
     }
 
@@ -128,11 +277,14 @@ internal static class PolicySourceLoader
             await File.WriteAllTextAsync(cachePath, content, cancellationToken);
             return content;
         }
-        catch
+        catch (HttpRequestException)
         {
             if (File.Exists(cachePath))
             {
-                return await File.ReadAllTextAsync(cachePath, cancellationToken);
+                var cachedContent = await File.ReadAllTextAsync(cachePath, cancellationToken);
+                ValidateShaIfPresent(cachedContent, expectedSha);
+                Console.Error.WriteLine($"[warn] Using cached policy for '{reference}' after the HTTP request failed.");
+                return cachedContent;
             }
 
             throw;
@@ -185,10 +337,11 @@ internal static class PolicySourceLoader
             await File.WriteAllTextAsync(cachePath, output.Output, cancellationToken);
             return output.Output;
         }
-        catch
+        catch (InvalidOperationException)
         {
             if (File.Exists(cachePath))
             {
+                Console.Error.WriteLine($"[warn] Using cached policy for '{reference}' after git policy resolution failed.");
                 return await File.ReadAllTextAsync(cachePath, cancellationToken);
             }
 
@@ -228,7 +381,7 @@ internal static class PolicySourceLoader
         try
         {
             using var stream = await HttpClient.GetStreamAsync(packageUrl, cancellationToken);
-            var tempNupkg = Path.Combine(Path.GetTempPath(), $"rexo-policy-{ComputeSha256Hex(reference)}.nupkg");
+            var tempNupkg = Path.Join(Path.GetTempPath(), $"rexo-policy-{ComputeSha256Hex(reference)}.nupkg");
             await using (var file = File.Create(tempNupkg))
             {
                 await stream.CopyToAsync(file, cancellationToken);
@@ -248,10 +401,11 @@ internal static class PolicySourceLoader
             await File.WriteAllTextAsync(cachePath, content, cancellationToken);
             return content;
         }
-        catch
+        catch (HttpRequestException)
         {
             if (File.Exists(cachePath))
             {
+                Console.Error.WriteLine($"[warn] Using cached policy for '{reference}' after the NuGet request failed.");
                 return await File.ReadAllTextAsync(cachePath, cancellationToken);
             }
 
@@ -275,7 +429,7 @@ internal static class PolicySourceLoader
     private static string GetCachePath(string workingDir, string reference)
     {
         var key = ComputeSha256Hex(reference);
-        return Path.Combine(workingDir, ".rexo", "cache", "policies", $"{key}.policy.json");
+        return Path.Join(workingDir, ".rexo", "cache", "policies", $"{key}.policy.json");
     }
 
     private static void EnsureTrusted(string host)

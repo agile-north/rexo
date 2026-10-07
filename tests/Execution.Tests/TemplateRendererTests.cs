@@ -494,12 +494,12 @@ public sealed class TemplateRendererTests
         var original = Environment.GetEnvironmentVariable(key);
         Environment.SetEnvironmentVariable(key, null);
 
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-template-env-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(dir, ".rexo"));
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-template-env-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(dir, ".rexo"));
 
         try
         {
-            File.WriteAllText(Path.Combine(dir, ".rexo", ".env"), $"{key}=from-rexo\n");
+            File.WriteAllText(Path.Join(dir, ".rexo", ".env"), $"{key}=from-rexo\n");
 
             var renderer = new TemplateRenderer();
             var ctx = ExecutionContext.Empty(dir);
@@ -698,7 +698,7 @@ public sealed class TemplateRendererTests
         var renderer = new TemplateRenderer();
         var ctx = MakeContext(args: new Dictionary<string, string> { ["dir"] = "artifacts/analysis/sarif/dotnet-build.sarif" });
         Assert.Equal(
-            Path.GetFullPath(Path.Combine(ctx.RepositoryRoot, "artifacts", "analysis", "sarif", "dotnet-build.sarif")),
+            Path.GetFullPath(Path.Join(ctx.RepositoryRoot, "artifacts", "analysis", "sarif", "dotnet-build.sarif")),
             renderer.Render("{{args.dir | abspath}}", ctx));
     }
 
@@ -716,7 +716,7 @@ public sealed class TemplateRendererTests
         var renderer = new TemplateRenderer();
         var ctx = MakeContext(args: new Dictionary<string, string> { ["dir"] = "artifacts/analysis/sarif" });
         Assert.Equal(
-            "/p:ErrorLog=" + Path.GetFullPath(Path.Combine(ctx.RepositoryRoot, "artifacts", "analysis", "sarif", "dotnet-build.sarif")),
+            "/p:ErrorLog=" + Path.GetFullPath(Path.Join(ctx.RepositoryRoot, "artifacts", "analysis", "sarif", "dotnet-build.sarif")),
             renderer.Render("{{args.dir | suffix('/dotnet-build.sarif') | abspath | prefix('/p:ErrorLog=')}}", ctx));
     }
 
@@ -727,7 +727,7 @@ public sealed class TemplateRendererTests
         var ctx = MakeContext(args: new Dictionary<string, string> { ["dir"] = "artifacts/analysis/sarif" });
 
         Assert.Equal(
-            "/p:ErrorLog=" + Path.GetFullPath(Path.Combine(ctx.RepositoryRoot, "artifacts", "analysis", "sarif", "dotnet-build.sarif")),
+            "/p:ErrorLog=" + Path.GetFullPath(Path.Join(ctx.RepositoryRoot, "artifacts", "analysis", "sarif", "dotnet-build.sarif")),
             renderer.Render("{{args.missing | coalesce(args.dir, 'artifacts/analysis') | suffix('/dotnet-build.sarif') | abspath | prefix('/p:ErrorLog=')}}", ctx));
     }
 

@@ -51,7 +51,7 @@ public sealed class GradleArtifactProvider : IArtifactProvider
         return new ArtifactBuildResult(
             artifact.Name,
             result.ExitCode == 0,
-            result.ExitCode == 0 ? Path.Combine(workDir, "build", "libs") : null);
+            result.ExitCode == 0 ? Path.Join(workDir, "build", "libs") : null);
     }
 
     public Task<ArtifactTagResult> TagAsync(
@@ -111,19 +111,19 @@ public sealed class GradleArtifactProvider : IArtifactProvider
             return context.RepositoryRoot;
         }
 
-        return Path.IsPathRooted(dir) ? dir : Path.Combine(context.RepositoryRoot, dir);
+        return Path.IsPathRooted(dir) ? dir : Path.Join(context.RepositoryRoot, dir);
     }
 
     private static string ResolveNativeExe(bool useWrapper, string workDir)
     {
         if (useWrapper)
         {
-            if (File.Exists(Path.Combine(workDir, "gradlew.bat")))
+            if (File.Exists(Path.Join(workDir, "gradlew.bat")))
             {
                 return "gradlew.bat";
             }
 
-            if (File.Exists(Path.Combine(workDir, "gradlew")))
+            if (File.Exists(Path.Join(workDir, "gradlew")))
             {
                 return "./gradlew";
             }

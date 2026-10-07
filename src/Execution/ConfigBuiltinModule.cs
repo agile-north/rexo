@@ -25,7 +25,7 @@ internal sealed class ConfigBuiltinModule : IConfigBuiltinModule
 
             if (string.Equals(context.Config.Versioning?.Provider, "gitversion", StringComparison.OrdinalIgnoreCase))
             {
-                var gvPath = Path.Combine(context.RepositoryRoot, "GitVersion.yml");
+                var gvPath = Path.Join(context.RepositoryRoot, "GitVersion.yml");
                 if (!File.Exists(gvPath))
                 {
                     var gvContent = """

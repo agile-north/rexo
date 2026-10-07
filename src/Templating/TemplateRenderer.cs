@@ -781,7 +781,7 @@ public sealed class TemplateRenderer : ITemplateRenderer
             value = value[2..];
         }
 
-        return Path.GetFullPath(Path.Combine(repositoryRoot, value));
+        return Path.GetFullPath(Path.Join(repositoryRoot, value));
     }
 
     private static string ComputeSha256Hex(string value)

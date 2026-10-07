@@ -91,7 +91,11 @@
         outputLine = $"output root: {outputRoot}";
         emitFilesLine = $"emit runtime files: {(TuiRuntimeContext.Config?.Outputs?.Emit ?? true).ToString().ToLowerInvariant()}";
 
-        var manifestPath = Path.Combine(TuiRuntimeContext.WorkingDirectory, outputRoot, "manifest.json");
+        var absoluteOutputRoot = Path.GetFullPath(
+            Path.IsPathRooted(outputRoot)
+                ? outputRoot
+                : Path.Join(TuiRuntimeContext.WorkingDirectory, outputRoot));
+        var manifestPath = Path.Join(absoluteOutputRoot, "manifest.json");
         if (!File.Exists(manifestPath))
         {
             return;

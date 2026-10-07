@@ -313,9 +313,9 @@ public sealed class DockerArtifactProviderTests
     [Fact]
     public async Task BuildAsyncUsesTargetFromRexoDotEnv()
     {
-        var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-docker-env-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(repoRoot, ".rexo"));
-        await File.WriteAllTextAsync(Path.Combine(repoRoot, ".rexo", ".env"),
+        var repoRoot = Path.Join(Path.GetTempPath(), $"rexo-docker-env-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(repoRoot, ".rexo"));
+        await File.WriteAllTextAsync(Path.Join(repoRoot, ".rexo", ".env"),
             "DOCKER_TARGET_REGISTRY=ghcr.io\nDOCKER_TARGET_REPOSITORY=acme/service\n");
 
         try
@@ -360,9 +360,9 @@ public sealed class DockerArtifactProviderTests
     [Fact]
     public async Task TagAsyncUsesTargetFromRexoDotEnv()
     {
-        var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-docker-tag-env-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(repoRoot, ".rexo"));
-        await File.WriteAllTextAsync(Path.Combine(repoRoot, ".rexo", ".env"),
+        var repoRoot = Path.Join(Path.GetTempPath(), $"rexo-docker-tag-env-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(repoRoot, ".rexo"));
+        await File.WriteAllTextAsync(Path.Join(repoRoot, ".rexo", ".env"),
             "DOCKER_TARGET_REGISTRY=ghcr.io\nDOCKER_TARGET_REPOSITORY=acme/service\n");
 
         try
@@ -410,9 +410,9 @@ public sealed class DockerArtifactProviderTests
     [Fact]
     public async Task BuildAsyncNormalizesTargetRegistryWithScheme()
     {
-        var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-docker-env-scheme-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(repoRoot, ".rexo"));
-        await File.WriteAllTextAsync(Path.Combine(repoRoot, ".rexo", ".env"),
+        var repoRoot = Path.Join(Path.GetTempPath(), $"rexo-docker-env-scheme-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(repoRoot, ".rexo"));
+        await File.WriteAllTextAsync(Path.Join(repoRoot, ".rexo", ".env"),
             "DOCKER_TARGET_REGISTRY=https://ghcr.io\nDOCKER_TARGET_REPOSITORY=acme/service\n");
 
         try
@@ -460,10 +460,10 @@ public sealed class DockerArtifactProviderTests
     {
         using var _ = CiEnvironmentVariableScope.CreateIsolatedCiScope();
 
-        var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-docker-ghcr-default-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(repoRoot, ".rexo"));
+        var repoRoot = Path.Join(Path.GetTempPath(), $"rexo-docker-ghcr-default-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(repoRoot, ".rexo"));
         await File.WriteAllTextAsync(
-            Path.Combine(repoRoot, ".rexo", ".env"),
+            Path.Join(repoRoot, ".rexo", ".env"),
             "GITHUB_ACTIONS=true\nGITHUB_REPOSITORY=agile-north/rexo\nGITHUB_ACTOR=copilot\nGITHUB_TOKEN=gh-token\n");
 
         try
@@ -510,10 +510,10 @@ public sealed class DockerArtifactProviderTests
     [Fact]
     public async Task BuildAsyncDoesNotInferCiImageWhenCiInferenceDisabled()
     {
-        var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-docker-ghcr-disabled-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(repoRoot, ".rexo"));
+        var repoRoot = Path.Join(Path.GetTempPath(), $"rexo-docker-ghcr-disabled-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(repoRoot, ".rexo"));
         await File.WriteAllTextAsync(
-            Path.Combine(repoRoot, ".rexo", ".env"),
+            Path.Join(repoRoot, ".rexo", ".env"),
             "GITHUB_ACTIONS=true\nGITHUB_REPOSITORY=agile-north/rexo\nGITHUB_ACTOR=copilot\nGITHUB_TOKEN=gh-token\n");
 
         try
@@ -567,10 +567,10 @@ public sealed class DockerArtifactProviderTests
     {
         using var _ = CiEnvironmentVariableScope.CreateIsolatedCiScope();
 
-        var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-docker-ghcr-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(repoRoot, ".rexo"));
+        var repoRoot = Path.Join(Path.GetTempPath(), $"rexo-docker-ghcr-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(repoRoot, ".rexo"));
         await File.WriteAllTextAsync(
-            Path.Combine(repoRoot, ".rexo", ".env"),
+            Path.Join(repoRoot, ".rexo", ".env"),
             "DOCKER_TARGET_REGISTRY=ghcr.io\nGITHUB_ACTIONS=true\nGITHUB_REPOSITORY=agile-north/rexo\nGITHUB_ACTOR=copilot\nGITHUB_TOKEN=gh-token\n");
 
         try
@@ -619,10 +619,10 @@ public sealed class DockerArtifactProviderTests
     {
         using var _ = CiEnvironmentVariableScope.CreateIsolatedCiScope();
 
-        var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-docker-ghcr-empty-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(repoRoot, ".rexo"));
+        var repoRoot = Path.Join(Path.GetTempPath(), $"rexo-docker-ghcr-empty-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(repoRoot, ".rexo"));
         await File.WriteAllTextAsync(
-            Path.Combine(repoRoot, ".rexo", ".env"),
+            Path.Join(repoRoot, ".rexo", ".env"),
             "DOCKER_TARGET_REGISTRY=ghcr.io\nGITHUB_ACTIONS=true\nGITHUB_REPOSITORY=agile-north/rexo\nGITHUB_ACTOR=copilot\nGITHUB_TOKEN=gh-token\n");
 
         try
@@ -671,10 +671,10 @@ public sealed class DockerArtifactProviderTests
     {
         using var _ = CiEnvironmentVariableScope.CreateIsolatedCiScope();
 
-        var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-docker-ghcr-dedup-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(repoRoot, ".rexo"));
+        var repoRoot = Path.Join(Path.GetTempPath(), $"rexo-docker-ghcr-dedup-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(repoRoot, ".rexo"));
         await File.WriteAllTextAsync(
-            Path.Combine(repoRoot, ".rexo", ".env"),
+            Path.Join(repoRoot, ".rexo", ".env"),
             "DOCKER_TARGET_REGISTRY=ghcr.io\nGITHUB_ACTIONS=true\nGITHUB_REPOSITORY=agile-north/rexo\nGITHUB_ACTOR=copilot\nGITHUB_TOKEN=gh-token\n");
 
         try
@@ -722,10 +722,10 @@ public sealed class DockerArtifactProviderTests
     {
         using var _ = CiEnvironmentVariableScope.CreateIsolatedCiScope();
 
-        var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-docker-gitlab-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(repoRoot, ".rexo"));
+        var repoRoot = Path.Join(Path.GetTempPath(), $"rexo-docker-gitlab-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(repoRoot, ".rexo"));
         await File.WriteAllTextAsync(
-            Path.Combine(repoRoot, ".rexo", ".env"),
+            Path.Join(repoRoot, ".rexo", ".env"),
             "GITLAB_CI=true\nCI_REGISTRY=registry.gitlab.example.com:5050\nCI_PROJECT_PATH=team/rexo\nCI_REGISTRY_USER=gitlab-ci-token\nCI_JOB_TOKEN=gl-token\n");
 
         try
@@ -775,10 +775,10 @@ public sealed class DockerArtifactProviderTests
     {
         using var _ = CiEnvironmentVariableScope.CreateIsolatedCiScope();
 
-        var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-docker-gitlab-dedup-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(repoRoot, ".rexo"));
+        var repoRoot = Path.Join(Path.GetTempPath(), $"rexo-docker-gitlab-dedup-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(repoRoot, ".rexo"));
         await File.WriteAllTextAsync(
-            Path.Combine(repoRoot, ".rexo", ".env"),
+            Path.Join(repoRoot, ".rexo", ".env"),
             "GITLAB_CI=true\nCI_REGISTRY=registry.gitlab.example.com:5050\nCI_PROJECT_PATH=team/rexo\nCI_REGISTRY_USER=gitlab-ci-token\nCI_JOB_TOKEN=gl-token\n");
 
         try

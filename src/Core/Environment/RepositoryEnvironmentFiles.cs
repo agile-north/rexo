@@ -9,8 +9,8 @@ public static class RepositoryEnvironmentFiles
     public static IReadOnlyDictionary<string, string> Load(string repositoryRoot)
     {
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
-        MergeFile(Path.Combine(repositoryRoot, ".env"), values);
-        MergeFile(Path.Combine(repositoryRoot, ".rexo", ".env"), values);
+        MergeFile(Path.Join(repositoryRoot, ".env"), values);
+        MergeFile(Path.Join(repositoryRoot, ".rexo", ".env"), values);
         return values;
     }
 
@@ -21,9 +21,8 @@ public static class RepositoryEnvironmentFiles
             return;
         }
 
-        foreach (var rawLine in File.ReadAllLines(path))
+        foreach (var line in File.ReadAllLines(path).Select(rawLine => rawLine.Trim()))
         {
-            var line = rawLine.Trim();
             if (string.IsNullOrWhiteSpace(line) || line.StartsWith('#'))
             {
                 continue;

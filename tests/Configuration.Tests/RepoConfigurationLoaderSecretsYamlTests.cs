@@ -11,9 +11,9 @@ public sealed class RepoConfigurationLoaderSecretsYamlTests
         var originalOverlay = Environment.GetEnvironmentVariable("REXO_OVERLAY");
         Environment.SetEnvironmentVariable("REXO_OVERLAY", null);
 
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-yaml-secrets-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-yaml-secrets-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
-        var configPath = Path.Combine(dir, "rexo.yml");
+        var configPath = Path.Join(dir, "rexo.yml");
 
         await File.WriteAllTextAsync(
             configPath,
@@ -61,9 +61,9 @@ public sealed class RepoConfigurationLoaderSecretsYamlTests
         var originalOverlay = Environment.GetEnvironmentVariable("REXO_OVERLAY");
         Environment.SetEnvironmentVariable("REXO_OVERLAY", null);
 
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-json-secrets-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-json-secrets-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
-        var configPath = Path.Combine(dir, "rexo.json");
+        var configPath = Path.Join(dir, "rexo.json");
 
         await File.WriteAllTextAsync(
             configPath,
@@ -135,9 +135,9 @@ public sealed class RepoConfigurationLoaderSecretsYamlTests
         var originalOverlay = Environment.GetEnvironmentVariable("REXO_OVERLAY");
         Environment.SetEnvironmentVariable("REXO_OVERLAY", null);
 
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-yaml-secrets-chain-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-yaml-secrets-chain-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
-        var configPath = Path.Combine(dir, "rexo.yml");
+        var configPath = Path.Join(dir, "rexo.yml");
 
         await File.WriteAllTextAsync(
             configPath,

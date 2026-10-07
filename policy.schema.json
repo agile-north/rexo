@@ -508,6 +508,16 @@
           "type": "string",
           "description": "Container image used to execute the run command."
         },
+        "fallback": {
+          "type": "string",
+          "enum": [
+            "error",
+            "host"
+          ],
+          "default": "error",
+          "description": "Behavior when the container runtime is unavailable. Defaults to error; host explicitly allows native execution.",
+          "markdownDescription": "Behavior when the container runtime is unavailable. Defaults to `error`; set to `host` only to explicitly permit native execution."
+        },
         "env": {
           "type": "object",
           "description": "Additional environment variables injected into the container process.",

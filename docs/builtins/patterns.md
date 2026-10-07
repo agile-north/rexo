@@ -56,7 +56,7 @@ These mappings are intentionally approximate.
 | --- | --- |
 | `builtin:resolve-version` | `gitversion /output json` or equivalent provider command, then map fields into execution context |
 | `builtin:validate` | Logical validation gate; no direct external command in current implementation |
-| `builtin:clean` | Remove `<runtime.output.root>/` recursively (default `artifacts/`) |
+| `builtin:clean` | Remove `<outputs.root>/` recursively (default `artifacts/`) |
 
 ### Artifact lifecycle builtins
 
@@ -65,7 +65,7 @@ These mappings are intentionally approximate.
 | `builtin:plan-artifacts` | Read artifact config + context and print a computed plan (no build/tag/push mutation) |
 | `builtin:build-artifacts` | For each artifact provider, run equivalent build (`docker build`, `dotnet pack`, etc.) |
 | `builtin:tag-artifacts` | For each artifact provider, apply version tags (`docker tag`, package version tagging flows) |
-| `builtin:push-artifacts` | Enforce push gates then run provider push (`docker push`, `dotnet nuget push`, etc.), then write `<runtime.output.root>/manifest.json` when enabled |
+| `builtin:push-artifacts` | Enforce push gates then run provider push (`docker push`, `dotnet nuget push`, etc.), then write `<outputs.root>/manifest.json` when `outputs.emit` is enabled |
 
 ### Composite convenience builtins
 

@@ -21,8 +21,8 @@ Design principle: **only essential behavior is on by default**. Everything else 
 
 ```yaml
 extends:
-  - embedded:dotnet
   - embedded:standard
+  - embedded:dotnet
 vars:
   dotnet:
     solution: solution.slnx

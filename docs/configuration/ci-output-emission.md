@@ -49,12 +49,12 @@ The `outputs.ci` block is optional, but when present these are the runtime defau
 | `github-actions` | `KEY=VALUE` by stdout, or GitHub file output when `GITHUB_ENV`, `GITHUB_OUTPUT`, or `GITHUB_STATE` is available |
 | `azure-devops` | `##vso[task.setvariable variable=KEY]VALUE` |
 | `teamcity` | `##teamcity[setParameter name='env.KEY' value='VALUE']` |
-| `gitlab-ci` | `KEY=VALUE` |
-| `bitbucket-pipelines` | `KEY=VALUE` |
+| GitLab CI / Bitbucket Pipelines detected with `provider: auto` | `KEY=VALUE` |
 
 Behavior notes:
 
 - `provider: auto` uses the detected CI provider.
+- The schema accepts explicit values `auto`, `github-actions`, `azure-devops`, `teamcity`, and `generic`. GitLab CI and Bitbucket Pipelines are supported through auto-detection and use generic `KEY=VALUE` output.
 - When `provider: auto` is used outside CI, post-command CI emission is skipped.
 - A non-`auto` provider can be forced locally for testing.
 - When GitHub file output is configured but the target environment variable is missing, Rexo falls back to stdout and warns.

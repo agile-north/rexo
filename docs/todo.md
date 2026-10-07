@@ -28,7 +28,7 @@ Legend:
 | Artifact provenance | Delivered for available metadata | Run/CI metadata and local artifact SHA-256 are recorded. SBOMs, signed attestations, and provider-reported registry digests require a separate tooling/provider capability tranche. |
 | Artifact promotion | Delivered for local files | One verified local file can be copied immutably into a repository-relative environment. Remote deployment and registry-tag promotion are not implemented without a selected deployment/provider contract. |
 | Extension design | Delivered as an architecture decision | Arbitrary in-process plugin loading is rejected; any future extension contract must be out-of-process and capability-limited. |
-| Documentation and acceptance | Delivered for this worktree | User/developer docs, local Markdown-link tests, workflow YAML parsing, Release build/tests, and local package README generation are verified on Windows. No cross-platform run or upstream SchemaStore change was performed. |
+| Documentation and acceptance | Partial | This worktree's actionable documentation accuracy audit is complete; consolidation of historical scope/archive into a single authoritative reference remains separate work. Prior Windows build/test and package README checks are local evidence, not full roadmap acceptance. No cross-platform run or upstream SchemaStore change was performed. |
 
 ### Explicitly deferred capabilities
 

@@ -22,9 +22,9 @@ dotnet test solution.slnx -c Release
 - Keep implementation under `src/` and tests under `tests/`.
 - Prefer small, composable interfaces and deterministic behavior.
 
-## Commit Message Format (Enforced)
+## Commit Message Format
 
-All commit messages must follow Conventional Commits:
+Use Conventional Commits for commit messages:
 
 ```text
 type(scope): summary
@@ -54,15 +54,15 @@ Rules:
 - Update docs when behavior changes.
 - Ensure CI is green.
 
-## Pull Request Format (Enforced)
+## Pull Request Format
 
-PR title must follow Conventional Commits format:
+Use Conventional Commits format for PR titles:
 
 ```text
 type(scope): summary
 ```
 
-PR body must include all of these sections:
+Include all of these sections in the PR body:
 
 - `## Summary`
 - `## Checklist`
@@ -71,8 +71,6 @@ PR body must include all of these sections:
 Additional PR body requirements:
 
 - At least one checklist item must be checked (`- [x]`).
-- Validation commands must include:
+- Validation should include the results of:
   - `dotnet build solution.slnx -c Release`
   - `dotnet test solution.slnx -c Release` (or `--no-build` variant)
-
-These rules are validated in CI by `.github/workflows/commit-pr-format.yml`.

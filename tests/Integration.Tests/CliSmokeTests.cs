@@ -59,7 +59,7 @@ public sealed class CliSmokeTests
 
         var steps = workflow.RootElement
             .GetProperty("jobs")
-            .GetProperty("verify")
+            .GetProperty("lifecycle")
             .GetProperty("steps")
             .EnumerateArray()
             .ToArray();

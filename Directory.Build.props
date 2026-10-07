@@ -55,7 +55,7 @@
     <RepositoryType>git</RepositoryType>
     <PackageTags>cli;tool;dotnet;automation;build;ci;repository;rexo;rx</PackageTags>
     <Description>Rexo (rx) — config-driven repository automation CLI. Define build, versioning,
-      artifact, and release workflows in a single rexo.json and run them identically locally and in
+      artifact, and release workflows in a rexo.yaml or rexo.json config and run them identically locally and in
       CI.</Description>
   </PropertyGroup>
 </Project>

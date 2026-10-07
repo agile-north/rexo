@@ -55,13 +55,13 @@ execution engine. See [scope.md](scope.md) for the full product specification an
 └─────────────────────────────────────────────────────┘
 ```
 
-Support services consulted at startup:
+Support services used by the runtime:
 
 - `src/Git` — branch/SHA/remote/clean via `git` CLI
 - `src/Ci` — detects GitHub Actions, Azure DevOps, GitLab, Bitbucket from env vars
 - `src/Templating` — `{{variable | filter}}` interpolation in step `run` strings
 - `src/Ui` — Spectre.Console rich output for all result types
-- `src/Policies` — `LocalFilePolicySource` for future policy-driven command injection
+- `src/Policies` — policy source and embedded-template support for policy-provided defaults and commands
 
 ---
 
@@ -73,7 +73,7 @@ rx branch feature my-change
         ▼
 Program.ExecuteAsync
   1. Parse global flags (--json, --json-file, --verbose, --debug, --quiet/-q)
-  2. Load rexo.json → RepoConfigurationLoader
+  2. Load the discovered Rexo config (YAML or JSON) → RepoConfigurationLoader
       a. Validate $schema + schemaVersion metadata
       b. NJsonSchema validation against embedded schema (or local `rexo.schema.json` / `policy.schema.json`)
        c. JsonSerializer.Deserialize<RepoConfig>

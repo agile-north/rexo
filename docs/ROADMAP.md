@@ -8,7 +8,7 @@ not simply whether a command exists.
 | --- | --- | --- |
 | Container fallback (section 7; scenario D) | Implemented and tested | Resolver and executor tests cover fail-closed defaults and explicit host fallback. |
 | Release modes and self-hosting (8–9) | Single-job normal lifecycle; real remote publication unverified | Source-built CLI runs normal release once; config gates push on publication intent, PR context and branch policy. Prepared publication is a separately tested provider capability for NuGet/symbols and generic archives, not used by this pipeline. Docker/OCI capability implementations remain follow-ups. |
-| Documentation consolidation (10) | Partial | Link tests and refreshed guidance exist; historical archive and complete authoritative documentation audit remain. |
+| Documentation consolidation (10) | Partial | The actionable accuracy audit of current user/developer docs is complete; consolidation of the historical scope/archive into a single authoritative reference remains separate work. |
 | Init lifecycle (11) | Implemented and tested | Init tests cover superseded same-slot variants and preserved legacy files. |
 | Repository readiness (12) | Partial | Tool/provider/path/lock findings exist; required-secret resolution, full container/artifact readiness and version resolution remain. `check` is a basic gate, not proof of full readiness. |
 | Property provenance (13; scenario E) | Partial / limited contract | Declaration sources only; winning source, overridden values and per-policy merge ownership remain. |

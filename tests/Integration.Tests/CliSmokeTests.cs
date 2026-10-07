@@ -43,7 +43,7 @@ public sealed class CliSmokeTests
     }
 
     [Theory]
-    [InlineData("release.yml", "pack-and-publish")]
+    [InlineData("release.yml", "release-rehearsal")]
     [InlineData("build.yml", "build")]
     public async Task WorkflowsParseAndUseSourceBuiltRexo(string fileName, string jobName)
     {
@@ -72,11 +72,24 @@ public sealed class CliSmokeTests
         if (fileName == "release.yml")
         {
             Assert.Contains("Bootstrap local Rexo CLI", names);
-            Assert.Contains("Build, test, and pack with Rexo (no publisher configured)", names);
+            Assert.Contains("Rehearse release without publication", names);
             var bootstrapIndex = Array.IndexOf(names, "Bootstrap local Rexo CLI");
             var readinessIndex = Array.IndexOf(names, "Check repository readiness");
-            var loginIndex = Array.IndexOf(names, "NuGet login (OIDC -> temporary API key)");
-            Assert.True(readinessIndex > bootstrapIndex && readinessIndex < loginIndex);
+            var rehearsalIndex = Array.IndexOf(names, "Rehearse release without publication");
+            Assert.True(readinessIndex > bootstrapIndex && readinessIndex < rehearsalIndex);
+            Assert.Equal("read", workflow.RootElement.GetProperty("permissions").GetProperty("contents").GetString());
+            Assert.Single(workflow.RootElement.GetProperty("permissions").EnumerateObject());
+            Assert.DoesNotContain("secrets.", workflow.RootElement.GetProperty("jobs").GetProperty(jobName).GetRawText(), StringComparison.Ordinal);
+            Assert.DoesNotContain("--push", workflow.RootElement.GetProperty("jobs").GetProperty(jobName).GetRawText(), StringComparison.Ordinal);
+            Assert.False(workflow.RootElement.GetProperty("on").GetProperty("workflow_dispatch").GetProperty("inputs").GetProperty("publish").GetProperty("default").GetBoolean());
+            Assert.True(workflow.RootElement.GetProperty("on").TryGetProperty("pull_request", out _));
+            var publish = workflow.RootElement.GetProperty("jobs").GetProperty("publish");
+            Assert.Equal("release-rehearsal", publish.GetProperty("needs").GetString());
+            var gate = publish.GetProperty("if").GetString();
+            Assert.Contains("github.event_name != 'pull_request'", gate, StringComparison.Ordinal);
+            Assert.Contains("inputs.publish", gate, StringComparison.Ordinal);
+            Assert.Contains("github.ref_type == 'branch'", gate, StringComparison.Ordinal);
+            Assert.Contains("github.ref_name == 'main'", gate, StringComparison.Ordinal);
             var readiness = Assert.Single(steps, step => step.GetProperty("name").GetString() == "Check repository readiness");
             Assert.Contains("artifacts/rx-bootstrap/Rexo.Cli.dll --non-interactive check", readiness.GetProperty("run").GetString(), StringComparison.Ordinal);
         }
@@ -93,8 +106,11 @@ public sealed class CliSmokeTests
             Assert.Contains("artifacts/selfhost/**", evidence.GetProperty("with").GetProperty("path").GetString(), StringComparison.Ordinal);
             Assert.Contains("artifacts/packages/*.nupkg", evidence.GetProperty("with").GetProperty("path").GetString(), StringComparison.Ordinal);
         }
-        var reporter = Assert.Single(steps, step => step.GetProperty("name").GetString() == "Publish test results to GitHub Checks");
-        Assert.Equal("artifacts/test-results/**/*.trx", reporter.GetProperty("with").GetProperty("path").GetString());
+        if (fileName == "build.yml")
+        {
+            var reporter = Assert.Single(steps, step => step.GetProperty("name").GetString() == "Publish test results to GitHub Checks");
+            Assert.Equal("artifacts/test-results/**/*.trx", reporter.GetProperty("with").GetProperty("path").GetString());
+        }
         var coverage = Assert.Single(steps, step => step.GetProperty("name").GetString() == "Generate coverage summary");
         Assert.Contains("artifacts/test-results/**/coverage.cobertura.xml", coverage.GetProperty("run").GetString(), StringComparison.Ordinal);
         Assert.All(steps, step =>

@@ -1,6 +1,6 @@
 # Rexo
 
-[![Repository lifecycle](https://github.com/agile-north/rexo/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/agile-north/rexo/actions/workflows/release.yml)
+[![Release](https://github.com/agile-north/rexo/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/agile-north/rexo/actions/workflows/release.yml)
 [![Workflow validation](https://github.com/agile-north/rexo/actions/workflows/workflow-validation.yml/badge.svg?branch=main)](https://github.com/agile-north/rexo/actions/workflows/workflow-validation.yml)
 [![NuGet version](https://img.shields.io/nuget/v/Rexo.Cli)](https://www.nuget.org/packages/Rexo.Cli)
 [![NuGet downloads](https://img.shields.io/nuget/dt/Rexo.Cli)](https://www.nuget.org/packages/Rexo.Cli)

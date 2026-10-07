@@ -17,7 +17,7 @@ dotnet test solution.slnx -c Release
 
 ## Repository release workflow
 
-The single `repository-lifecycle` workflow (`release.yml`) has one job (`lifecycle`).
+The single `release` workflow (`release.yml`) has one job (`release`).
 It bootstraps the current source and calls the normal
 `rx release` lifecycle once, with identical arguments on every event.
 The configured release command gates pushing on `REXO_PUBLISH`, PR context and
@@ -31,7 +31,7 @@ the previous read-only job boundary. Publisher login and release mutations remai
 event/branch-gated. Non-publishing runs do not verify real publisher authentication.
 
 `workflow-validation` runs pinned actionlint over all workflows, including shell checks.
-Require `workflow-validation` and `lifecycle` in the `main` branch rules,
+Require `workflow-validation` and `release` in the `main` branch rules,
 with branches up to date, before merging workflow changes. Repository rules are maintained
 in GitHub settings, not by the workflow itself.
 

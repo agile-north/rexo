@@ -29,6 +29,7 @@ public sealed record ExecutionContext(
     public IReadOnlyDictionary<string, string> MappedSecretEnvironment { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
     public string CiVariablePrefix { get; init; } = "REXO_";
     public VersionResult? Version { get; init; }
+    public IReadOnlyList<PreparedArtifact> PreparedArtifacts { get; init; } = [];
     public IReadOnlyDictionary<string, StepResult> CompletedSteps { get; init; } = new Dictionary<string, StepResult>();
 
     /// <summary>Resolved output paths available as <c>{{outputs.*}}</c> in templates.</summary>
@@ -67,4 +68,3 @@ public sealed record ExecutionContext(
         System.Environment.GetEnvironmentVariable(name)
         ?? (FileEnvironment.TryGetValue(name, out var value) ? value : null);
 }
-

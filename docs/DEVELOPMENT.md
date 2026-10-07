@@ -39,16 +39,20 @@ orchestration. `rx ci coverage` restores the pinned local report tool and genera
 coverage summaries using the config's output paths; Actions only appends the summary
 to GitHub and uploads evidence. The local tool version lives in `.config/dotnet-tools.json`.
 The acceptance script checks evidence rather than reimplementing that lifecycle.
-After release verification, `rx ci handoff` seals the successful run and exact NuGet
-package SHA-256 inventory. Actions transfers that receipt, the packages and the
+After release verification, `rx ci handoff` seals the successful run and provider-described
+prepared outputs. Actions transfers that receipt, this repository's packages and the
 source-built bootstrap CLI to the separate publishing runner. `rx ci publish --confirm`
 checks the commit, config, lockfile, version, CI run identity and all package hashes
-before using the existing push policies/providers; it does not build, pack or test.
+before using the existing push policies and each provider's prepared-publication method;
+it does not build, pack or test.
 The publication rehearsal exercises this command with global `--dry-run`.
 Post-push Git tagging runs only after a successful push and never in dry-run.
-This handoff currently supports explicitly named NuGet packages with literal,
-repository-relative output paths, without symbol packages. Other providers are rejected,
-not treated as verified. SHA-256 detects changed bytes, but the receipt is not a signed
+`IPreparedArtifactProvider` is an optional provider capability. NuGet (including exact-path
+symbols) and generic file archives implement it using shared file-integrity checks.
+The runtime does not construct package filenames or discover files for publication.
+Other providers currently fail explicitly until they implement this capability; remote
+image/chart references need provider-specific immutable identity validation, not file hashing.
+SHA-256 detects changed bytes, but the receipt is not a signed
 attestation: only artifacts from the same trusted Actions run may enter publication.
 
 PR CI continuously exercises the policy-backed lifecycle using

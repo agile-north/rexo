@@ -31,17 +31,17 @@ outputs:
     sarif: ~/sarif
 commands:
   ci handoff:
-    description: Seal the packages from a successful unpublished release for transfer.
+    description: Seal provider-described outputs from a successful unpublished release for transfer.
     steps:
       - id: version
         uses: builtin:resolve-version
       - id: seal
-        uses: builtin:seal-nuget-handoff
+        uses: builtin:seal-artifact-handoff
         with:
           runManifest: artifacts/selfhost/release-manifest.json
           path: artifacts/selfhost/handoff.json
   ci publish:
-    description: Verify and publish handed-off packages without rebuilding or testing.
+    description: Verify and publish prepared artifacts without rebuilding or testing.
     options:
       confirm:
         type: bool
@@ -50,7 +50,7 @@ commands:
       - id: version
         uses: builtin:resolve-version
       - id: publish
-        uses: builtin:push-nuget-handoff
+        uses: builtin:push-artifact-handoff
         with:
           path: artifacts/selfhost/handoff.json
       - id: post-push

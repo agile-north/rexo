@@ -57,3 +57,11 @@ silencing an analyzer.
 After a fix is pushed, inspect feedback on the new head commit. A successful analysis check means
 the analyzer ran successfully, not that it found no quality issues. Re-read the current inline
 comments and scan sibling code for the same pattern before declaring the review addressed.
+
+## Provider capabilities
+
+Keep artifact-format details in providers, not the execution runtime. Shared lifecycle features
+must use provider-neutral contracts; do not hard-code package filenames or assume every output
+is a local file. Model optional capabilities explicitly, fail clearly when unsupported, and test
+the contract with multiple providers. File integrity can be shared, while registry references
+require provider-specific immutable identity validation.

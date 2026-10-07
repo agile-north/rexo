@@ -7,7 +7,7 @@ using Rexo.Core.Abstractions;
 using Rexo.Core.Environment;
 using Rexo.Core.Models;
 
-public sealed class NuGetArtifactProvider : IArtifactProvider
+public sealed class NuGetArtifactProvider : IArtifactProvider, IPreparedArtifactProvider
 {
     public static void Register(ArtifactProviderRegistry registry) =>
         registry.Register("nuget", new NuGetArtifactProvider());
@@ -21,6 +21,45 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
     }
 
     public string Type => "nuget";
+
+    public async Task<PreparedArtifact> PrepareAsync(
+        ArtifactConfig artifact, ExecutionContext context, CancellationToken cancellationToken)
+    {
+        var version = context.Version?.NuGetVersion ?? context.Version?.SemVer
+            ?? throw new InvalidOperationException("Prepared NuGet publication requires a resolved version.");
+        var output = GetSetting(artifact, "output") ?? "artifacts/packages";
+        var paths = new List<string> { $"{output}/{artifact.Name}.{version}.nupkg" };
+        if (IsTrue(GetSetting(artifact.Settings, "symbols.enabled")))
+        {
+            var symbols = ResolveSymbolPattern(artifact, output, version);
+            if (symbols.Contains('*', StringComparison.Ordinal) || symbols.Contains('?', StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Prepared symbol publication requires an exact path, not a pattern.");
+            }
+            paths.Add(symbols);
+        }
+        return await PreparedArtifactFiles.PrepareAsync(artifact, paths, context.RepositoryRoot, cancellationToken);
+    }
+
+    public async Task ValidatePreparedAsync(
+        ArtifactConfig artifact, PreparedArtifact prepared, ExecutionContext context, CancellationToken cancellationToken)
+    {
+        var expected = await PrepareAsync(artifact, context, cancellationToken);
+        if (!PreparedArtifactFiles.SameOutputs(expected, prepared))
+        {
+            throw new InvalidOperationException("Prepared NuGet outputs do not match the configured package and version.");
+        }
+        await PreparedArtifactFiles.ValidateAsync(prepared, context.RepositoryRoot, cancellationToken);
+    }
+
+    public async Task<ArtifactPushResult> PushPreparedAsync(
+        ArtifactConfig artifact, PreparedArtifact prepared, ExecutionContext context, CancellationToken cancellationToken)
+    {
+        await ValidatePreparedAsync(artifact, prepared, context, cancellationToken);
+        var package = prepared.Outputs.Single(output => output.Reference.EndsWith(".nupkg", StringComparison.Ordinal));
+        var symbols = prepared.Outputs.SingleOrDefault(output => output.Reference.EndsWith(".snupkg", StringComparison.Ordinal));
+        return await PushPackagesAsync(artifact, context, [package.Reference], symbols?.Reference, cancellationToken);
+    }
 
     public async Task<ArtifactBuildResult> BuildAsync(
         ArtifactConfig artifact,
@@ -73,6 +112,13 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
         var packageVersion = context.Version?.NuGetVersion ?? context.Version?.SemVer;
         var packageTargets = ResolvePackageTargets(context.RepositoryRoot, output, artifact.Name, packageVersion);
         var symbolPattern = ResolveSymbolPattern(artifact, output, packageVersion);
+        return await PushPackagesAsync(artifact, context, packageTargets, symbolPattern, cancellationToken);
+    }
+
+    private async Task<ArtifactPushResult> PushPackagesAsync(
+        ArtifactConfig artifact, ExecutionContext context, IReadOnlyList<string> packageTargets,
+        string? symbolPattern, CancellationToken cancellationToken)
+    {
         var fileEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
         var source = ResolveSource(artifact, fileEnv);
         var auth = ResolveAuth(artifact, source, GetSetting(artifact.Settings, "target.apiKeyEnv"), fileEnv);
@@ -103,7 +149,7 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
         var published = new List<string> { $"{source}/{artifact.Name}" };
 
         var pushSymbols = IsTrue(GetSetting(artifact.Settings, "symbols.enabled"));
-        if (pushSymbols && HasMatchingFiles(context.RepositoryRoot, symbolPattern))
+        if (pushSymbols && symbolPattern is not null && HasMatchingFiles(context.RepositoryRoot, symbolPattern))
         {
             var symbolSource = ResolveSymbolSource(artifact, source, fileEnv);
             var symbolAuth = ResolveSymbolAuth(

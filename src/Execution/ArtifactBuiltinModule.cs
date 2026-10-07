@@ -6,7 +6,7 @@ internal sealed class ArtifactBuiltinModule : IConfigBuiltinModule
 {
     public void Register(BuiltinRegistry registry, ConfigBuiltinModuleContext context)
     {
-        registry.Register("builtin:seal-nuget-handoff", async (step, ctx, ct) =>
+        registry.Register("builtin:seal-artifact-handoff", async (step, ctx, ct) =>
         {
             if (ctx.IsDryRun)
             {
@@ -14,28 +14,30 @@ internal sealed class ArtifactBuiltinModule : IConfigBuiltinModule
                     new Dictionary<string, object?> { ["message"] = "Dry run: handoff not written." });
             }
 
-            await VerifiedNuGetHandoff.SealAsync(
+            await VerifiedArtifactHandoff.SealAsync(
                 step.With?["runManifest"] ?? throw new InvalidOperationException("runManifest is required."),
                 step.With?["path"] ?? throw new InvalidOperationException("path is required."),
-                context.Config, ctx, ct);
+                context.Config, ctx, context.Loader.ArtifactProviders, ct);
             return new StepResult(step.Id ?? "seal-handoff", true, 0, TimeSpan.Zero,
-                new Dictionary<string, object?> { ["message"] = "Verified NuGet handoff sealed." });
+                new Dictionary<string, object?> { ["message"] = "Verified artifact handoff sealed." });
         });
 
-        registry.Register("builtin:push-nuget-handoff", async (step, ctx, ct) =>
+        registry.Register("builtin:push-artifact-handoff", async (step, ctx, ct) =>
         {
             if (ConfigCommandLoader.TryGetOptionBoolean(ctx.Options, "confirm") != true)
             {
                 throw new InvalidOperationException("Verified publication requires --confirm.");
             }
-            var version = await VerifiedNuGetHandoff.VerifyAsync(
+            var handoff = await VerifiedArtifactHandoff.VerifyAsync(
                 step.With?["path"] ?? throw new InvalidOperationException("path is required."),
-                context.Config, ctx, ct);
+                context.Config, ctx, context.Loader.ArtifactProviders, ct);
+            var version = handoff.Run.Version!;
             var result = await context.Loader.PushArtifactsAsync(
                 step.Id ?? "push-handoff", context.Config, context.RepositoryRoot,
                 ConfigCommandLoader.ResolveOutputRoot(context.Config, ctx),
                 ConfigCommandLoader.ShouldEmitRuntimeFiles(context.Config),
-                ctx.WithVersion(version), static _ => true, "Verified packages pushed.", "No packages configured.", ct);
+                ctx.WithVersion(version) with { PreparedArtifacts = handoff.Artifacts },
+                static _ => true, "Verified artifacts pushed.", "No artifacts configured.", ct);
             if (result.Success && result.Outputs.TryGetValue("__pushDecisions", out var decisions) &&
                 decisions is List<PushDecision> pushDecisions && pushDecisions.Any(decision => !decision.Allowed))
             {
@@ -60,7 +62,7 @@ internal sealed class ArtifactBuiltinModule : IConfigBuiltinModule
                     ExitCode = 6,
                     Outputs = new Dictionary<string, object?>(result.Outputs)
                     {
-                        ["error"] = "Verified publication did not publish every configured package.",
+                        ["error"] = "Verified publication did not publish every configured artifact.",
                     },
                 };
             }

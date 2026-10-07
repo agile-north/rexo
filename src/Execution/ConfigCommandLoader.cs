@@ -596,7 +596,19 @@ public sealed class ConfigCommandLoader
             }
             else
             {
-                pushResult = await provider.PushAsync(artifactConfig, ctx, cancellationToken);
+                if (ctx.PreparedArtifacts.Count > 0)
+                {
+                    var prepared = ctx.PreparedArtifacts.Single(entry => entry.Type == artifactCfg.Type && entry.Name == artifactName);
+                    if (provider is not IPreparedArtifactProvider preparedProvider)
+                    {
+                        throw new InvalidOperationException($"Provider '{artifactCfg.Type}' does not support prepared publication.");
+                    }
+                    pushResult = await preparedProvider.PushPreparedAsync(artifactConfig, prepared, ctx, cancellationToken);
+                }
+                else
+                {
+                    pushResult = await provider.PushAsync(artifactConfig, ctx, cancellationToken);
+                }
             }
 
             var pushPerformed = pushResult.PublishedReferences.Count > 0;
@@ -1126,7 +1138,7 @@ public sealed class ConfigCommandLoader
         return blockers;
     }
 
-    private static ArtifactConfig ToArtifactConfig(RepoArtifactConfig artifactCfg, RepoConfig config, string outputRoot)
+    internal static ArtifactConfig ToArtifactConfig(RepoArtifactConfig artifactCfg, RepoConfig config, string outputRoot)
     {
         var settings = artifactCfg.Settings is not null
             ? CloneSettings(artifactCfg.Settings)

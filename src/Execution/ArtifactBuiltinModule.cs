@@ -6,7 +6,7 @@ internal sealed class ArtifactBuiltinModule : IConfigBuiltinModule
 {
     public void Register(BuiltinRegistry registry, ConfigBuiltinModuleContext context)
     {
-        registry.Register("builtin:seal-artifact-handoff", async (step, ctx, ct) =>
+        registry.Register("builtin:seal-artifact-handoff", (step, ctx, ct) => ExecuteHandoffAsync(step, async () =>
         {
             if (ctx.IsDryRun)
             {
@@ -20,9 +20,9 @@ internal sealed class ArtifactBuiltinModule : IConfigBuiltinModule
                 context.Config, ctx, context.Loader.ArtifactProviders, ct);
             return new StepResult(step.Id ?? "seal-handoff", true, 0, TimeSpan.Zero,
                 new Dictionary<string, object?> { ["message"] = "Verified artifact handoff sealed." });
-        });
+        }));
 
-        registry.Register("builtin:push-artifact-handoff", async (step, ctx, ct) =>
+        registry.Register("builtin:push-artifact-handoff", (step, ctx, ct) => ExecuteHandoffAsync(step, async () =>
         {
             if (ConfigCommandLoader.TryGetOptionBoolean(ctx.Options, "confirm") != true)
             {
@@ -70,7 +70,7 @@ internal sealed class ArtifactBuiltinModule : IConfigBuiltinModule
             {
                 Outputs = new Dictionary<string, object?>(result.Outputs) { ["__version"] = version },
             };
-        });
+        }));
 
         registry.Register("builtin:build-artifacts", (step, ctx, ct) =>
             context.Loader.BuildArtifactsAsync(
@@ -216,4 +216,19 @@ internal sealed class ArtifactBuiltinModule : IConfigBuiltinModule
         step.With is not null && step.With.TryGetValue(name, out var value) && !string.IsNullOrWhiteSpace(value)
             ? value
             : throw new InvalidOperationException($"{name} is required.");
+
+    private static async Task<StepResult> ExecuteHandoffAsync(StepDefinition step, Func<Task<StepResult>> action)
+    {
+        try
+        {
+            return await action();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or
+            UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            Console.Error.WriteLine($"Artifact handoff failed: {ex.Message}");
+            return new StepResult(step.Id ?? "artifact-handoff", false, 6, TimeSpan.Zero,
+                new Dictionary<string, object?> { ["error"] = ex.Message });
+        }
+    }
 }

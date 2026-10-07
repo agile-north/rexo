@@ -267,7 +267,10 @@ public sealed class VerifiedArtifactHandoffTests : IDisposable
 
         if (tamper || !confirm)
         {
-            await Assert.ThrowsAsync<InvalidOperationException>(() => push!(step, context, CancellationToken.None));
+            var result = await push!(step, context, CancellationToken.None);
+            Assert.False(result.Success);
+            Assert.Equal(6, result.ExitCode);
+            Assert.True(result.Outputs.ContainsKey("error"));
         }
         else
         {

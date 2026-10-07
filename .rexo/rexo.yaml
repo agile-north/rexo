@@ -29,39 +29,25 @@ outputs:
     coverage: ~/test-results
   analysis:
     sarif: ~/sarif
+runtime:
+  push:
+    noPushInPullRequest: true
+    branches: [main, alpha, alpha-*, beta, beta-*, edge, edge-*]
 commands:
-  ci handoff:
-    description: Seal provider-described outputs from a successful unpublished release for transfer.
-    steps:
-      - id: version
-        uses: builtin:resolve-version
-      - id: evidence
-        uses: builtin:validate-release-evidence
-        with:
-          runManifest: artifacts/selfhost/release-manifest.json
-          result: artifacts/selfhost/release.json
-          tests: "{{outputs.tests.results}}"
-          sarif: "{{outputs.analysis.sarif}}/dotnet-build.sarif"
-          archive: "artifacts/packages/Rexo.Cli.{{version.semver}}.nupkg"
-          entry: PACKAGE_README.generated.md
-      - id: seal
-        uses: builtin:seal-artifact-handoff
-        with:
-          runManifest: artifacts/selfhost/release-manifest.json
-          path: artifacts/selfhost/handoff.json
-  ci publish:
-    description: Verify and publish prepared artifacts without rebuilding or testing.
+  release:
+    description: Verify and build once; publish only when CI selects a publisher and push policy permits it.
     options:
-      confirm:
+      push:
         type: bool
-        default: false
+        default: true
     steps:
-      - id: version
-        uses: builtin:resolve-version
-      - id: publish
-        uses: builtin:push-artifact-handoff
-        with:
-          path: artifacts/selfhost/handoff.json
+      - id: verify
+        command: verify
+      - id: build
+        command: build
+      - id: push
+        uses: builtin:push-artifacts
+        when: "{{options.push && env.REXO_PUBLISH == 'true' && !ci.isPullRequest}}"
       - id: post-push
         command: post-push
         when: "{{push.anyPushed && !options.dry-run}}"

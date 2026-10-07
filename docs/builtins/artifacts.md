@@ -150,8 +150,9 @@ Missing/changed outputs, identity mismatches and denied pushes fail explicitly.
 Global `--dry-run` verifies evidence and simulates publication without calling providers.
 It does not invoke build/test/pack. Configured post-push hooks must be gated separately.
 
-The repository demonstrates these primitives through `rx ci handoff` and
-`rx ci publish --confirm`. NuGet packages (including exact-path symbols) and generic
+Consumers can configure separate seal/publish stages with these primitives.
+This repository uses the normal single-job release lifecycle instead.
+NuGet packages (including exact-path symbols) and generic
 archives implement the capability. Both use shared repository-contained file hashes,
 reject symbolic-link traversal, and publish only their validated outputs.
 Unsupported providers fail explicitly rather than falling back to build or discovery.

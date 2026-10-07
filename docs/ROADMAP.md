@@ -7,7 +7,7 @@ not simply whether a command exists.
 | Scope | Status in foundation | Evidence / remaining acceptance |
 | --- | --- | --- |
 | Container fallback (section 7; scenario D) | Implemented and tested | Resolver and executor tests cover fail-closed defaults and explicit host fallback. |
-| Release modes and self-hosting (8–9) | Prepared-artifact capability implemented; real remote publication unverified | Source-built CLI verifies evidence and rehearses publish-only with dry-run. Provider-neutral receipts support NuGet/symbol packages and generic archives; publishing downloads this repository's same-run packages and CLI without rebuilding. Docker/OCI and other provider implementations remain follow-ups and fail explicitly today. |
+| Release modes and self-hosting (8–9) | Single-job normal lifecycle; real remote publication unverified | Source-built CLI runs normal release once; config gates push on publication intent, PR context and branch policy. Prepared publication is a separately tested provider capability for NuGet/symbols and generic archives, not used by this pipeline. Docker/OCI capability implementations remain follow-ups. |
 | Documentation consolidation (10) | Partial | Link tests and refreshed guidance exist; historical archive and complete authoritative documentation audit remain. |
 | Init lifecycle (11) | Implemented and tested | Init tests cover superseded same-slot variants and preserved legacy files. |
 | Repository readiness (12) | Partial | Tool/provider/path/lock findings exist; required-secret resolution, full container/artifact readiness and version resolution remain. `check` is a basic gate, not proof of full readiness. |

@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Rexo.Cli;
 using Rexo.Configuration;
+using Rexo.Templating;
 using Spectre.Console;
 
 [Collection("IntegrationSequential")]
@@ -43,7 +44,7 @@ public sealed class CliSmokeTests
     }
 
     [Fact]
-    public async Task LifecycleWorkflowUsesRexoAndIsolatesPublishing()
+    public async Task LifecycleWorkflowRunsNormalRexoReleaseInOneJob()
     {
         DirectoryInfo? directory = new(AppContext.BaseDirectory);
         while (directory is not null && !File.Exists(Path.Join(directory.FullName, "solution.slnx")))
@@ -69,31 +70,63 @@ public sealed class CliSmokeTests
 
         Assert.Contains("Bootstrap source-built Rexo", names);
         Assert.False(File.Exists(Path.Join(directory.FullName, ".github", "workflows", "build.yml")));
-        Assert.Equal("read", workflow.RootElement.GetProperty("permissions").GetProperty("contents").GetString());
-        Assert.Single(workflow.RootElement.GetProperty("permissions").EnumerateObject());
-        var verify = workflow.RootElement.GetProperty("jobs").GetProperty("verify");
-        Assert.DoesNotContain("secrets.", verify.GetRawText(), StringComparison.Ordinal);
-        Assert.DoesNotContain("--push", verify.GetRawText(), StringComparison.Ordinal);
+        Assert.Single(workflow.RootElement.GetProperty("jobs").EnumerateObject());
         Assert.False(workflow.RootElement.GetProperty("on").GetProperty("workflow_dispatch").GetProperty("inputs").GetProperty("publish").GetProperty("default").GetBoolean());
         Assert.True(workflow.RootElement.GetProperty("on").TryGetProperty("pull_request", out _));
-        var publish = workflow.RootElement.GetProperty("jobs").GetProperty("publish");
-        Assert.Equal("verify", publish.GetProperty("needs").GetString());
-        var gate = publish.GetProperty("if").GetString();
-        Assert.Contains("github.event_name != 'pull_request'", gate, StringComparison.Ordinal);
-        Assert.Contains("inputs.publish", gate, StringComparison.Ordinal);
-        Assert.Contains("github.ref_type == 'branch'", gate, StringComparison.Ordinal);
-        Assert.Contains("github.ref_name == 'main'", gate, StringComparison.Ordinal);
-        Assert.DoesNotContain("dotnet publish", publish.GetRawText(), StringComparison.Ordinal);
-        Assert.DoesNotContain("release --push", publish.GetRawText(), StringComparison.Ordinal);
-        Assert.Contains("ci publish --confirm", publish.GetRawText(), StringComparison.Ordinal);
-        Assert.Contains("actions/download-artifact@v4", publish.GetRawText(), StringComparison.Ordinal);
-        var acceptance = Assert.Single(steps, step => step.GetProperty("name").GetString() == "Verify release without publication");
+        var selection = Assert.Single(steps, step => step.GetProperty("name").GetString() == "Select publication");
+        var gate = selection.GetProperty("env").GetProperty("REQUESTED").GetString();
+        Assert.Contains("github.event_name == 'push'", gate, StringComparison.Ordinal);
+        Assert.Contains("github.event_name == 'workflow_dispatch' && inputs.publish", gate, StringComparison.Ordinal);
+        Assert.DoesNotContain("pull_request", gate, StringComparison.Ordinal);
+        Assert.Contains("main|alpha|alpha-*|beta|beta-*|edge|edge-*", selection.GetProperty("run").GetString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("actions/download-artifact", workflowText, StringComparison.Ordinal);
+        Assert.DoesNotContain("ci publish", workflowText, StringComparison.Ordinal);
+        Assert.DoesNotContain("ci handoff", workflowText, StringComparison.Ordinal);
+        var acceptance = Assert.Single(steps, step => step.GetProperty("name").GetString() == "Run Rexo release lifecycle");
         Assert.Contains("--json-file artifacts/selfhost/release.json release", acceptance.GetProperty("run").GetString(), StringComparison.Ordinal);
         Assert.False(File.Exists(Path.Join(directory.FullName, "scripts", "Test-SelfHost.ps1")));
         Assert.DoesNotContain(".ps1", workflowText, StringComparison.Ordinal);
-        Assert.True(Array.IndexOf(names, "Check repository readiness") < Array.IndexOf(names, "Verify release without publication"));
-        Assert.True(Array.IndexOf(names, "Verify release without publication") < Array.IndexOf(names, "Validate and seal verified outputs"));
-        var evidence = Assert.Single(steps, step => step.GetProperty("name").GetString() == "Upload release rehearsal evidence");
+        Assert.DoesNotContain("--push", acceptance.GetProperty("run").GetString(), StringComparison.Ordinal);
+        Assert.Equal("${{ steps.publication.outputs.enabled }}", acceptance.GetProperty("env").GetProperty("REXO_PUBLISH").GetString());
+        var configPath = Path.Join(directory.FullName, ".rexo", "rexo.yaml");
+        using var config = JsonDocument.Parse(YamlJsonConverter.ToJson(await File.ReadAllTextAsync(configPath), configPath));
+        var release = config.RootElement.GetProperty("commands").GetProperty("release");
+        Assert.True(release.GetProperty("options").GetProperty("push").GetProperty("default").GetBoolean());
+        var push = Assert.Single(release.GetProperty("steps").EnumerateArray(), step => step.GetProperty("id").GetString() == "push");
+        var when = push.GetProperty("when").GetString()!;
+        var renderer = new TemplateRenderer();
+        (string Publish, bool IsPr, string Push, string Expected)[] cases =
+        [
+            ("true", false, "true", "true"),
+            ("true", true, "true", "false"),
+            ("false", false, "true", "false"),
+            ("", false, "true", "false"),
+            ("true", false, "false", "false"),
+        ];
+        var originalPublish = Environment.GetEnvironmentVariable("REXO_PUBLISH");
+        try
+        {
+            foreach (var scenario in cases)
+            {
+                Environment.SetEnvironmentVariable("REXO_PUBLISH", scenario.Publish);
+                var context = Rexo.Core.Models.ExecutionContext.Empty(directory.FullName) with
+                {
+                    IsPullRequest = scenario.IsPr,
+                    Options = new Dictionary<string, string?> { ["push"] = scenario.Push },
+                };
+                Assert.Equal(scenario.Expected, renderer.Render(when, context));
+            }
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("REXO_PUBLISH", originalPublish);
+        }
+        var pushPolicy = config.RootElement.GetProperty("runtime").GetProperty("push");
+        Assert.True(pushPolicy.GetProperty("noPushInPullRequest").GetBoolean());
+        Assert.Equal(
+            ["main", "alpha", "alpha-*", "beta", "beta-*", "edge", "edge-*"],
+            pushPolicy.GetProperty("branches").EnumerateArray().Select(branch => branch.GetString() ?? string.Empty).ToArray());
+        var evidence = Assert.Single(steps, step => step.GetProperty("name").GetString() == "Upload lifecycle evidence");
         Assert.Contains("artifacts/selfhost/**", evidence.GetProperty("with").GetProperty("path").GetString(), StringComparison.Ordinal);
         Assert.Contains("artifacts/packages/*.nupkg", evidence.GetProperty("with").GetProperty("path").GetString(), StringComparison.Ordinal);
         var coverage = Assert.Single(steps, step => step.GetProperty("name").GetString() == "Generate coverage summary");

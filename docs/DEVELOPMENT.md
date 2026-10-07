@@ -17,15 +17,17 @@ dotnet test solution.slnx -c Release
 
 ## Repository release workflow
 
-The single `repository-lifecycle` workflow (`release.yml`) runs `verify` on every PR
-to the configured release branches, with only
-`contents: read`, no publishing secrets, and no persisted checkout credentials.
-It exercises GitVersion and the source-built release lifecycle and uploads evidence.
-Manual dispatch defaults to rehearsal (`publish: false`). Only pushes to the configured
-release branches, or explicit publishing dispatches on those branches, can enter the
-separate privileged `publish` job, after rehearsal succeeds. Publisher authentication,
-package publication, Git tag/schema updates and GitHub Releases exist only in that job.
-Rehearsal does not verify real publisher authentication or remote publication.
+The single `repository-lifecycle` workflow (`release.yml`) has one job (`verify`,
+retaining the required-check name). It bootstraps the current source and calls the normal
+`rx release` lifecycle once, with identical arguments on every event.
+The configured release command gates pushing on `REXO_PUBLISH`, PR context and
+`runtime.push` branch policy; post-push tagging requires an actual successful push.
+Actions selects/authenticates the publisher; PRs and default manual runs do not select one.
+Rexo owns verification, building, tagging and pushing;
+there is no second build, publishing job, artifact transfer or lifecycle wrapper.
+The job has release permissions, including on same-repository PRs; it no longer provides
+the previous read-only job boundary. Publisher login and release mutations remain
+event/branch-gated. Non-publishing runs do not verify real publisher authentication.
 
 `workflow-validation` runs pinned actionlint over all workflows, including shell checks.
 Require `workflow-validation` and `verify` in the `main` branch rules,
@@ -33,38 +35,19 @@ with branches up to date, before merging workflow changes. Repository rules are 
 in GitHub settings, not by the workflow itself.
 
 There is no separate build workflow: PRs, branch pushes and manual rehearsals share
-the same verification job, with one isolated bootstrap and one readiness check.
+the same job, with one isolated source bootstrap.
 Rexo's embedded policies and `.rexo/rexo.yaml` own restore/build/test/analyze/package
 orchestration. `rx ci coverage` restores the pinned local report tool and generates
 coverage summaries using the config's output paths; Actions only appends the summary
 to GitHub and uploads evidence. The local tool version lives in `.config/dotnet-tools.json`.
-There is no lifecycle wrapper script. After the unavoidable source bootstrap,
-workflow steps call the CLI directly; `ci handoff` validates configured evidence
-through `builtin:validate-release-evidence` before sealing outputs.
-After release verification, `rx ci handoff` seals the successful run and provider-described
-prepared outputs. Actions transfers that receipt, this repository's packages and the
-source-built bootstrap CLI to the separate publishing runner. `rx ci publish --confirm`
-checks the commit, config, lockfile, version, CI run identity and all package hashes
-before using the existing push policies and each provider's prepared-publication method;
-it does not build, pack or test.
-The publication rehearsal exercises this command with global `--dry-run`.
-Post-push Git tagging runs only after a successful push and never in dry-run.
-`IPreparedArtifactProvider` is an optional provider capability. NuGet (including exact-path
-symbols) and generic file archives implement it using shared file-integrity checks.
-The runtime does not construct package filenames or discover files for publication.
-Other providers currently fail explicitly until they implement this capability; remote
-image/chart references need provider-specific immutable identity validation, not file hashing.
-SHA-256 detects changed bytes, but the receipt is not a signed
-attestation: only artifacts from the same trusted Actions run may enter publication.
+Prepared-artifact and evidence-validation primitives remain available for consumers that
+need a multi-stage pipeline, but this repository does not use them in its normal lifecycle.
 
 To reproduce PR verification locally from the repository root:
 
 ```powershell
 dotnet publish src\Cli\Cli.csproj -c Release --output artifacts\rx-bootstrap
-dotnet artifacts\rx-bootstrap\Rexo.Cli.dll --non-interactive check
 dotnet artifacts\rx-bootstrap\Rexo.Cli.dll --non-interactive --json-file artifacts/selfhost/release.json release
-dotnet artifacts\rx-bootstrap\Rexo.Cli.dll --non-interactive ci handoff
-dotnet artifacts\rx-bootstrap\Rexo.Cli.dll --non-interactive --dry-run ci publish --confirm
 ```
 
 Set `GITVERSION_SEMVER` to select a version; local execution otherwise uses the configured
@@ -72,8 +55,7 @@ fallback. No publishing credentials are needed. This does not certify the full
 readiness or deployment roadmap; see [ROADMAP.md](ROADMAP.md).
 The repository config uses `~/` output paths relative to `outputs.root` (`artifacts`).
 TRX and XPlat coverage attachments share `artifacts/test-results`; merged analyzer output
-lives in `artifacts/sarif`. The configured evidence validation requires fresh reports and a newly built
-package, so leftover local outputs cannot satisfy the gate.
+lives in `artifacts/sarif`. CI uploads the lifecycle output in one evidence artifact.
 
 The repository release workflow publishes a temporary bootstrap CLI from the checked-out source tree
 to an isolated output directory, then runs the repository's `.rexo/rexo.yaml` release command. The
@@ -87,7 +69,7 @@ Configure at most one publishing mode:
   GitHub Packages using `GITHUB_TOKEN`.
 - If neither is configured, Rexo still builds, tests, and packs the CLI, but the workflow skips
   package publishing, tagging, schema-branch publication, and GitHub Release creation.
-  If both modes are configured, the workflow fails before publishing.
+  If both modes are configured, NuGet.org takes precedence.
 
 The self-hosted version comes from GitVersion and is passed to the local CLI as
 `GITVERSION_SEMVER`. Never add publishing credentials to repository configuration. NuGet push

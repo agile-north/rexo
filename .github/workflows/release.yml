@@ -2,46 +2,29 @@ name: repository-lifecycle
 
 on:
   pull_request:
-    branches:
-      - main
-      - alpha
-      - alpha-*
-      - beta
-      - beta-*
-      - edge
-      - edge-*
+    branches: [main, alpha, alpha-*, beta, beta-*, edge, edge-*]
   push:
-    branches:
-      - main
-      - alpha
-      - alpha-*
-      - beta
-      - beta-*
-      - edge
-      - edge-*
+    branches: [main, alpha, alpha-*, beta, beta-*, edge, edge-*]
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish from an approved release branch (otherwise rehearse only)
+        description: Publish from a release branch
         type: boolean
         default: false
 
 permissions:
-  contents: read
+  contents: write
+  packages: write
+  id-token: write
 
 jobs:
   verify:
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.gitversion.outputs.semVer }}
-      prerelease: ${{ steps.gitversion.outputs.preReleaseTag }}
-
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          persist-credentials: false
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
@@ -57,28 +40,48 @@ jobs:
         id: gitversion
         uses: gittools/actions/gitversion/execute@v3
 
+      - name: Select publication
+        id: publication
+        env:
+          REQUESTED: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
+          NUGET_ORG_USER: ${{ secrets.NUGET_ORG_USER }}
+          GITHUB_PACKAGES: ${{ vars.PUBLISH_TO_GITHUB_PACKAGES }}
+        run: |
+          publish=false
+          source=
+          if [ "$REQUESTED" = true ] && [ "$GITHUB_REF_TYPE" = branch ]; then
+            case "$GITHUB_REF_NAME" in
+              main|alpha|alpha-*|beta|beta-*|edge|edge-*)
+                if [ -n "$NUGET_ORG_USER" ]; then
+                  source=https://api.nuget.org/v3/index.json
+                  publish=true
+                elif [ "$GITHUB_PACKAGES" = true ]; then
+                  source="https://nuget.pkg.github.com/${GITHUB_REPOSITORY_OWNER}/index.json"
+                  publish=true
+                fi
+                ;;
+            esac
+          fi
+          echo "enabled=$publish" >> "$GITHUB_OUTPUT"
+          echo "source=$source" >> "$GITHUB_OUTPUT"
+
+      - name: NuGet login
+        id: nuget-login
+        if: ${{ steps.publication.outputs.enabled == 'true' && steps.publication.outputs.source == 'https://api.nuget.org/v3/index.json' }}
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_ORG_USER }}
+
       - name: Bootstrap source-built Rexo
         run: dotnet publish src/Cli/Cli.csproj -c Release --output artifacts/rx-bootstrap
 
-      - name: Check repository readiness
+      - name: Run Rexo release lifecycle
         env:
           GITVERSION_SEMVER: ${{ steps.gitversion.outputs.semVer }}
-        run: dotnet artifacts/rx-bootstrap/Rexo.Cli.dll --non-interactive check
-
-      - name: Verify release without publication
-        env:
-          GITVERSION_SEMVER: ${{ steps.gitversion.outputs.semVer }}
+          REXO_PUBLISH: ${{ steps.publication.outputs.enabled }}
+          NUGET_TARGET_SOURCE: ${{ steps.publication.outputs.source }}
+          NUGET_API_KEY: ${{ steps.publication.outputs.enabled == 'true' && (steps.publication.outputs.source == 'https://api.nuget.org/v3/index.json' && steps.nuget-login.outputs.NUGET_API_KEY || steps.publication.outputs.source != 'https://api.nuget.org/v3/index.json' && github.token) || '' }}
         run: dotnet artifacts/rx-bootstrap/Rexo.Cli.dll --non-interactive --json-file artifacts/selfhost/release.json release
-
-      - name: Validate and seal verified outputs
-        env:
-          GITVERSION_SEMVER: ${{ steps.gitversion.outputs.semVer }}
-        run: dotnet artifacts/rx-bootstrap/Rexo.Cli.dll --non-interactive ci handoff
-
-      - name: Rehearse prepared publication
-        env:
-          GITVERSION_SEMVER: ${{ steps.gitversion.outputs.semVer }}
-        run: dotnet artifacts/rx-bootstrap/Rexo.Cli.dll --non-interactive --dry-run ci publish --confirm
 
       - name: Generate coverage summary
         if: ${{ always() && hashFiles('artifacts/test-results/**/*.cobertura.xml') != '' }}
@@ -86,124 +89,30 @@ jobs:
           dotnet artifacts/rx-bootstrap/Rexo.Cli.dll --non-interactive ci coverage
           cat artifacts/coverage-report/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload verified release handoff
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-handoff
-          path: |
-            artifacts/selfhost/handoff.json
-            artifacts/packages/*.nupkg
-            artifacts/rx-bootstrap/**
-          if-no-files-found: error
-
-      - name: Upload coverage artifact
+      - name: Upload lifecycle evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-report
-          path: |
-            artifacts/coverage-report/**
-            artifacts/test-results/**/coverage.cobertura.xml
-          if-no-files-found: warn
-
-      - name: Upload test results artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-test-results
-          path: artifacts/test-results/**
-          if-no-files-found: warn
-
-      - name: Upload release rehearsal evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-rehearsal-evidence
+          name: lifecycle-evidence
           path: |
             artifacts/selfhost/**
             artifacts/packages/*.nupkg
+            artifacts/test-results/**
             artifacts/sarif/**
-          if-no-files-found: error
+            artifacts/coverage-report/**
+          if-no-files-found: warn
 
-  publish:
-    needs: verify
-    if: >-
-      github.event_name != 'pull_request' &&
-      (github.event_name == 'push' || inputs.publish) &&
-      github.ref_type == 'branch' &&
-      (github.ref_name == 'main' || github.ref_name == 'alpha' ||
-       startsWith(github.ref_name, 'alpha-') || github.ref_name == 'beta' ||
-       startsWith(github.ref_name, 'beta-') || github.ref_name == 'edge' ||
-       startsWith(github.ref_name, 'edge-'))
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      packages: write
-      id-token: write
-    env:
-      NUGET_ORG_USER: ${{ secrets.NUGET_ORG_USER }}
-      GITVERSION_SEMVER: ${{ needs.verify.outputs.version }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: 10.0.x
-
-      - name: Download verified release handoff
-        uses: actions/download-artifact@v4
-        with:
-          name: release-handoff
-          path: artifacts
-
-      - name: NuGet login (OIDC -> temporary API key)
-        id: nuget-login
-        if: ${{ env.NUGET_ORG_USER != '' }}
-        uses: NuGet/login@v1
-        with:
-          user: ${{ secrets.NUGET_ORG_USER }}
-
-      - name: Verify NuGet publisher identity
-        if: ${{ env.NUGET_ORG_USER != '' }}
-        env:
-          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
+      - name: Publish schema branch
+        if: ${{ steps.publication.outputs.enabled == 'true' }}
         run: |
-          if [ -z "$NUGET_API_KEY" ]; then
-            echo "::error::NuGet trusted publishing was selected, but the login action did not return an API key."
-            exit 1
-          fi
-
-      - name: Publish with Rexo (NuGet.org)
-        if: ${{ env.NUGET_ORG_USER != '' }}
-        env:
-          NUGET_TARGET_SOURCE: https://api.nuget.org/v3/index.json
-          NUGET_API_KEY: ${{ steps.nuget-login.outputs.NUGET_API_KEY }}
-        run: dotnet artifacts/rx-bootstrap/Rexo.Cli.dll --non-interactive ci publish --confirm
-
-      - name: Publish with Rexo (GitHub Packages)
-        if: ${{ env.NUGET_ORG_USER == '' && vars.PUBLISH_TO_GITHUB_PACKAGES == 'true' }}
-        env:
-          NUGET_TARGET_SOURCE: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
-          NUGET_API_KEY: ${{ secrets.GITHUB_TOKEN }}
-        run: dotnet artifacts/rx-bootstrap/Rexo.Cli.dll --non-interactive ci publish --confirm
-
-      - name: Publish schema branch (schema/v<major.minor>, moving)
-        if: ${{ env.NUGET_ORG_USER != '' || vars.PUBLISH_TO_GITHUB_PACKAGES == 'true' }}
-        run: |
-          SCHEMA_VERSION=$(jq -r '.properties.schemaVersion.const' rexo.schema.json)
-          SCHEMA_BRANCH="schema/v${SCHEMA_VERSION}"
-          git push origin "$GITHUB_SHA:refs/heads/$SCHEMA_BRANCH" --force
-          echo "Updated schema branch $SCHEMA_BRANCH to $GITHUB_SHA"
+          schema_version=$(jq -r '.properties.schemaVersion.const' rexo.schema.json)
+          git push origin "$GITHUB_SHA:refs/heads/schema/v${schema_version}" --force
 
       - name: Create GitHub Release
-        if: ${{ env.NUGET_ORG_USER != '' || vars.PUBLISH_TO_GITHUB_PACKAGES == 'true' }}
+        if: ${{ steps.publication.outputs.enabled == 'true' }}
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: v${{ needs.verify.outputs.version }}
+          tag_name: v${{ steps.gitversion.outputs.semVer }}
           target_commitish: ${{ github.sha }}
-          prerelease: ${{ needs.verify.outputs.prerelease != '' }}
+          prerelease: ${{ steps.gitversion.outputs.preReleaseTag != '' }}
           generate_release_notes: true

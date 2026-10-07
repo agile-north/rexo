@@ -24,5 +24,6 @@ jobs:
         run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
       - name: Validate all workflows
         run: |
-          export PATH="$(go env GOPATH)/bin:$PATH"
+          go_path="$(go env GOPATH)"
+          export PATH="$go_path/bin:$PATH"
           actionlint -color

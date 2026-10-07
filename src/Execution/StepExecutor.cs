@@ -160,9 +160,10 @@ public sealed class StepExecutor : IStepExecutor
                     }
                 }
             }
-            catch (ArgumentException)
+            catch (ArgumentException ex)
             {
-                // invalid regex — skip extraction
+                Console.Error.WriteLine(
+                    $"  Warning: could not extract outputs for step '{stepId}': {SecretMasker.Mask(ex.Message, secrets)}");
             }
         }
 

@@ -483,8 +483,11 @@ public sealed class CliJsonOutputTests
     }
   }
 
-  [Fact]
-  public async Task CommandManifestCanAggregateAllCommandsInOneFile()
+  [Theory]
+  [InlineData(null)]
+  [InlineData("{broken")]
+  [InlineData("[]")]
+  public async Task CommandManifestCanAggregateAllCommandsInOneFile(string? existingManifest)
   {
     var tempDir = Path.Combine(Path.GetTempPath(), $"rexo-cli-command-manifest-aggregate-{Guid.NewGuid():N}");
     Directory.CreateDirectory(tempDir);
@@ -522,11 +525,17 @@ public sealed class CliJsonOutputTests
           }
           """);
 
+      var aggregatePath = Path.Combine(tempDir, "artifacts", "manifests", "commands.json");
+      if (existingManifest is not null)
+      {
+        Directory.CreateDirectory(Path.GetDirectoryName(aggregatePath)!);
+        await File.WriteAllTextAsync(aggregatePath, existingManifest);
+      }
+
       Environment.CurrentDirectory = tempDir;
       Assert.Equal(0, await Program.ExecuteAsync(["hello", "--quiet"], CancellationToken.None));
       Assert.Equal(0, await Program.ExecuteAsync(["goodbye", "--quiet"], CancellationToken.None));
 
-      var aggregatePath = Path.Combine(tempDir, "artifacts", "manifests", "commands.json");
       var latestPath = Path.Combine(tempDir, "artifacts", "manifests", "latest.json");
       var helloPath = Path.Combine(tempDir, "artifacts", "manifests", "hello.json");
 
@@ -699,4 +708,3 @@ public sealed class CliJsonOutputTests
     }
   }
 }
-

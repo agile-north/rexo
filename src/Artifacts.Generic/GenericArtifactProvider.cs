@@ -37,17 +37,17 @@ public sealed class GenericArtifactProvider : IArtifactProvider
 
         var absoluteSource = System.IO.Path.IsPathRooted(source)
             ? source
-            : System.IO.Path.Combine(context.RepositoryRoot, source);
+            : System.IO.Path.Join(context.RepositoryRoot, source);
 
         var absoluteOutput = System.IO.Path.IsPathRooted(outputDir)
             ? outputDir
-            : System.IO.Path.Combine(context.RepositoryRoot, outputDir);
+            : System.IO.Path.Join(context.RepositoryRoot, outputDir);
 
         Directory.CreateDirectory(absoluteOutput);
 
         var version = context.Version?.SemVer ?? "0.0.0";
         var archiveName = $"{artifact.Name}-{version}.{format}";
-        var archivePath = System.IO.Path.Combine(absoluteOutput, archiveName);
+        var archivePath = System.IO.Path.Join(absoluteOutput, archiveName);
 
         Console.WriteLine($"  > Creating {format} archive: {archiveName}");
 
@@ -112,11 +112,11 @@ public sealed class GenericArtifactProvider : IArtifactProvider
             ?? "artifacts/generic";
         var absoluteOutput = System.IO.Path.IsPathRooted(outputDir)
             ? outputDir
-            : System.IO.Path.Combine(context.RepositoryRoot, outputDir);
+            : System.IO.Path.Join(context.RepositoryRoot, outputDir);
 
         var absoluteDestination = System.IO.Path.IsPathRooted(destination)
             ? destination
-            : System.IO.Path.Combine(context.RepositoryRoot, destination);
+            : System.IO.Path.Join(context.RepositoryRoot, destination);
 
         try
         {
@@ -125,7 +125,7 @@ public sealed class GenericArtifactProvider : IArtifactProvider
             var files = Directory.GetFiles(absoluteOutput, $"{artifact.Name}-*");
             foreach (var file in files)
             {
-                var destFile = System.IO.Path.Combine(absoluteDestination, System.IO.Path.GetFileName(file));
+                var destFile = System.IO.Path.Join(absoluteDestination, System.IO.Path.GetFileName(file));
                 File.Copy(file, destFile, overwrite: true);
                 Console.WriteLine($"  Copied: {destFile}");
             }

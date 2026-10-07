@@ -159,11 +159,8 @@ public static class CiOutputEmitter
     private static void AppendStepFileOutputsFields(ICollection<KeyValuePair<string, object?>> items, StepManifestEntry step)
     {
         var basePath = $"steps.{step.StepId}.fileOutputs";
-        foreach (var fileOutput in step.FileOutputs)
+        foreach (var (outputName, values) in step.FileOutputs)
         {
-            var outputName = fileOutput.Key;
-            var values = fileOutput.Value;
-
             items.Add(new KeyValuePair<string, object?>($"{basePath}.{outputName}.count", values.Count));
 
             for (var index = 0; index < values.Count; index++)

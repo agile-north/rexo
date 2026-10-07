@@ -349,8 +349,10 @@ public sealed class CliSmokeTests
         }
     }
 
-    [Fact]
-    public async Task PromoteCopiesVerifiedArtifactWithoutRebuildingAndIsIdempotent()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PromoteCopiesVerifiedArtifactWithoutRebuildingAndIsIdempotent(bool useAbsolutePaths)
     {
         var tempDir = Path.Combine(Path.GetTempPath(), $"rexo-promote-{Guid.NewGuid():N}");
         Directory.CreateDirectory(Path.Combine(tempDir, ".rexo"));
@@ -387,22 +389,23 @@ public sealed class CliSmokeTests
                     [
                         new Rexo.Core.Models.ArtifactManifestEntry("nuget", "sample", true, false, ["1.0.0"])
                         {
-                            Location = sourceArtifact,
+                            Location = useAbsolutePaths ? sourceArtifact : Path.GetFileName(sourceArtifact),
                             ContentSha256 = contentHash,
                         },
                     ],
                 });
             await File.WriteAllTextAsync(sourceManifestPath, originalManifestJson);
             Environment.CurrentDirectory = tempDir;
+            var manifestArgument = useAbsolutePaths ? sourceManifestPath : Path.GetFileName(sourceManifestPath);
 
             var outputPath = Path.Combine(tempDir, "promotion.json");
             Assert.Equal(0, await Program.ExecuteAsync(
-                ["--dry-run", "--json-file", outputPath, "promote", "build-manifest.json", "staging"],
+                ["--dry-run", "--json-file", outputPath, "promote", manifestArgument, "staging"],
                 CancellationToken.None));
             Assert.False(Directory.Exists(Path.Combine(tempDir, "deployments")));
 
             Assert.Equal(0, await Program.ExecuteAsync(
-                ["--json-file", outputPath, "promote", "build-manifest.json", "staging"],
+                ["--json-file", outputPath, "promote", manifestArgument, "staging"],
                 CancellationToken.None));
 
             var destination = Path.Combine(tempDir, "deployments", "staging", "objects", contentHash, "sample.nupkg");
@@ -416,13 +419,13 @@ public sealed class CliSmokeTests
                 configPath,
                 configYaml.Replace("path: deployments/staging", "path: ../outside", StringComparison.Ordinal));
             Assert.Equal(9, await Program.ExecuteAsync(
-                ["promote", "build-manifest.json", "staging"],
+                ["promote", manifestArgument, "staging"],
                 CancellationToken.None));
             Assert.False(Directory.Exists(Path.Combine(tempDir, "outside")));
             await File.WriteAllTextAsync(configPath, configYaml);
 
             Assert.Equal(0, await Program.ExecuteAsync(
-                ["promote", "build-manifest.json", "staging"],
+                ["promote", manifestArgument, "staging"],
                 CancellationToken.None));
             Assert.Single(Directory.GetFiles(Path.Combine(tempDir, "deployments", "staging", "promotions"), "*.json"));
 
@@ -432,14 +435,14 @@ public sealed class CliSmokeTests
             };
             await File.WriteAllTextAsync(sourceManifestPath, JsonSerializer.Serialize(alteredManifest));
             Assert.Equal(9, await Program.ExecuteAsync(
-                ["promote", "build-manifest.json", "staging"],
+                ["promote", manifestArgument, "staging"],
                 CancellationToken.None));
             Assert.Single(Directory.GetFiles(Path.Combine(tempDir, "deployments", "staging", "promotions"), "*.json"));
 
             await File.WriteAllTextAsync(sourceManifestPath, originalManifestJson);
             await File.WriteAllTextAsync(sourceArtifact, "modified package bytes");
             Assert.Equal(9, await Program.ExecuteAsync(
-                ["--dry-run", "promote", "build-manifest.json", "staging"],
+                ["--dry-run", "promote", manifestArgument, "staging"],
                 CancellationToken.None));
         }
         finally

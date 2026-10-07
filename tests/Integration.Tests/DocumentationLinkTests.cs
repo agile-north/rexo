@@ -19,20 +19,12 @@ public sealed class DocumentationLinkTests
             .ToArray();
         var missingLinks = new List<string>();
 
-        foreach (var markdownFile in markdownFiles)
+        foreach (var (markdownFile, markdown) in markdownFiles
+            .Select(path => (Path: path, Markdown: File.ReadAllText(path))))
         {
-            var markdown = File.ReadAllText(markdownFile);
-            foreach (var target in MarkdownLinkPattern.Matches(markdown)
-                .Select(match => match.Groups[1].Value.Trim()))
+            foreach (var linkTarget in MarkdownLinkPattern.Matches(markdown)
+                .Select(match => NormalizeLinkTarget(match.Groups[1].Value)))
             {
-                var linkTarget = target;
-                var separator = linkTarget.IndexOfAny([' ', '\t', '\r', '\n']);
-                if (separator >= 0)
-                {
-                    linkTarget = linkTarget[..separator];
-                }
-
-                linkTarget = linkTarget.Trim('<', '>');
                 if (string.IsNullOrWhiteSpace(linkTarget) ||
                     linkTarget.StartsWith('#') ||
                     Uri.TryCreate(linkTarget, UriKind.Absolute, out _))
@@ -46,7 +38,7 @@ public sealed class DocumentationLinkTests
                     continue;
                 }
 
-                var resolvedPath = Path.GetFullPath(Path.Combine(
+                var resolvedPath = Path.GetFullPath(Path.Join(
                     Path.GetDirectoryName(markdownFile)!,
                     localPath.Replace('/', Path.DirectorySeparatorChar)));
                 if (!File.Exists(resolvedPath) && !Directory.Exists(resolvedPath))
@@ -57,6 +49,22 @@ public sealed class DocumentationLinkTests
         }
 
         Assert.True(missingLinks.Count == 0, $"Missing local Markdown links:{Environment.NewLine}{string.Join(Environment.NewLine, missingLinks)}");
+    }
+
+    [Theory]
+    [InlineData(" docs/README.md ", "docs/README.md")]
+    [InlineData("docs/README.md \"Title\"", "docs/README.md")]
+    [InlineData("<docs/README.md>", "docs/README.md")]
+    [InlineData("docs/README.md\t\"Title\"", "docs/README.md")]
+    [InlineData("#section", "#section")]
+    public void LinkTargetNormalizationPreservesPathsAndRemovesTitles(string input, string expected) =>
+        Assert.Equal(expected, NormalizeLinkTarget(input));
+
+    private static string NormalizeLinkTarget(string value)
+    {
+        var target = value.Trim();
+        var separator = target.IndexOfAny([' ', '\t', '\r', '\n']);
+        return (separator >= 0 ? target[..separator] : target).Trim('<', '>');
     }
 
     private static string FindRepositoryRoot()

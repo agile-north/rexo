@@ -159,7 +159,7 @@ internal static class ArtifactPromotionService
         else
         {
             Directory.CreateDirectory(objectDirectory);
-            var temporaryObjectPath = Path.Combine(objectDirectory, $".{fileName}.{Guid.NewGuid():N}.tmp");
+            var temporaryObjectPath = Path.Join(objectDirectory, $".{fileName}.{Guid.NewGuid():N}.tmp");
             try
             {
                 await using (var source = File.OpenRead(sourcePath))
@@ -276,22 +276,20 @@ internal static class ArtifactPromotionService
                      [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
                      StringSplitOptions.RemoveEmptyEntries))
         {
-            var candidate = Path.GetFullPath(Path.Join(currentPath, segment));
-            if (Directory.Exists(candidate))
+            currentPath = Path.GetFullPath(Path.Join(currentPath, segment));
+            if (Directory.Exists(currentPath))
             {
-                var directory = new DirectoryInfo(candidate);
-                candidate = directory.ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? directory.FullName;
+                var directory = new DirectoryInfo(currentPath);
+                currentPath = directory.ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? directory.FullName;
             }
 
-            candidate = Path.GetFullPath(candidate);
-            if (!candidate.Equals(root, pathComparison) &&
-                !candidate.StartsWith(rootPrefix, pathComparison))
+            currentPath = Path.GetFullPath(currentPath);
+            if (!currentPath.Equals(root, pathComparison) &&
+                !currentPath.StartsWith(rootPrefix, pathComparison))
             {
                 throw new InvalidOperationException(
                     $"Environment '{environmentName}' path must remain inside the repository, including through symbolic links.");
             }
-
-            currentPath = candidate;
         }
 
         return currentPath;

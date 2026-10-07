@@ -98,7 +98,7 @@ public sealed class HelmArtifactProvider : IArtifactProvider
         {
             foreach (var tgz in Directory.EnumerateFiles(outputDir, "*.tgz"))
             {
-                var dest = Path.Combine(repo, Path.GetFileName(tgz));
+                var dest = Path.Join(repo, Path.GetFileName(tgz));
                 File.Copy(tgz, dest, overwrite: true);
                 Console.WriteLine($"  > copied {Path.GetFileName(tgz)} -> {repo}");
             }

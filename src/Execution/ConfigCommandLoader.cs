@@ -881,8 +881,8 @@ public sealed class ConfigCommandLoader
     {
         return artifact.Type.ToLowerInvariant() switch
         {
-            "nuget" => [Path.Combine(TryGetArtifactSettingString(artifact.Settings, "output") ?? Path.Combine("artifacts", "packages"), $"{artifactName}.*.nupkg")],
-            "helm-oci" => [Path.Combine(TryGetArtifactSettingString(artifact.Settings, "output") ?? Path.Combine("artifacts", "charts"), $"{(TryGetArtifactSettingString(artifact.Settings, "chart") ?? artifactName)}-{ctx.Version?.SemVer ?? "<version>"}.tgz")],
+            "nuget" => [Path.Join(TryGetArtifactSettingString(artifact.Settings, "output") ?? Path.Combine("artifacts", "packages"), $"{artifactName}.*.nupkg")],
+            "helm-oci" => [Path.Join(TryGetArtifactSettingString(artifact.Settings, "output") ?? Path.Combine("artifacts", "charts"), $"{(TryGetArtifactSettingString(artifact.Settings, "chart") ?? artifactName)}-{ctx.Version?.SemVer ?? "<version>"}.tgz")],
             "docker" => (TryGetArtifactSettingString(artifact.Settings, "image") is { Length: > 0 } image)
                 ? [image]
                 : [artifactName],
@@ -1314,7 +1314,7 @@ public sealed class ConfigCommandLoader
             "perCommand" => $"{safeName}.json",
             _ => "commands.json",
         };
-        var manifestPath = Path.Combine(manifestsDir, manifestFileName);
+        var manifestPath = Path.Join(manifestsDir, manifestFileName);
 
         var stepSummaries = commandResult.Steps
             .Select(s =>
@@ -1428,6 +1428,11 @@ public sealed class ConfigCommandLoader
             {
                 var existingJson = await ReadTextFileAsyncWithRetry(manifestPath, cancellationToken);
                 using var document = JsonDocument.Parse(existingJson);
+                if (document.RootElement.ValueKind != JsonValueKind.Object)
+                {
+                    throw new JsonException("Aggregate command manifest must contain a JSON object.");
+                }
+
                 if (document.RootElement.TryGetProperty("commands", out var commandsElement) &&
                     commandsElement.ValueKind == JsonValueKind.Array)
                 {
@@ -1437,9 +1442,10 @@ public sealed class ConfigCommandLoader
                     }
                 }
             }
-            catch
+            catch (JsonException ex)
             {
-                // Ignore malformed existing aggregate manifest and overwrite with a fresh one.
+                Console.Error.WriteLine(
+                    $"  Warning: replacing malformed aggregate command manifest '{manifestPath}': {ex.Message}");
             }
         }
 
@@ -2115,7 +2121,7 @@ public sealed class ConfigCommandLoader
         var currentDirectory = repositoryRootFullPath;
         foreach (var segment in relativePath.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            currentDirectory = Path.Combine(currentDirectory, segment);
+            currentDirectory = Path.Join(currentDirectory, segment);
             if (!Directory.Exists(currentDirectory))
             {
                 Directory.CreateDirectory(currentDirectory);

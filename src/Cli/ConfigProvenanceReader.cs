@@ -28,7 +28,7 @@ internal static class ConfigProvenanceReader
             var configDirectory = Path.GetDirectoryName(configPath) ?? Directory.GetCurrentDirectory();
             var resolvedOverlayPath = Path.IsPathRooted(overlayPath)
                 ? Path.GetFullPath(overlayPath)
-                : Path.GetFullPath(Path.Combine(configDirectory, overlayPath));
+                : Path.GetFullPath(Path.Join(configDirectory, overlayPath));
             if (File.Exists(resolvedOverlayPath))
             {
                 await ReadLayerAsync(
@@ -85,7 +85,7 @@ internal static class ConfigProvenanceReader
 
                 var basePath = Path.IsPathRooted(baseReference)
                     ? baseReference
-                    : Path.GetFullPath(Path.Combine(configDirectory, baseReference));
+                    : Path.GetFullPath(Path.Join(configDirectory, baseReference));
                 if (File.Exists(basePath))
                 {
                     await ReadLayerAsync(basePath, visited, layers, cancellationToken);

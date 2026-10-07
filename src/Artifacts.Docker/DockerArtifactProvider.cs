@@ -309,7 +309,7 @@ public sealed class DockerArtifactProvider : IArtifactProvider
             return (false, null, null);
         }
 
-        var tempDockerConfig = Path.Combine(Path.GetTempPath(), $"rexo-docker-config-{Guid.NewGuid():N}");
+        var tempDockerConfig = Path.Join(Path.GetTempPath(), $"rexo-docker-config-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDockerConfig);
 
         envOverrides["DOCKER_CONFIG"] = tempDockerConfig;

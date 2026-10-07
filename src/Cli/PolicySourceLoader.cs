@@ -72,7 +72,7 @@ internal static class PolicySourceLoader
                             source.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase)
                 ? ".yaml"
                 : ".json";
-            var tempPolicy = Path.Combine(Path.GetTempPath(), $"rexo-policy-{ComputeSha256Hex(source)}{extension}");
+            var tempPolicy = Path.Join(Path.GetTempPath(), $"rexo-policy-{ComputeSha256Hex(source)}{extension}");
             try
             {
                 var content = await LoadPolicyContentAsync(source, workingDir, cancellationToken);
@@ -126,7 +126,7 @@ internal static class PolicySourceLoader
         var lockfile = new PolicyLockfile { Policies = entries };
         var json = JsonSerializer.Serialize(lockfile, LockJsonOptions);
         var yaml = YamlJsonConverter.FromJson(json);
-        var lockPath = Path.Combine(workingDir, LockfileRelativePath.Replace('/', Path.DirectorySeparatorChar));
+        var lockPath = Path.Join(workingDir, LockfileRelativePath.Replace('/', Path.DirectorySeparatorChar));
         if (dryRun)
         {
             return Path.GetRelativePath(workingDir, lockPath);
@@ -152,7 +152,7 @@ internal static class PolicySourceLoader
 
     public static async Task<PolicyLockfile?> ReadLockfileAsync(string workingDir, CancellationToken cancellationToken)
     {
-        var lockPath = Path.Combine(workingDir, LockfileRelativePath.Replace('/', Path.DirectorySeparatorChar));
+        var lockPath = Path.Join(workingDir, LockfileRelativePath.Replace('/', Path.DirectorySeparatorChar));
         if (!File.Exists(lockPath))
         {
             return null;
@@ -251,7 +251,7 @@ internal static class PolicySourceLoader
         // fallback: local file source listed in env
         var fullPath = Path.IsPathRooted(source)
             ? source
-            : Path.GetFullPath(Path.Combine(workingDir, source));
+            : Path.GetFullPath(Path.Join(workingDir, source));
         return await File.ReadAllTextAsync(fullPath, cancellationToken);
     }
 
@@ -381,7 +381,7 @@ internal static class PolicySourceLoader
         try
         {
             using var stream = await HttpClient.GetStreamAsync(packageUrl, cancellationToken);
-            var tempNupkg = Path.Combine(Path.GetTempPath(), $"rexo-policy-{ComputeSha256Hex(reference)}.nupkg");
+            var tempNupkg = Path.Join(Path.GetTempPath(), $"rexo-policy-{ComputeSha256Hex(reference)}.nupkg");
             await using (var file = File.Create(tempNupkg))
             {
                 await stream.CopyToAsync(file, cancellationToken);
@@ -429,7 +429,7 @@ internal static class PolicySourceLoader
     private static string GetCachePath(string workingDir, string reference)
     {
         var key = ComputeSha256Hex(reference);
-        return Path.Combine(workingDir, ".rexo", "cache", "policies", $"{key}.policy.json");
+        return Path.Join(workingDir, ".rexo", "cache", "policies", $"{key}.policy.json");
     }
 
     private static void EnsureTrusted(string host)

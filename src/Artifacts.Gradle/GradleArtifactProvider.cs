@@ -111,7 +111,7 @@ public sealed class GradleArtifactProvider : IArtifactProvider
             return context.RepositoryRoot;
         }
 
-        return Path.IsPathRooted(dir) ? dir : Path.Combine(context.RepositoryRoot, dir);
+        return Path.IsPathRooted(dir) ? dir : Path.Join(context.RepositoryRoot, dir);
     }
 
     private static string ResolveNativeExe(bool useWrapper, string workDir)

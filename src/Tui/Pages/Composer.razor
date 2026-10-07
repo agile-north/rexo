@@ -235,7 +235,7 @@
                 var destination = outputFilePath!;
                 if (!Path.IsPathRooted(destination))
                 {
-                    destination = Path.Combine(TuiRuntimeContext.WorkingDirectory, destination);
+                    destination = Path.Join(TuiRuntimeContext.WorkingDirectory, destination);
                 }
 
                 var dir = Path.GetDirectoryName(destination);

@@ -243,9 +243,9 @@ public static class BuiltinCommandRegistration
             var configDirectory = Path.GetDirectoryName(configPath) ?? invocation.WorkingDirectory;
             string[] schemaPathCandidates =
             [
-                Path.Combine(configDirectory, RepoConfigurationLoader.SupportedRexoSchemaPath),
-                Path.Combine(configDirectory, "..", RepoConfigurationLoader.SupportedRexoSchemaPath),
-                Path.Combine(configDirectory, ".rexo", RepoConfigurationLoader.SupportedRexoSchemaPath),
+                Path.Join(configDirectory, RepoConfigurationLoader.SupportedRexoSchemaPath),
+                Path.Join(configDirectory, "..", RepoConfigurationLoader.SupportedRexoSchemaPath),
+                Path.Join(configDirectory, ".rexo", RepoConfigurationLoader.SupportedRexoSchemaPath),
             ];
             var schemaPath = schemaPathCandidates.FirstOrDefault(File.Exists);
 
@@ -255,7 +255,7 @@ public static class BuiltinCommandRegistration
         }
 
         var configuredPolicySourceCount = GetConfiguredPolicySources(config).Count;
-        var policyLockPath = Path.Combine(invocation.WorkingDirectory, ".rexo", "rexo.lock.yaml");
+        var policyLockPath = Path.Join(invocation.WorkingDirectory, ".rexo", "rexo.lock.yaml");
         var localPolicyPath = ConfigFileLocator.FindPolicyPath(invocation.WorkingDirectory);
         checks.Add((
             "policy",
@@ -501,7 +501,7 @@ public static class BuiltinCommandRegistration
         var policySources = GetConfiguredPolicySources(config);
         if (policySources.Count > 0)
         {
-            var policyLockPath = Path.Combine(workingDirectory, ".rexo", "rexo.lock.yaml");
+            var policyLockPath = Path.Join(workingDirectory, ".rexo", "rexo.lock.yaml");
             var requireLocked = string.Equals(
                 Environment.GetEnvironmentVariable("REXO_POLICY_REQUIRE_LOCKED"),
                 "true",
@@ -1835,7 +1835,7 @@ public static class BuiltinCommandRegistration
                 return CommandResult.Fail("init", 1, "Invalid --instructions-path value. Use a repository-relative path.");
             }
 
-            instructionsTargetPath = Path.GetFullPath(Path.Combine(workingDir, relativeInstructionsPath));
+            instructionsTargetPath = Path.GetFullPath(Path.Join(workingDir, relativeInstructionsPath));
             var repoRoot = Path.GetFullPath(workingDir + Path.DirectorySeparatorChar);
             if (!instructionsTargetPath.StartsWith(repoRoot, StringComparison.OrdinalIgnoreCase))
             {
@@ -1876,7 +1876,7 @@ public static class BuiltinCommandRegistration
         string? policySchemaPath = null;
         if (schemaSource.Equals("local", StringComparison.OrdinalIgnoreCase))
         {
-            rexoSchemaPath = Path.Combine(workingDir, ".rexo", RepoConfigurationLoader.SupportedRexoSchemaPath);
+            rexoSchemaPath = Path.Join(workingDir, ".rexo", RepoConfigurationLoader.SupportedRexoSchemaPath);
             if (File.Exists(rexoSchemaPath) && !force)
             {
                 return CommandResult.Fail("init", 1, $"Target schema already exists at '{rexoSchemaPath}'. Use --force to overwrite.");
@@ -1888,7 +1888,7 @@ public static class BuiltinCommandRegistration
 
             if (withPolicy)
             {
-                policySchemaPath = Path.Combine(workingDir, ".rexo", RepoConfigurationLoader.SupportedPolicySchemaPath);
+                policySchemaPath = Path.Join(workingDir, ".rexo", RepoConfigurationLoader.SupportedPolicySchemaPath);
                 if (File.Exists(policySchemaPath) && !force)
                 {
                     return CommandResult.Fail("init", 1, $"Target schema already exists at '{policySchemaPath}'. Use --force to overwrite.");
@@ -1993,9 +1993,9 @@ public static class BuiltinCommandRegistration
             : StringComparison.Ordinal;
         var removed = new List<string>();
 
-        foreach (var extension in RexoConfigExtensions)
+        foreach (var candidate in RexoConfigExtensions
+            .Select(extension => Path.GetFullPath(Path.Join(workingDir, ".rexo", fileStem + extension))))
         {
-            var candidate = Path.GetFullPath(Path.Combine(workingDir, ".rexo", fileStem + extension));
             if (string.Equals(candidate, selectedFullPath, pathComparison) || !File.Exists(candidate))
             {
                 continue;

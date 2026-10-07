@@ -39,12 +39,12 @@ public static class ConfigFileLocator
 
     public static IReadOnlyList<string> GetConfigCandidates(string workingDirectory) =>
         ConfigRelativeCandidates
-            .Select(relative => Path.Combine(workingDirectory, NormalizeRelativePath(relative)))
+            .Select(relative => Path.Join(workingDirectory, NormalizeRelativePath(relative)))
             .ToArray();
 
     public static IReadOnlyList<string> GetPolicyCandidates(string workingDirectory) =>
         PolicyRelativeCandidates
-            .Select(relative => Path.Combine(workingDirectory, NormalizeRelativePath(relative)))
+            .Select(relative => Path.Join(workingDirectory, NormalizeRelativePath(relative)))
             .ToArray();
 
     public static string? FindConfigPath(string workingDirectory) =>

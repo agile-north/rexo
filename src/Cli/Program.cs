@@ -1019,7 +1019,7 @@ public static class Program
         }
 
         var configHash = config is null ? null : CanonicalConfigHasher.Compute(config);
-        var policyLockPath = Path.Combine(workingDir, ".rexo", "rexo.lock.yaml");
+        var policyLockPath = Path.Join(workingDir, ".rexo", "rexo.lock.yaml");
         string? policyLockHash = null;
         if (File.Exists(policyLockPath))
         {

@@ -21,9 +21,8 @@ public static class RepositoryEnvironmentFiles
             return;
         }
 
-        foreach (var rawLine in File.ReadAllLines(path))
+        foreach (var line in File.ReadAllLines(path).Select(rawLine => rawLine.Trim()))
         {
-            var line = rawLine.Trim();
             if (string.IsNullOrWhiteSpace(line) || line.StartsWith('#'))
             {
                 continue;

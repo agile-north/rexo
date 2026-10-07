@@ -88,7 +88,7 @@ public sealed class RubyGemsArtifactProvider : IArtifactProvider
             return context.RepositoryRoot;
         }
 
-        return Path.IsPathRooted(dir) ? dir : Path.Combine(context.RepositoryRoot, dir);
+        return Path.IsPathRooted(dir) ? dir : Path.Join(context.RepositoryRoot, dir);
     }
 
     private static string ResolveDockerImage(ArtifactConfig artifact) =>

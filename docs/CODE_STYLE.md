@@ -23,6 +23,9 @@ silencing an analyzer.
   symbolic-link resolution when the operation must remain inside the repository.
 - `Path.Join` appends its inputs instead of resetting on a rooted later component, but it does not
   validate untrusted paths. Validate components and enforce containment where the boundary matters.
+- Use `Path.Join` for append-only joins even when later components are literals, generated file
+  names, hashes, or already checked with `Path.IsPathRooted`. Review every join in a touched file,
+  including temporary files, caches, and fallback branches, not just the reported line.
 - Add tests for both relative and rooted inputs when both are supported. Keep path expectations
   platform-neutral so the same test passes on Windows and Unix.
 
@@ -41,5 +44,15 @@ silencing an analyzer.
 - Prefer `Select` for a simple one-to-one projection and `Where` for filtering. Keep imperative
   loops when they perform meaningful side effects, validation, or branching that is clearer as a
   loop.
+- Project the actual value the body needs; do not introduce a new alias of the iteration variable
+  as the first statement. Extract a normalization helper if the mapping requires several steps.
+  For stateful traversal, update the accumulator directly inside the loop rather than capturing
+  mutable state in a `Select` lambda. Path traversal through symbolic links must stay sequential.
 - Avoid redundant or constant-condition checks in switch expressions and boolean branches. Express
   precedence directly, then test each meaningful input state (including unset and override cases).
+
+## Review follow-through
+
+After a fix is pushed, inspect feedback on the new head commit. A successful analysis check means
+the analyzer ran successfully, not that it found no quality issues. Re-read the current inline
+comments and scan sibling code for the same pattern before declaring the review addressed.

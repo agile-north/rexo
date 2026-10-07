@@ -21,8 +21,8 @@ Every enabled script must be defined in `package.json`; missing scripts fail the
 
 ```yaml
 extends:
-  - embedded:node
   - embedded:standard
+  - embedded:node
 vars:
   node:
     packageManager: pnpm

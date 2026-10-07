@@ -55,11 +55,12 @@ Description: Run validation, then overlay-provided quality checks.
 Steps:
 
 1. `builtin:validate`
-2. `command:verify` (overlay contribution, when present)
-3. `command:test` (when present)
-4. `command:analyze` (when present)
-5. `command:security` (when present)
-6. `command:post-verify` (when present; always runs after hard failures)
+2. `command:pre-verify` (when present)
+3. `command:verify` (overlay contribution, when present)
+4. `command:test` (when present)
+5. `command:analyze` (when present)
+6. `command:security` (when present)
+7. `command:post-verify` (when present; always runs after hard failures)
 
 Notes:
 
@@ -75,15 +76,16 @@ Steps:
 
 1. `builtin:validate`
 2. `builtin:resolve-version`
-3. `command:build` (overlay continuation, skipped when no inner layer contributes steps)
-4. `builtin:build-artifacts`
-5. `builtin:tag-artifacts`
-6. `command:post-build` (when present; always runs after hard failures)
+3. `command:build` (layer continuation; skipped when no inner layer contributes steps)
+4. `command:pre-build` (when present)
+5. `builtin:build-artifacts`
+6. `builtin:tag-artifacts`
+7. `command:post-build` (when present; always runs after hard failures)
 
 Notes:
 
-- Toolchain overlays such as `embedded:dotnet` and `embedded:node` inject their build steps at the continuation point.
-- When no overlay contributes steps, the continuation marker is skipped successfully.
+- Toolchain policies such as `embedded:dotnet` and `embedded:node` inject their build steps at the continuation point.
+- When no inner layer contributes build steps, the continuation is skipped successfully.
 
 ### tag
 
@@ -116,13 +118,16 @@ Options:
 
 Steps:
 
-1. `builtin:validate`
-2. `builtin:resolve-version`
-3. `command:verify`
-4. `builtin:build-artifacts`
-5. `builtin:tag-artifacts`
-6. `builtin:push-artifacts` when `{{options.push}}`, with `with.confirm = {{options.push}}`
+1. `command:pre-release` (when present)
+2. `command:verify` (when present)
+3. `command:build`
+4. `command:pre-push` (when `{{options.push}}` and present)
+5. `builtin:push-artifacts` when `{{options.push}}`, with `with.confirm = {{options.push}}`
+6. `command:post-push` (when `{{options.push}}` and present)
 7. `command:post-release` (when present; always runs after hard failures)
+
+The `build` command performs validation, version resolution, configured artifact build/tag,
+and its own optional build hooks. Push and post-push hooks are controlled by `--push`.
 
 ### clean
 

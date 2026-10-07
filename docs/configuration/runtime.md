@@ -1,6 +1,6 @@
 # Runtime Configuration
 
-Configure runtime output and push policies.
+Configure runtime behavior, output paths, and push policies.
 
 ---
 
@@ -52,41 +52,40 @@ Controls command delegation depth and the fallback merge behavior for same-name 
 
 ---
 
-## `runtime.output`
+## `outputs`
 
 Controls filesystem artifact emission, the root output folder, and per-category output paths.
+This is a top-level config section, separate from `runtime`.
 
 ```jsonc
-"runtime": {
-  "output": {
-    "emitRuntimeFiles": true,
-    "root": "artifacts",
-    "tests": {
-      "results": "~/tests",
-      "coverage": "~/tests/coverage",
-      "reports": "~/tests/reports"
-    },
-    "analysis": {
-      "reports": "~/analysis",
-      "sarif": "~/analysis/sarif"
-    },
-    "packages": "~/packages",
-    "manifests": {
-      "path": "~/manifests",
-      "commandMode": "aggregate",
-      "commandDetail": "summary"
-    },
-    "logs": "~/logs",
-    "temp": "~/tmp"
-  }
+"outputs": {
+  "emit": true,
+  "root": "artifacts",
+  "tests": {
+    "results": "~/tests",
+    "coverage": "~/tests/coverage",
+    "reports": "~/tests/reports"
+  },
+  "analysis": {
+    "reports": "~/analysis",
+    "sarif": "~/analysis/sarif"
+  },
+  "packages": "~/packages",
+  "manifests": {
+    "path": "~/manifests",
+    "commandMode": "aggregate",
+    "commandDetail": "summary"
+  },
+  "logs": "~/logs",
+  "temp": "~/tmp"
 }
 ```
 
-- `emitRuntimeFiles` (default: `true`): when `false`, runtime-generated files (for example artifact manifest files) are not written.
+- `emit` (default: `true`): when `false`, Rexo does not collect or write runtime output files such as manifests and step file outputs.
 - `root` (default: `artifacts`): root folder used by runtime artifact outputs.
 - `tests` — overrides where test results, coverage data, and coverage reports are written. The policy overlay (e.g. `embedded:dotnet`) reads these paths when constructing test commands.
 - `analysis` — overrides where analysis reports and SARIF files are written. The policy overlay reads these paths when constructing analysis commands.
-- `packages` (default: `artifacts/packages`): NuGet and other package output directory.
+- `packages` (default: `~/packages` under `outputs.root`): NuGet and other package output directory.
 - `manifests.path` (default: `~/manifests`): manifest directory. `~/...` resolves under `outputs.root`.
 - `manifests.commandMode` (default: `aggregate`): command-manifest file strategy.
   - `single`: alias for aggregate; write one aggregated manifest file (`commands.json`) containing every command run.
@@ -95,7 +94,7 @@ Controls filesystem artifact emission, the root output folder, and per-category 
 - `manifests.commandDetail` (default: `summary`): command-manifest detail level.
   - `summary`: concise command/step/file-output summary.
   - `verbose`: includes full command result payload.
-- `logs` (default: `artifacts/logs`): log output directory.
+- `logs` (default: `~/logs` under `outputs.root`): log output directory.
 
 Path behavior under `outputs`:
 

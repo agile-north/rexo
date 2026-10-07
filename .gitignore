@@ -1,6 +1,7 @@
 # Build output
 bin/
 obj/
+src/Cli/PACKAGE_README.generated.md
 
 # IDE
 .vs/

@@ -1,7 +1,7 @@
 # Rexo
 
-[![ci-build-test](https://github.com/agile-north/rexo/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/agile-north/rexo/actions/workflows/build.yml)
-[![CodeQL](https://github.com/agile-north/rexo/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/agile-north/rexo/actions/workflows/codeql.yml)
+[![Release](https://github.com/agile-north/rexo/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/agile-north/rexo/actions/workflows/release.yml)
+[![Workflow validation](https://github.com/agile-north/rexo/actions/workflows/workflow-validation.yml/badge.svg?branch=main)](https://github.com/agile-north/rexo/actions/workflows/workflow-validation.yml)
 [![NuGet version](https://img.shields.io/nuget/v/Rexo.Cli)](https://www.nuget.org/packages/Rexo.Cli)
 [![NuGet downloads](https://img.shields.io/nuget/dt/Rexo.Cli)](https://www.nuget.org/packages/Rexo.Cli)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -27,7 +27,7 @@ rx hello
 
 # Inspect effective repository readiness and the configured command graph
 rx check
-rx graph release --format mermaid
+rx graph hello --format mermaid
 ```
 
 ### Standard lifecycle (opt-in)
@@ -46,9 +46,14 @@ rx plan
 # Run the full release pipeline (build + tag, no push)
 rx release
 
-# Push artifacts — requires explicit opt-in everywhere (local and CI)
+# Request push with the default standard policy (runtime push gates still apply)
 rx release --push
 ```
+
+The default standard policy does not push from plain `release`. Repositories can override
+the lifecycle in configuration. This repository dogfoods a single plain `release` call;
+its config gates publication on CI publication intent, PR context and allowed branches.
+See [Repository release workflow](docs/DEVELOPMENT.md#repository-release-workflow).
 
 ## Stack vs Policy
 
@@ -56,7 +61,7 @@ These two `rx init` concepts are distinct:
 
 **`--stack`** — the technology stack of the repository. Tells the wizard what kind of project you have so it can scaffold an appropriate starter `.rexo/rexo.yaml`. Valid values: `auto` (detect from disk), `dotnet`, `node`, `python`, `go`, `java`, `ruby`, `generic`, `blank`. The stack shapes the generated config — which artifact type to add, what project-specific convenience commands to include (`local build`, `local test`), and so on. The stack choice is a one-time scaffolding decision.
 
-**`--policy`** — which embedded lifecycle policy to adopt. When you pass `--with-policy`, a `.rexo/policy.yaml` file is written alongside `.rexo/rexo.yaml`. The policy provides the shared lifecycle commands (`build`, `test`, `verify`, `release`, `plan`, `push`, etc.). Available policies: `standard` (language-agnostic), `dotnet` (extends standard with .NET-specific steps). A project's stack and policy are independent: you can have a `node` stack with a `standard` policy, or a `dotnet` stack with no policy at all.
+**`--policy`** — which embedded policy to adopt. When you pass `--with-policy`, a `.rexo/policy.yaml` file is written alongside `.rexo/rexo.yaml`. `standard` provides shared lifecycle commands (`build`, `test`, `verify`, `release`, `plan`, `push`, etc.); `dotnet` and `node` add toolchain overlays, and `git-tag` adds post-push Git tagging. See [Embedded Policies](docs/embedded/README.md). A project's stack and policy are independent: you can have a `node` stack with a `standard` policy, or a `dotnet` stack with no policy at all. Artifact detection may automatically add `embedded:standard`; use `--stack blank` for a policy-free scaffold.
 
 ## Config Format and Location
 
@@ -197,16 +202,20 @@ dotnet test solution.slnx -c Release
 
 The packaged tool command is `rx`.
 
-You can also run Rexo without installing it globally by using `dotnet`:
+Run directly from NuGet without a permanent install (.NET 10 SDK):
 
 ```bash
-dotnet tool run rx -- --help
-dotnet tool run rx -- init --yes --stack auto
+dotnet dnx Rexo.Cli -- --help
+dotnet dnx Rexo.Cli -- init --yes --stack auto
 ```
+
+For a repository-local install, run `dotnet new tool-manifest` (if needed),
+`dotnet tool install Rexo.Cli`, then `dotnet tool run rx -- --help`.
 
 ## Versioning
 
-Versioning uses GitVersion (mainline) via [GitVersion.yml](GitVersion.yml).
+This repository uses GitVersion's GitHubFlow configuration via [GitVersion.yml](GitVersion.yml).
+Consumers can choose a [version provider](docs/configuration/versioning.md).
 
 ## Contributing
 

@@ -213,8 +213,7 @@ When `rx init --schema-source local --with-policy` is used, both schema files ar
   "artifacts": [ ... ],
   "secrets": { ... },
   "runtime": { ... },
-  "tests": { ... },
-  "analysis": { ... }
+  "outputs": { ... }
 }
 ```
 
@@ -239,43 +238,53 @@ shows the effective values used by built-ins (not a requirement to persist every
     "settings": {}
   },
 
-  "runtime": {
-    "output": {
-      "emitRuntimeFiles": true,
-      "root": "artifacts"
+  "outputs": {
+    "emit": true,
+    "root": "artifacts",
+    "tests": {
+      "results": "~/tests",
+      "coverage": "~/tests/coverage",
+      "reports": "~/tests/reports"
     },
+    "analysis": {
+      "reports": "~/analysis",
+      "sarif": "~/analysis/sarif"
+    },
+    "security": {
+      "audit": "~/security/audit.json",
+      "reports": "~/security",
+      "sarif": "~/security/sarif"
+    },
+    "packages": "~/packages",
+    "manifests": {
+      "path": "~/manifests",
+      "commandMode": "aggregate",
+      "commandDetail": "summary"
+    },
+    "logs": "~/logs",
+    "temp": "~/tmp"
+  },
+
+  "runtime": {
+    "dryRun": false,
     "push": {
       "enabled": true,
       "noPushInPullRequest": false,
       "requireCleanWorkingTree": false,
       "branches": []
+    },
+    "commands": {
+      "maxDepth": 5
     }
-  },
-
-  "tests": {
-    "enabled": true,
-    "projects": null,
-    "configuration": "Release",
-    "resultsOutput": "<runtime.output.root>/tests",
-    "coverageOutput": null,
-    "collectCoverage": null,
-    "coverageThreshold": null
-  },
-
-  "analysis": {
-    "enabled": true,
-    "failOnIssues": true,
-    "tools": [],
-    "configuration": "<runtime.output.root>/analysis.sarif.json"
   }
 }
 ```
 
 Notes:
 
-- `versioning` defaults are used by `builtin:resolve-version` when `versioning` is omitted.
-- `tests.resultsOutput` and `analysis.configuration` are computed from `runtime.output.root` when omitted.
-- `collectCoverage` only becomes active when coverage output collection is configured.
+- These are defaults for supported `outputs` and `runtime` fields, not fields that must be written to a config file.
+- `outputs.tests`, `outputs.analysis`, and `outputs.security` configure output locations only; test and analysis commands are provided by policy overlays.
+- Paths beginning with `~/` resolve under `outputs.root`.
 - `commands`, `aliases`, and `artifacts` are shown as empty here for completeness; they are optional in config files.
 
 ---
@@ -329,13 +338,12 @@ making minimal intent explicit in shared templates.
 
 ### Policy template stacking
 
-When a project-specific embedded policy is selected (e.g. `dotnet-api`) it should be
-stacked *on top of* `embedded:standard` so both the shared lifecycle commands (`build`,
-`test`, `verify`, `release`) and the project-specific commands (`ci`, `restore`,
-`format`, `stage`) are available together:
+When a toolchain policy such as `embedded:dotnet` is selected, stack it after
+`embedded:standard` so the shared lifecycle commands (`verify`, `release`, and artifact
+operations) compose with toolchain commands such as `restore`, `format`, and `security`:
 
 ```json
-{ "extends": ["embedded:standard", "embedded:dotnet-api"] }
+{ "extends": ["embedded:standard", "embedded:dotnet"] }
 ```
 If you want generic git tag creation on push, stack `embedded:git-tag` alongside `embedded:standard`:
 
@@ -368,7 +376,7 @@ Examples:
 ```
 
 ```json
-{ "extends": ["embedded:standard", "embedded:dotnet-api"] }
+{ "extends": ["embedded:standard", "embedded:dotnet"] }
 ```
 
 ```json

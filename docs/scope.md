@@ -1946,7 +1946,12 @@ Machine output via JSON.
 
 ## 53. Artifact System Architecture
 
-### Current state
+### Historical implementation baseline
+
+The following implementation snapshot describes an earlier stage of the project and is
+preserved as design history, not as a description of current code. See
+[ARCHITECTURE.md](ARCHITECTURE.md) for the current architecture and
+[artifacts/README.md](artifacts/README.md) for the current provider inventory.
 
 `IArtifactProvider` is defined in `src/Core/Abstractions/`. Built-in providers (Docker, NuGet, Helm OCI) live in dedicated projects (`src/Artifacts.Docker/`, `src/Artifacts.NuGet/`, `src/Artifacts.Helm/`). Provider registration is hardcoded in the CLI bootstrapper (`CliBootstrapper.cs`/`Program.cs`). All providers are registered eagerly.
 
@@ -2578,4 +2583,3 @@ how a repository pushes artifacts
 how a repository exposes workflows
 how humans and CI interact with it
 ```
-

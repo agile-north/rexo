@@ -17,20 +17,21 @@ dotnet test solution.slnx -c Release
 
 ## Repository release workflow
 
-The single `repository-lifecycle` workflow (`release.yml`) has one job (`verify`,
-retaining the required-check name). It bootstraps the current source and calls the normal
+The single `release` workflow (`release.yml`) has one job (`release`).
+It bootstraps the current source and calls the normal
 `rx release` lifecycle once, with identical arguments on every event.
 The configured release command gates pushing on `REXO_PUBLISH`, PR context and
 `runtime.push` branch policy; post-push tagging requires an actual successful push.
 Actions selects/authenticates the publisher; PRs and default manual runs do not select one.
 Rexo owns verification, building, tagging and pushing;
-there is no second build, publishing job, artifact transfer or lifecycle wrapper.
+there is no second build, separate publishing job, package transfer between jobs, or
+lifecycle wrapper. The workflow uploads a single evidence artifact from this job.
 The job has release permissions, including on same-repository PRs; it no longer provides
 the previous read-only job boundary. Publisher login and release mutations remain
 event/branch-gated. Non-publishing runs do not verify real publisher authentication.
 
 `workflow-validation` runs pinned actionlint over all workflows, including shell checks.
-Require `workflow-validation` and `verify` in the `main` branch rules,
+Require `workflow-validation` and `release` in the `main` branch rules,
 with branches up to date, before merging workflow changes. Repository rules are maintained
 in GitHub settings, not by the workflow itself.
 
@@ -38,8 +39,10 @@ There is no separate build workflow: PRs, branch pushes and manual rehearsals sh
 the same job, with one isolated source bootstrap.
 Rexo's embedded policies and `.rexo/rexo.yaml` own restore/build/test/analyze/package
 orchestration. `rx ci coverage` restores the pinned local report tool and generates
-coverage summaries using the config's output paths; Actions only appends the summary
-to GitHub and uploads evidence. The local tool version lives in `.config/dotnet-tools.json`.
+coverage summaries using the config's output paths; Actions appends the summary to GitHub
+and uploads the lifecycle evidence. When publication is enabled, Actions also performs
+NuGet.org OIDC login when that feed is selected, publishes the schema branch, and creates
+the GitHub Release. The local report-tool version lives in `.config/dotnet-tools.json`.
 Prepared-artifact and evidence-validation primitives remain available for consumers that
 need a multi-stage pipeline, but this repository does not use them in its normal lifecycle.
 
@@ -68,7 +71,8 @@ Configure at most one publishing mode:
 - Otherwise, set the `PUBLISH_TO_GITHUB_PACKAGES` Actions variable to `true` to publish through
   GitHub Packages using `GITHUB_TOKEN`.
 - If neither is configured, Rexo still builds, tests, and packs the CLI, but the workflow skips
-  package publishing, tagging, schema-branch publication, and GitHub Release creation.
+  package publishing, post-push Git version-tag creation, schema-branch publication, and
+  GitHub Release creation.
   If both modes are configured, NuGet.org takes precedence.
 
 The self-hosted version comes from GitVersion and is passed to the local CLI as
@@ -83,6 +87,15 @@ The build is strict:
 - `TreatWarningsAsErrors=true` — any analyzer warning is a build error
 - `AnalysisLevel=latest-recommended` — Roslyn CA rules enforced
 - `GenerateDocumentationFile=true` for all `src/` projects (CS1591 suppressed)
+
+## NuGet package README
+
+Edit `src/Cli/PACKAGE_README.md`, the source template for the CLI package README.
+During packing, `src/Cli/Cli.csproj` generates `src/Cli/obj/PACKAGE_README.generated.md`,
+substituting the versioned documentation and schema link tokens, and includes that generated
+file at the package root. The generated file is ignored and recreated before each pack; there
+is no tracked root-level generated README to update. Verify package README changes by inspecting
+`PACKAGE_README.generated.md` in the resulting `.nupkg`.
 
 The integration suite also checks that repository-local Markdown links resolve. Run this before
 every commit:
@@ -181,7 +194,7 @@ Built-in primitives are step types used as `uses: builtin:my-primitive`.
    ```
 
 2. Document the new primitive contract in `docs/BUILTINS.md` (and reference it from
-   `docs/CONFIGURATION.md` when needed).
+   `docs/configuration/README.md` when needed).
 
 ---
 
@@ -214,8 +227,8 @@ Test projects live in `tests/`:
 | --- | --- |
 | `Core.Tests` | Domain model unit tests |
 | `Configuration.Tests` | `RepoConfigurationLoader` — happy path, missing schema, bad version, NJsonSchema failures, `extends` merge, circular detection |
-| `Execution.Tests` | `DefaultCommandExecutor`, `TemplateRenderer` (10 cases), `BuiltinCommandRegistration` (5 cases), config commands, step model |
-| `Integration.Tests` | Smoke: `rx version` exits 0 |
+| `Execution.Tests` | Command execution/registration, templates, config commands, artifact and policy workflows, outputs, secrets, and versioning |
+| `Integration.Tests` | CLI smoke/output/override scenarios and repository Markdown-link checks |
 
 Run a specific test project:
 
@@ -239,9 +252,9 @@ Workflows in `.github/workflows/`:
 
 | File | Triggers |
 | --- | --- |
-| `release.yml` | Release-branch PRs/pushes and manual dispatch — Rexo verification, then gated publication |
+| `release.yml` | PRs and pushes to `main`/`alpha`/`beta`/`edge` branches (including `*-*` variants), plus manual dispatch — one Rexo lifecycle with gated publication |
 | `workflow-validation.yml` | PRs to main and manual dispatch — workflow and shell lint |
-| `codeql.yml` | Scheduled — security scanning |
+| `dependabot-auto-merge.yml` | Dependabot pull requests — automated dependency-update handling |
 
 ---
 
@@ -252,5 +265,5 @@ Workflows in `.github/workflows/`:
 | Full product design | `docs/scope.md` |
 | What's done vs pending | `docs/todo.md` |
 | Architecture diagram | `docs/ARCHITECTURE.md` |
-| Config system | `docs/CONFIGURATION.md` |
+| Config system | `docs/configuration/README.md` |
 | AI agent context | `AGENTS.md` (root) |

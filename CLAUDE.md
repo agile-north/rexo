@@ -21,7 +21,7 @@ Build must be clean: **0 errors, 0 warnings**. Tests must all pass before commit
 - **Product**: Rexo — config-driven repository automation CLI
 - **CLI command**: `rx`
 - **Stack**: .NET 10, C#, xUnit, Spectre.Console, NJsonSchema
-- **Solution**: `solution.slnx` (15 src + 4 test projects)
+- **Solution**: `solution.slnx`
 - **Config file**: `.rexo/rexo.yaml` (default; `.rexo/rexo.json` and root `rexo.yaml|json` also supported) — requires `$schema` (key or YAML modeline) + `schemaVersion: "1.0"`
 - **Schema**: `rexo.schema.json` (repo root)
 
@@ -44,7 +44,8 @@ Build must be clean: **0 errors, 0 warnings**. Tests must all pass before commit
 
 ## What is implemented
 
-See `docs/todo.md` for the complete checklist. Working today:
+`docs/todo.md` is a historical scope checklist; current production-hardening status is in
+`docs/ROADMAP.md`. Implemented behavior includes:
 
 - CLI routing (built-in + config commands, multi-word resolution, global flags)
 - Config loading with JSON Schema validation
@@ -63,7 +64,7 @@ See `docs/todo.md` for the complete checklist. Working today:
 
 ## What is not yet implemented
 
-The production-hardening roadmap is tracked in the current session and reflected in `docs/todo.md`;
+Production-hardening status and remaining acceptance are tracked in [docs/ROADMAP.md](docs/ROADMAP.md);
 older scope/checklist entries are historical and must not be treated as proof that the roadmap is
 complete. Current limits include local-file-only promotion (no remote deploy or registry-tag
 promotion), no generated SBOM or signed attestation, and layer-level rather than exact per-file

@@ -101,7 +101,7 @@ Calls:
 - Merge per-artifact push overrides from artifact settings
 - Enforce local explicit confirmation (`confirm`/`push` option)
 - For allowed artifacts: provider `PushAsync(...)`
-- Writes `<runtime.output.root>/manifest.json` when `runtime.output.emitRuntimeFiles=true` (default)
+- Writes `<outputs.root>/manifest.json` when `outputs.emit=true` (default)
 
 Dry-run changes the provider call path: the builtin still evaluates push decisions and
 produces manifest output, but it skips external push operations and marks artifacts as
@@ -136,7 +136,8 @@ Exit behavior:
 `tests`, `sarif`, `archive` and `entry` inputs. It requires successful result/manifest
 outputs, fresh TRX/coverage/SARIF/package files since the release started, and an archive
 entry without unresolved template tokens. Paths and entry names belong in config,
-not an external lifecycle script. It runs before sealing in this repository's `ci handoff`.
+not an external lifecycle script. A consumer can place it before sealing in a multi-stage
+pipeline; this repository does not use it in its normal single-job lifecycle.
 
 `builtin:seal-artifact-handoff` accepts `with.runManifest` and `with.path` as portable,
 repository-relative paths. It requires a successful, unpublished `release` run with

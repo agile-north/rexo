@@ -17,7 +17,8 @@ dotnet test solution.slnx -c Release
 
 ## Repository release workflow
 
-The `release` workflow runs `release-rehearsal` on every PR to `main`, with only
+The single `repository-lifecycle` workflow (`release.yml`) runs `verify` on every PR
+to the configured release branches, with only
 `contents: read`, no publishing secrets, and no persisted checkout credentials.
 It exercises GitVersion and the source-built release lifecycle and uploads evidence.
 Manual dispatch defaults to rehearsal (`publish: false`). Only pushes to the configured
@@ -27,11 +28,22 @@ package publication, Git tag/schema updates and GitHub Releases exist only in th
 Rehearsal does not verify real publisher authentication or remote publication.
 
 `workflow-validation` runs pinned actionlint over all workflows, including shell checks.
-Require `workflow-validation`, `release-rehearsal` and `build` in the `main` branch rules,
+Require `workflow-validation` and `verify` in the `main` branch rules,
 with branches up to date, before merging workflow changes. Repository rules are maintained
 in GitHub settings, not by the workflow itself.
 
-PR CI continuously exercises the same policy-backed lifecycle using
+There is no separate build workflow: PRs, branch pushes and manual rehearsals share
+the same verification job, with one isolated bootstrap and one readiness check.
+Rexo's embedded policies and `.rexo/rexo.yaml` own restore/build/test/analyze/package
+orchestration. `rx ci coverage` restores the pinned local report tool and generates
+coverage summaries using the config's output paths; Actions only appends the summary
+to GitHub and uploads evidence. The local tool version lives in `.config/dotnet-tools.json`.
+The acceptance script checks evidence rather than reimplementing that lifecycle.
+The publishing job still calls `release --push`, which rebuilds on its separate
+trusted runner. Exact verified-package handoff is not implemented; consolidation
+removes duplicate PR verification, not that remaining publication-stage rebuild.
+
+PR CI continuously exercises the policy-backed lifecycle using
 `pwsh -File scripts\Test-SelfHost.ps1`. It bootstraps the checked-out source into an isolated
 directory, runs a basic readiness gate, executes `release` without `--push`, and checks the
 package and run manifest. No publishing credentials are needed. This does not certify the full
@@ -223,8 +235,8 @@ Workflows in `.github/workflows/`:
 
 | File | Triggers |
 | --- | --- |
-| `build.yml` | All pushes and PRs — build + test |
-| `release.yml` | Tags — publish dotnet tool to NuGet |
+| `release.yml` | Release-branch PRs/pushes and manual dispatch — Rexo verification, then gated publication |
+| `workflow-validation.yml` | PRs to main and manual dispatch — workflow and shell lint |
 | `codeql.yml` | Scheduled — security scanning |
 
 ---

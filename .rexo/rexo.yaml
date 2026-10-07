@@ -29,6 +29,18 @@ outputs:
     coverage: ~/test-results
   analysis:
     sarif: ~/sarif
+commands:
+  ci coverage:
+    description: Generate coverage reports locally and in CI from the release test evidence.
+    steps:
+      - id: restore-report-tools
+        run: dotnet tool restore
+      - id: coverage-summary
+        run: >-
+          dotnet tool run reportgenerator
+          "-reports:{{outputs.tests.results}}/**/coverage.cobertura.xml"
+          "-targetdir:{{outputs.root}}/coverage-report"
+          "-reporttypes:Cobertura;MarkdownSummaryGithub"
 artifacts:
   - type: nuget
     name: Rexo.Cli

@@ -1,9 +1,15 @@
-name: release
+name: repository-lifecycle
 
 on:
   pull_request:
     branches:
       - main
+      - alpha
+      - alpha-*
+      - beta
+      - beta-*
+      - edge
+      - edge-*
   push:
     branches:
       - main
@@ -24,7 +30,7 @@ permissions:
   contents: read
 
 jobs:
-  release-rehearsal:
+  verify:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.gitversion.outputs.semVer }}
@@ -51,28 +57,27 @@ jobs:
         id: gitversion
         uses: gittools/actions/gitversion/execute@v3
 
-      - name: Bootstrap local Rexo CLI
-        run: dotnet publish src/Cli/Cli.csproj --configuration Release --output artifacts/rx-bootstrap
-
-      - name: Check repository readiness
-        env:
-          GITVERSION_SEMVER: ${{ steps.gitversion.outputs.semVer }}
-        run: dotnet artifacts/rx-bootstrap/Rexo.Cli.dll --non-interactive check
-
       - name: Rehearse release without publication
         shell: pwsh
-        run: ./scripts/Test-SelfHost.ps1 -Version '${{ steps.gitversion.outputs.semVer }}'
+        env:
+          RELEASE_VERSION: ${{ steps.gitversion.outputs.semVer }}
+        run: ./scripts/Test-SelfHost.ps1 -Version $env:RELEASE_VERSION
 
       - name: Generate coverage summary
         if: ${{ always() && hashFiles('artifacts/test-results/**/*.cobertura.xml') != '' }}
         run: |
-          dotnet tool install --global dotnet-reportgenerator-globaltool
-          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
-          reportgenerator \
-            -reports:"artifacts/test-results/**/coverage.cobertura.xml" \
-            -targetdir:"CoverageReport" \
-            -reporttypes:"Cobertura;MarkdownSummaryGithub"
-          cat CoverageReport/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
+          dotnet artifacts/rx-bootstrap/Rexo.Cli.dll --non-interactive ci coverage
+          cat artifacts/coverage-report/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            artifacts/coverage-report/**
+            artifacts/test-results/**/coverage.cobertura.xml
+          if-no-files-found: warn
 
       - name: Upload test results artifact
         if: always()
@@ -94,7 +99,7 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: release-rehearsal
+    needs: verify
     if: >-
       github.event_name != 'pull_request' &&
       (github.event_name == 'push' || inputs.publish) &&
@@ -110,7 +115,7 @@ jobs:
       id-token: write
     env:
       NUGET_ORG_USER: ${{ secrets.NUGET_ORG_USER }}
-      GITVERSION_SEMVER: ${{ needs.release-rehearsal.outputs.version }}
+      GITVERSION_SEMVER: ${{ needs.verify.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -156,16 +161,6 @@ jobs:
           NUGET_API_KEY: ${{ secrets.GITHUB_TOKEN }}
         run: dotnet artifacts/rx-bootstrap/Rexo.Cli.dll --non-interactive release --push
 
-      - name: Upload coverage artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-coverage-report
-          path: |
-            CoverageReport/**
-            artifacts/test-results/**/coverage.cobertura.xml
-          if-no-files-found: warn
-
       - name: Publish schema branch (schema/v<major.minor>, moving)
         if: ${{ env.NUGET_ORG_USER != '' || vars.PUBLISH_TO_GITHUB_PACKAGES == 'true' }}
         run: |
@@ -178,7 +173,7 @@ jobs:
         if: ${{ env.NUGET_ORG_USER != '' || vars.PUBLISH_TO_GITHUB_PACKAGES == 'true' }}
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: v${{ needs.release-rehearsal.outputs.version }}
+          tag_name: v${{ needs.verify.outputs.version }}
           target_commitish: ${{ github.sha }}
-          prerelease: ${{ needs.release-rehearsal.outputs.prerelease != '' }}
+          prerelease: ${{ needs.verify.outputs.prerelease != '' }}
           generate_release_notes: true

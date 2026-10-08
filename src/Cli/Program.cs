@@ -3,6 +3,7 @@
 namespace Rexo.Cli;
 
 using System.Text.Json;
+using System.Security.Cryptography;
 using Rexo.Artifacts;
 using Rexo.Artifacts.Helm;
 using Rexo.Artifacts.Docker;
@@ -30,7 +31,8 @@ public static class Program
         var workingDir = Environment.CurrentDirectory;
 
         // Parse global flags
-        var (cleanArgs, json, jsonFile, verbose, debug, quiet, dryRunFlag, setOverrides) = ParseGlobalFlags(args);
+        var (cleanArgs, json, jsonFile, verbose, debug, quiet, dryRunFlag, nonInteractive, color, setOverrides) = ParseGlobalFlags(args);
+        ConsoleRenderer.ConfigureColors(color);
 
         // No args (or only global flags) — show help
         if (cleanArgs.Count == 0)
@@ -49,7 +51,39 @@ public static class Program
         }
 
         // Set up the full service graph
-        var (registry, executor, config) = await CliBootstrapper.BuildServicesAsync(workingDir, debug, setOverrides, cancellationToken);
+        CommandRegistry registry;
+        DefaultCommandExecutor executor;
+        RepoConfig? config;
+        ConfigProvenanceSnapshot provenance;
+        try
+        {
+            (registry, executor, config, provenance) = await CliBootstrapper.BuildServicesAsync(
+                workingDir,
+                debug,
+                setOverrides,
+                cancellationToken,
+                updatePolicies: command == "update",
+                requirePolicyLock: command == "restore",
+                captureConfigProvenance: command == "config" &&
+                    (cleanArgs.Count > 1 &&
+                     cleanArgs[1].Equals("explain", StringComparison.OrdinalIgnoreCase) ||
+                     cleanArgs.Count > 2 &&
+                     cleanArgs[1].Equals("resolved", StringComparison.OrdinalIgnoreCase) &&
+                     cleanArgs.Skip(2).Any(argument =>
+                         argument.Equals("--provenance", StringComparison.OrdinalIgnoreCase))),
+                registerConfigCommands: command is not ("doctor" or "check"));
+        }
+        catch (Exception ex) when ((command is "restore" or "update") && ex is not OperationCanceledException)
+        {
+            ConsoleRenderer.RenderError($"Policy {command} failed: {ex.Message}");
+            return 9;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            ConsoleRenderer.RenderError($"Failed to initialize Rexo for '{command}': {ex.Message}");
+            return 9;
+        }
+
         var outputSettings = ResolveCommandOutputSettings(config, json, jsonFile, quiet);
         var dryRun = ResolveDryRun(config, dryRunFlag);
 
@@ -57,14 +91,24 @@ public static class Program
         {
             "version" => await RunBuiltinAsync(executor, "version", EmptyInvocation(workingDir, outputSettings, dryRun, debug), config, outputSettings, verbose, quiet, cancellationToken),
             "doctor" => await RunBuiltinAsync(executor, "doctor", EmptyInvocation(workingDir, outputSettings, dryRun, debug), config, outputSettings, verbose, quiet, cancellationToken),
+            "check" => await RunDirectAsync(command, cleanArgs, executor, config, workingDir, config, outputSettings, verbose, quiet, dryRun, debug, cancellationToken),
             "capabilities" => await RunBuiltinAsync(executor, "capabilities", EmptyInvocation(workingDir, outputSettings, dryRun, debug), config, outputSettings, verbose, quiet, cancellationToken),
-            "init" => await RunInitBuiltinAsync(executor, cleanArgs, workingDir, config, outputSettings, verbose, quiet, dryRun, debug, cancellationToken),
-            "new" => await RunInitBuiltinAsync(executor, cleanArgs, workingDir, config, outputSettings, verbose, quiet, dryRun, debug, cancellationToken),
+            "init" => await RunInitBuiltinAsync(executor, cleanArgs, workingDir, config, outputSettings, verbose, quiet, dryRun, debug, nonInteractive, cancellationToken),
+            "new" => await RunInitBuiltinAsync(executor, cleanArgs, workingDir, config, outputSettings, verbose, quiet, dryRun, debug, nonInteractive, cancellationToken),
             "list" => await RunListBuiltinAsync(executor, cleanArgs, workingDir, config, outputSettings, verbose, quiet, dryRun, debug, cancellationToken),
             "explain" => await RunExplainAsync(executor, cleanArgs, workingDir, config, outputSettings, verbose, quiet, dryRun, debug, cancellationToken),
-            "config" => await RunConfigSubcommandAsync(cleanArgs, executor, workingDir, config, outputSettings, verbose, quiet, dryRun, debug, cancellationToken),
+            "graph" => await RunGraphAsync(executor, cleanArgs, workingDir, config, outputSettings, verbose, quiet, dryRun, debug, cancellationToken),
+            "completion" => await RunCompletionAsync(executor, cleanArgs, workingDir, config, outputSettings, verbose, quiet, dryRun, debug, cancellationToken),
+            "restore" => await RunPolicyLockCommandAsync(
+                update: false, workingDir, config, outputSettings, verbose, quiet, dryRun, cancellationToken),
+            "update" => await RunPolicyLockCommandAsync(
+                update: true, workingDir, config, outputSettings, verbose, quiet, dryRun, cancellationToken),
+            "promote" => await RunPromoteAsync(cleanArgs, workingDir, config, outputSettings, verbose, quiet, dryRun, debug, cancellationToken),
+            "config" when cleanArgs.Count > 1 && cleanArgs[1].Equals("explain", StringComparison.OrdinalIgnoreCase) =>
+                await RunConfigExplainAsync(cleanArgs, workingDir, config, provenance, outputSettings, verbose, quiet, cancellationToken),
+            "config" => await RunConfigSubcommandAsync(cleanArgs, executor, workingDir, config, outputSettings, verbose, quiet, dryRun, debug, provenance, cancellationToken),
             "policies" => await RunPoliciesSubcommandAsync("policies", cleanArgs, executor, workingDir, config, outputSettings, verbose, quiet, dryRun, debug, cancellationToken),
-            "ui" => await RunUiAsync(executor, config, workingDir, cancellationToken),
+            "ui" => await RunUiAsync(executor, config, workingDir, nonInteractive, cancellationToken),
             "run" => await RunConfiguredAsync(cleanArgs, executor, config, workingDir, config, outputSettings, verbose, quiet, dryRun, debug, cancellationToken),
             _ => await RunDirectAsync(command, cleanArgs, executor, config, workingDir, config, outputSettings, verbose, quiet, dryRun, debug, cancellationToken),
         };
@@ -128,6 +172,202 @@ public static class Program
         return exitCode;
     }
 
+    private static async Task<int> RunGraphAsync(
+        DefaultCommandExecutor executor,
+        IReadOnlyList<string> args,
+        string workingDir,
+        RepoConfig? config,
+        CommandOutputSettings outputSettings,
+        bool verbose,
+        bool quiet,
+        bool dryRun,
+        bool debug,
+        CancellationToken cancellationToken)
+    {
+        if (args.Count < 2)
+        {
+            ConsoleRenderer.RenderError($"Usage: {GetCliCommandName()} graph <command> [--format text|json|mermaid]");
+            return 1;
+        }
+
+        var commandWords = args.Skip(1).TakeWhile(argument => !argument.StartsWith("--", StringComparison.Ordinal));
+        var commandName = string.Join(" ", commandWords);
+        var optionArgs = args.Skip(1).Skip(commandName.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length);
+        var (_, parsedOptions) = ParseArgsAndOptions(optionArgs);
+        var invocation = CreateInvocation(
+            new Dictionary<string, string> { ["command"] = commandName },
+            parsedOptions,
+            outputSettings,
+            workingDir,
+            dryRun,
+            debug);
+        var startedAt = DateTimeOffset.UtcNow;
+        var result = await ExecuteCommandAsync(executor, "graph", invocation, cancellationToken);
+        var completedAt = DateTimeOffset.UtcNow;
+        var exitCode = await WriteResultAsync(result, invocation, verbose, quiet, cancellationToken);
+        await WriteRunManifestAsync(result, "graph", workingDir, startedAt, completedAt, invocation.JsonFile, config, outputSettings, cancellationToken);
+        return exitCode;
+    }
+
+    private static async Task<int> RunCompletionAsync(
+        DefaultCommandExecutor executor,
+        IReadOnlyList<string> args,
+        string workingDir,
+        RepoConfig? config,
+        CommandOutputSettings outputSettings,
+        bool verbose,
+        bool quiet,
+        bool dryRun,
+        bool debug,
+        CancellationToken cancellationToken)
+    {
+        if (args.Count < 2)
+        {
+            ConsoleRenderer.RenderError($"Usage: {GetCliCommandName()} completion <bash|zsh|fish|powershell>");
+            return 1;
+        }
+
+        var invocation = CreateInvocation(
+            new Dictionary<string, string> { ["shell"] = args[1] },
+            new Dictionary<string, string?>(),
+            outputSettings,
+            workingDir,
+            dryRun,
+            debug);
+        var startedAt = DateTimeOffset.UtcNow;
+        var result = await ExecuteCommandAsync(executor, "completion", invocation, cancellationToken);
+        var completedAt = DateTimeOffset.UtcNow;
+        var exitCode = await WriteResultAsync(result, invocation, verbose, quiet, cancellationToken);
+        await WriteRunManifestAsync(result, "completion", workingDir, startedAt, completedAt, invocation.JsonFile, config, outputSettings, cancellationToken);
+        return exitCode;
+    }
+
+    private static async Task<int> RunPolicyLockCommandAsync(
+        bool update,
+        string workingDir,
+        RepoConfig? config,
+        CommandOutputSettings outputSettings,
+        bool verbose,
+        bool quiet,
+        bool dryRun,
+        CancellationToken cancellationToken)
+    {
+        var command = update ? "update" : "restore";
+        var sources = GetPolicySources(config);
+        string message;
+        try
+        {
+            if (update)
+            {
+                if (sources.Count == 0)
+                {
+                    ConsoleRenderer.RenderError("No policy sources are configured to lock.");
+                    return 1;
+                }
+
+                var lockPath = await PolicySourceLoader.UpdateLockfileAsync(
+                    sources,
+                    workingDir,
+                    cancellationToken,
+                    dryRun);
+                message = dryRun
+                    ? $"Dry run: would update the policy lockfile for {sources.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)} policy source(s) at '{lockPath}'."
+                    : $"Locked {sources.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)} policy source(s) in '{lockPath}'.";
+            }
+            else
+            {
+                var lockfile = await PolicySourceLoader.ReadLockfileAsync(workingDir, cancellationToken);
+                message = sources.Count == 0
+                    ? "No remote policy sources are configured."
+                    : lockfile is null
+                        ? $"Resolved {sources.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)} policy source(s); no lockfile is present."
+                        : $"Restored and verified {lockfile.Policies.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)} locked policy source(s).";
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            ConsoleRenderer.RenderError($"Policy {command} failed: {ex.Message}");
+            return 9;
+        }
+
+        var invocation = EmptyInvocation(workingDir, outputSettings, dryRun, debug: false);
+        var startedAt = DateTimeOffset.UtcNow;
+        var result = CommandResult.Ok(command, message);
+        var completedAt = DateTimeOffset.UtcNow;
+        var exitCode = await WriteResultAsync(result, invocation, verbose, quiet, cancellationToken);
+        await WriteRunManifestAsync(result, command, workingDir, startedAt, completedAt, invocation.JsonFile, config, outputSettings, cancellationToken);
+        return exitCode;
+    }
+
+    private static async Task<int> RunPromoteAsync(
+        IReadOnlyList<string> args,
+        string workingDir,
+        RepoConfig? config,
+        CommandOutputSettings outputSettings,
+        bool verbose,
+        bool quiet,
+        bool dryRun,
+        bool debug,
+        CancellationToken cancellationToken)
+    {
+        var startedAt = DateTimeOffset.UtcNow;
+        CommandResult result;
+        if (args.Count < 3 || config is null)
+        {
+            result = CommandResult.Fail(
+                "promote",
+                1,
+                "Usage: rx promote <run-manifest.json> <environment>; define environments.<name>.path in configuration.");
+        }
+        else
+        {
+            try
+            {
+                var message = await ArtifactPromotionService.PromoteAsync(
+                    args[1],
+                    args[2],
+                    config,
+                    workingDir,
+                    dryRun,
+                    cancellationToken);
+                result = CommandResult.Ok("promote", message);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                result = CommandResult.Fail("promote", 9, $"Promotion failed: {ex.Message}");
+            }
+        }
+
+        var completedAt = DateTimeOffset.UtcNow;
+        var invocation = EmptyInvocation(workingDir, outputSettings, dryRun, debug);
+        var exitCode = await WriteResultAsync(result, invocation, verbose, quiet, cancellationToken);
+        await WriteRunManifestAsync(
+            result,
+            "promote",
+            workingDir,
+            startedAt,
+            completedAt,
+            invocation.JsonFile,
+            config,
+            outputSettings,
+            cancellationToken);
+        return exitCode;
+    }
+
+    private static IReadOnlyList<string> GetPolicySources(RepoConfig? config)
+    {
+        var sources = config?.PolicySources?.ToList() ?? [];
+        var environmentSources = Environment.GetEnvironmentVariable("REXO_POLICY_SOURCES");
+        if (!string.IsNullOrWhiteSpace(environmentSources))
+        {
+            sources.AddRange(environmentSources.Split(
+                [';', ','],
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        }
+
+        return sources.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
     private static async Task<int> RunPoliciesSubcommandAsync(
         string commandPrefix,
         IReadOnlyList<string> args,
@@ -179,6 +419,7 @@ public static class Program
         bool quiet,
         bool dryRun,
         bool debug,
+        ConfigProvenanceSnapshot provenance,
         CancellationToken cancellationToken)
     {
         // args[0] == "config", args[1] == sub-command
@@ -192,7 +433,11 @@ public static class Program
         var invocation = EmptyInvocation(workingDir, outputSettings, dryRun, debug);
 
         var startedAt = DateTimeOffset.UtcNow;
-        var result = await ExecuteCommandAsync(executor, subCommand, invocation, cancellationToken);
+        var includeProvenance = subCommand == "config resolved" &&
+            args.Skip(2).Any(argument => argument.Equals("--provenance", StringComparison.OrdinalIgnoreCase));
+        var result = includeProvenance
+            ? CreateConfigResolvedWithProvenance(config, provenance, workingDir)
+            : await ExecuteCommandAsync(executor, subCommand, invocation, cancellationToken);
         var completedAt = DateTimeOffset.UtcNow;
         var exitCode = await WriteResultAsync(result, invocation, verbose, quiet, cancellationToken);
 
@@ -201,12 +446,263 @@ public static class Program
         return exitCode;
     }
 
+    private static CommandResult CreateConfigResolvedWithProvenance(
+        RepoConfig? config,
+        ConfigProvenanceSnapshot provenance,
+        string workingDirectory)
+    {
+        if (config is null)
+        {
+            return CommandResult.Fail("config resolved", 1, "No rexo configuration loaded.");
+        }
+
+        var effectiveConfig = RedactConfigNode(
+            System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(config)));
+        var repositoryFiles = provenance.RepositoryLayers
+            .Select(layer => Path.GetRelativePath(workingDirectory, layer.Reference))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var sourceLayers = new List<string>();
+        if (provenance.PolicyConfig is not null)
+        {
+            sourceLayers.Add("merged policy sources");
+        }
+
+        sourceLayers.AddRange(repositoryFiles.Select(path => $"repository file: {path}"));
+        sourceLayers.AddRange(provenance.SetOverrides.Select(overrideValue =>
+        {
+            var separator = overrideValue.IndexOf('=', StringComparison.Ordinal);
+            var path = separator > 0 ? overrideValue[..separator] : "<invalid>";
+            return $"CLI --set override: {path}";
+        }));
+        var outputs = new Dictionary<string, object?>
+        {
+            ["effectiveConfig"] = effectiveConfig,
+            ["sourceLayers"] = sourceLayers,
+            ["repositoryFiles"] = repositoryFiles,
+            ["repositoryFileAttributionAvailable"] = provenance.RepositoryLayers.Count > 0,
+            ["policySourceAttributionAvailable"] = false,
+            ["sensitiveValuesRedacted"] = true,
+        };
+        var message = JsonSerializer.Serialize(new
+        {
+            effectiveConfig,
+            provenance = new
+            {
+                sourceLayers,
+                repositoryFiles,
+                cliOverridePaths = provenance.SetOverrides.Select(overrideValue =>
+                {
+                    var separator = overrideValue.IndexOf('=', StringComparison.Ordinal);
+                    return separator > 0 ? overrideValue[..separator] : "<invalid>";
+                }),
+                mergedPolicySourceGroupAvailable = provenance.PolicyConfig is not null,
+                repositoryFileAttributionAvailable = provenance.RepositoryLayers.Count > 0,
+                policySourceAttributionAvailable = false,
+                note = "Repository files are listed as declaration sources; exact field-level merge ownership and individual policy-source attribution are not available.",
+            },
+        }, JsonOptions);
+        return new CommandResult("config resolved", true, 0, message, outputs);
+    }
+
+    private static async Task<int> RunConfigExplainAsync(
+        IReadOnlyList<string> args,
+        string workingDir,
+        RepoConfig? config,
+        ConfigProvenanceSnapshot provenance,
+        CommandOutputSettings outputSettings,
+        bool verbose,
+        bool quiet,
+        CancellationToken cancellationToken)
+    {
+        if (args.Count < 3 || config is null)
+        {
+            ConsoleRenderer.RenderError("Usage: rx config explain <property.path>; an effective config must be loaded.");
+            return 1;
+        }
+
+        var propertyPath = args[2];
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(config));
+        var value = ResolveConfigProperty(document.RootElement, propertyPath);
+        var isSensitive = propertyPath
+            .Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(IsSensitiveConfigProperty);
+        var safeValue = value is null
+            ? null
+            : isSensitive
+                ? System.Text.Json.Nodes.JsonValue.Create("***")
+                : RedactConfigNode(System.Text.Json.Nodes.JsonNode.Parse(value.Value.GetRawText()));
+        var valueJson = safeValue is null
+            ? "<not found>"
+            : JsonSerializer.Serialize(safeValue, JsonOptions);
+        var sourceLayers = GetConfigSourceLayers(propertyPath, provenance, workingDir);
+        var source = string.Join(" -> ", sourceLayers);
+        var message = $"Property: {propertyPath}\nEffective value: {valueJson}\nApplicable declarations: {source}\n" +
+            "Note: repository file contributors are listed; merged policy sources are reported as a group because exact per-source field attribution is not available.";
+        var result = new CommandResult("config explain", true, 0, message, new Dictionary<string, object?>
+        {
+            ["path"] = propertyPath,
+            ["value"] = safeValue,
+            ["sourceLayers"] = sourceLayers,
+            ["provenanceAvailable"] = sourceLayers.Count > 0,
+            ["repositoryFileAttributionAvailable"] = provenance.RepositoryLayers.Count > 0,
+            ["policySourceAttributionAvailable"] = false,
+        });
+        var invocation = EmptyInvocation(workingDir, outputSettings, dryRun: false, debug: false);
+        return await WriteResultAsync(result, invocation, verbose, quiet, cancellationToken);
+    }
+
+    private static IReadOnlyList<string> GetConfigSourceLayers(
+        string propertyPath,
+        ConfigProvenanceSnapshot provenance,
+        string workingDirectory)
+    {
+        var sources = new List<string>();
+        if (provenance.PolicyConfig is not null &&
+            ResolveSerializedProperty(provenance.PolicyConfig, propertyPath) is not null)
+        {
+            sources.Add("merged policy sources");
+        }
+
+        if (provenance.RepositoryConfig is not null &&
+            ResolveSerializedProperty(provenance.RepositoryConfig, propertyPath) is not null)
+        {
+            var contributingFiles = provenance.RepositoryLayers
+                .Where(layer => ResolveConfigProperty(layer.Document, propertyPath) is not null)
+                .Select(layer => Path.GetRelativePath(workingDirectory, layer.Reference))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (contributingFiles.Length > 0)
+            {
+                sources.AddRange(contributingFiles.Select(path => $"repository file: {path}"));
+            }
+            else if (provenance.ConfigPath is not null)
+            {
+                sources.Add($"repository-derived configuration ({Path.GetRelativePath(workingDirectory, provenance.ConfigPath)})");
+            }
+            else
+            {
+                sources.Add("repository-derived configuration");
+            }
+        }
+
+        if (provenance.SetOverrides.Any(overrideValue => IsOverrideForPath(overrideValue, propertyPath)))
+        {
+            sources.Add("CLI --set override");
+        }
+
+        if (sources.Count == 0)
+        {
+            sources.Add("Rexo defaults or runtime-derived value");
+        }
+
+        return sources;
+    }
+
+    private static JsonElement? ResolveSerializedProperty<T>(T value, string propertyPath)
+    {
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(value));
+        return ResolveConfigProperty(document.RootElement, propertyPath);
+    }
+
+    private static bool IsOverrideForPath(string overrideValue, string propertyPath)
+    {
+        var separator = overrideValue.IndexOf('=', StringComparison.Ordinal);
+        if (separator <= 0)
+        {
+            return false;
+        }
+
+        var overridePath = overrideValue[..separator];
+        return propertyPath.Equals(overridePath, StringComparison.OrdinalIgnoreCase) ||
+            propertyPath.StartsWith(overridePath + ".", StringComparison.OrdinalIgnoreCase) ||
+            overridePath.StartsWith(propertyPath + ".", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static JsonElement? ResolveConfigProperty(JsonElement root, string propertyPath)
+    {
+        var current = root;
+        foreach (var segment in propertyPath.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (current.ValueKind == JsonValueKind.Object)
+            {
+                var property = current.EnumerateObject()
+                    .FirstOrDefault(candidate => candidate.Name.Equals(segment, StringComparison.OrdinalIgnoreCase));
+                if (property.Name is null)
+                {
+                    return null;
+                }
+
+                current = property.Value;
+                continue;
+            }
+
+            if (current.ValueKind == JsonValueKind.Array &&
+                int.TryParse(segment, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var index) &&
+                index >= 0 &&
+                index < current.GetArrayLength())
+            {
+                current = current[index];
+                continue;
+            }
+
+            return null;
+        }
+
+        return current.Clone();
+    }
+
+    private static bool IsSensitiveConfigProperty(string name)
+    {
+        var normalized = new string(name.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+        return normalized.Contains("secret", StringComparison.Ordinal) ||
+            normalized.Contains("password", StringComparison.Ordinal) ||
+            normalized.Contains("token", StringComparison.Ordinal) ||
+            normalized.Contains("apikey", StringComparison.Ordinal) ||
+            normalized.Contains("credential", StringComparison.Ordinal) ||
+            normalized.Contains("privatekey", StringComparison.Ordinal);
+    }
+
+    private static System.Text.Json.Nodes.JsonNode? RedactConfigNode(System.Text.Json.Nodes.JsonNode? node)
+    {
+        if (node is System.Text.Json.Nodes.JsonObject obj)
+        {
+            foreach (var key in obj.Select(property => property.Key).ToArray())
+            {
+                if (IsSensitiveConfigProperty(key))
+                {
+                    obj[key] = "***";
+                }
+                else
+                {
+                    RedactConfigNode(obj[key]);
+                }
+            }
+        }
+        else if (node is System.Text.Json.Nodes.JsonArray array)
+        {
+            for (var index = 0; index < array.Count; index++)
+            {
+                RedactConfigNode(array[index]);
+            }
+        }
+
+        return node;
+    }
+
     private static async Task<int> RunUiAsync(
         DefaultCommandExecutor executor,
         RepoConfig? config,
         string workingDir,
+        bool nonInteractive,
         CancellationToken cancellationToken)
     {
+        if (nonInteractive)
+        {
+            ConsoleRenderer.RenderError("The interactive UI cannot run with --non-interactive.");
+            return 1;
+        }
+
         await RexoTuiHost.RunAsync(executor, config, workingDir, cancellationToken);
         return 0;
     }
@@ -287,6 +783,7 @@ public static class Program
         bool quiet,
         bool dryRun,
         bool debug,
+        bool nonInteractive,
         CancellationToken cancellationToken)
     {
         var remainingArgs = args.Skip(1).ToList();
@@ -303,6 +800,14 @@ public static class Program
             parsedOptions = new Dictionary<string, string?>(parsedOptions)
             {
                 ["mode"] = mode,
+            };
+        }
+
+        if (nonInteractive)
+        {
+            parsedOptions = new Dictionary<string, string?>(parsedOptions)
+            {
+                ["non-interactive"] = "true",
             };
         }
 
@@ -513,14 +1018,13 @@ public static class Program
             if (manifestPath == jsonFile) manifestPath = jsonFile + ".manifest.json";
         }
 
-        // Compute SHA-256 of resolved config content for traceability
-        string? configHash = null;
-        var configPath = ConfigFileLocator.FindConfigPath(workingDir);
-        if (configPath is not null)
+        var configHash = config is null ? null : CanonicalConfigHasher.Compute(config);
+        var policyLockPath = Path.Join(workingDir, ".rexo", "rexo.lock.yaml");
+        string? policyLockHash = null;
+        if (File.Exists(policyLockPath))
         {
-            var configBytes = await File.ReadAllBytesAsync(configPath, cancellationToken);
-            var hashBytes = System.Security.Cryptography.SHA256.HashData(configBytes);
-            configHash = Convert.ToHexString(hashBytes).ToLowerInvariant();
+            await using var lockStream = File.OpenRead(policyLockPath);
+            policyLockHash = Convert.ToHexString(await SHA256.HashDataAsync(lockStream, cancellationToken)).ToLowerInvariant();
         }
 
         var gitInfo = await GitDetector.DetectAsync(workingDir, cancellationToken);
@@ -539,6 +1043,7 @@ public static class Program
             StartedAt = startedAt,
             CompletedAt = completedAt,
             ConfigHash = configHash,
+            PolicyLockHash = policyLockHash,
             Version = result.Version,
             AssemblyVersion = result.Version?.AssemblyVersion,
             InformationalVersion = result.Version?.InformationalVersion,
@@ -584,6 +1089,8 @@ public static class Program
                         RequestedExecutionMode = GetStringOutput(s.Outputs, "__requestedExecutionMode"),
                         ContainerImage = GetStringOutput(s.Outputs, "__containerImage"),
                         ContainerWorkingDirectory = GetStringOutput(s.Outputs, "__containerWorkingDirectory"),
+                        ContainerFallbackPolicy = GetStringOutput(s.Outputs, "__containerFallbackPolicy"),
+                        ContainerFallbackAllowed = GetBoolOutput(s.Outputs, "__containerFallbackAllowed"),
                         ContainerFallbackUsed = GetBoolOutput(s.Outputs, "__containerFallbackUsed"),
                         ContainerFallbackReason = GetStringOutput(s.Outputs, "__containerFallbackReason"),
                     };
@@ -751,7 +1258,7 @@ public static class Program
             .FirstOrDefault()?.InformationalVersion ?? "0.1.0-local";
     }
 
-    private static (IReadOnlyList<string> cleanArgs, bool json, string? jsonFile, bool verbose, bool debug, bool quiet, bool? dryRun, IReadOnlyList<string> setOverrides) ParseGlobalFlags(string[] args)
+    private static (IReadOnlyList<string> cleanArgs, bool json, string? jsonFile, bool verbose, bool debug, bool quiet, bool? dryRun, bool nonInteractive, bool? color, IReadOnlyList<string> setOverrides) ParseGlobalFlags(string[] args)
     {
         var clean = new List<string>();
         var json = false;
@@ -760,6 +1267,8 @@ public static class Program
         var debug = false;
         var quiet = false;
         bool? dryRun = null;
+        var nonInteractive = false;
+        bool? color = null;
         var setOverrides = new List<string>();
 
         for (var i = 0; i < args.Length; i++)
@@ -788,6 +1297,15 @@ public static class Program
                 case "--no-dry-run":
                     dryRun = false;
                     break;
+                case "--non-interactive":
+                    nonInteractive = true;
+                    break;
+                case "--color":
+                    color = true;
+                    break;
+                case "--no-color":
+                    color = false;
+                    break;
                 case "--set" when i + 1 < args.Length:
                     setOverrides.Add(args[++i]);
                     break;
@@ -797,7 +1315,7 @@ public static class Program
             }
         }
 
-        return (clean, json, jsonFile, verbose, debug, quiet, dryRun, setOverrides);
+        return (clean, json, jsonFile, verbose, debug, quiet, dryRun, nonInteractive, color, setOverrides);
     }
 
     private static (IReadOnlyDictionary<string, string> args, IReadOnlyDictionary<string, string?> options)
@@ -843,6 +1361,12 @@ public static class Program
         Console.WriteLine("  explain <command>           Explain a command (or alias)");
         Console.WriteLine("  explain version             Show version provider configuration");
         Console.WriteLine("  doctor                      Check environment and configuration");
+        Console.WriteLine("  check [--strict]            Safely assess repository readiness");
+        Console.WriteLine("  graph <command>             Show effective command steps (text|json|mermaid)");
+        Console.WriteLine("  completion <shell>          Generate bash, zsh, fish, or PowerShell completions");
+        Console.WriteLine("  restore                     Verify configured policy sources against the lockfile");
+        Console.WriteLine("  update                      Resolve and refresh the policy lockfile");
+        Console.WriteLine("  promote <manifest> <env>    Promote a verified local file artifact without rebuilding");
         Console.WriteLine("  capabilities                Show runtime capability contract and supported features");
         Console.WriteLine("  init                        Create a starter rexo config");
         Console.WriteLine("  new                         Alias for init");
@@ -863,8 +1387,9 @@ public static class Program
         Console.WriteLine("      --instructions-path     Repo-relative destination");
         Console.WriteLine("      --force                 Overwrite existing config");
         Console.WriteLine("  run <command>               Run a configured command");
-        Console.WriteLine("  config resolved             Show the fully-merged configuration");
+        Console.WriteLine("  config resolved [--provenance]  Show the merged config and optional source files");
         Console.WriteLine("  config sources              Show config file sources in merge order");
+        Console.WriteLine("  config explain <path>       Show an effective property value (sensitive values redacted)");
         Console.WriteLine("  config materialize          Write the merged config to a file");
         Console.WriteLine("  policies list               List available embedded policies");
         Console.WriteLine("  policies show <name>        Show an embedded policy");
@@ -879,6 +1404,8 @@ public static class Program
         Console.WriteLine("  --debug                     Show debug/diagnostic output");
         Console.WriteLine("  --dry-run                   Simulate external mutations without applying them");
         Console.WriteLine("  --no-dry-run                Explicitly disable dry-run when config enables it");
+        Console.WriteLine("  --non-interactive           Disable interactive prompts");
+        Console.WriteLine("  --color / --no-color        Force color output on or off (NO_COLOR disables by default)");
         Console.WriteLine("  --set <key.path=value>      Override a config value (repeatable; see docs/configuration/overrides.md)");
     }
 

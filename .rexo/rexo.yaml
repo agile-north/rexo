@@ -1,97 +1,73 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json
 $schema: https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json
 schemaVersion: "1.0"
-name: my-service
-description: Example Rexo config for a typical .NET service
-version: 1.0.0
+name: rexo
+description: Rexo self-hosted build and release configuration
+extends:
+  - embedded:standard
+  - embedded:dotnet
+  - embedded:git-tag
 versioning:
   provider: env
-  settings:
-    variable: BUILD_VERSION
   fallback: 0.1.0-local
-artifacts:
-  - type: docker
-    name: my-service
-    settings:
-      repository: ghcr.io/myorg/my-service
-      dockerfile: src/MyService/Dockerfile
-      context: .
-      tags:
-        - semver
-        - latest-on-main
-        - branch
-        - sha
-  - type: nuget
-    name: MyService.Client
-    settings:
-      project: src/MyService.Client/MyService.Client.csproj
-      target:
-        source: https://api.nuget.org/v3/index.json
-        sourceEnv: NUGET_TARGET_SOURCE
-        apiKeyEnv: NUGET_API_KEY
-      output: artifacts/packages
-settings:
+  settings:
+    variable: GITVERSION_SEMVER
+vars:
   dotnet:
     solution: solution.slnx
     configuration: Release
-    test:
-      logger: trx
-      coverageArgs: --collect:"XPlat Code Coverage" -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.OutputDirectory={{outputs.tests.coverage}}
+    analyze:
+      sarif:
+        enabled: true
+  gitTag:
+    prefix: v
+    container: none
+outputs:
+  root: artifacts
+  tests:
+    results: ~/test-results
+    coverage: ~/test-results
+  analysis:
+    sarif: ~/sarif
+runtime:
+  push:
+    noPushInPullRequest: true
+    branches: [main, alpha, alpha-*, beta, beta-*, edge, edge-*]
 commands:
-  build:
-    description: Build the solution
-    steps:
-      - id: restore
-        run: dotnet restore
-        description: Restore NuGet packages
-      - id: compile
-        run: dotnet build --no-restore -c Release
-        description: Compile the solution
   release:
-    description: 'Run the full release pipeline: version, test, build, push'
+    description: Verify and build once; publish only when CI selects a publisher and push policy permits it.
+    options:
+      push:
+        type: bool
+        default: true
     steps:
-      - id: resolve-version
-        uses: builtin:resolve-version
-        description: Resolve the release version
-      - id: test
-        command: test
-        whenExists: true
-        description: Run all tests
-      - id: analyze
-        command: analyze
-        whenExists: true
-        description: Run static analysis and format checks
-      - id: build-artifacts
-        uses: builtin:build-artifacts
-        description: Build Docker image and NuGet package
-      - id: push-artifacts
+      - id: verify
+        command: verify
+      - id: build
+        command: build
+      - id: push
         uses: builtin:push-artifacts
-        description: Push artifacts to registries
-  branch feature:
-    description: Create a feature branch
-    args:
-      name:
-        description: Feature branch name (e.g. my-feature)
-        required: true
+        when: "{{options.push && env.REXO_PUBLISH == 'true' && !ci.isPullRequest}}"
+      - id: post-push
+        command: post-push
+        when: "{{push.anyPushed && !options.dry-run}}"
+  ci coverage:
+    description: Generate coverage reports locally and in CI from the release test evidence.
     steps:
-      - id: git-checkout
-        run: git checkout -b feature/{{args.name | slug}}
-        description: Create and switch to new feature branch
-  branch release:
-    description: Create a release branch from the version
-    steps:
-      - id: resolve-version
-        uses: builtin:resolve-version
-      - id: git-checkout
-        run: git checkout -b release/{{steps.resolve-version.outputs.semver}}
-        description: Create release branch
-  env check:
-    description: Verify required environment variables are set
-    steps:
-      - id: check-vars
-        run: echo BUILD_VERSION=${BUILD_VERSION:-not set}
-        description: Show build environment
-aliases:
-  ci: release
-  bf: branch feature
-  br: branch release
+      - id: restore-report-tools
+        run: dotnet tool restore
+      - id: coverage-summary
+        run: >-
+          dotnet tool run reportgenerator
+          "-reports:{{outputs.tests.results}}/**/coverage.cobertura.xml"
+          "-targetdir:{{outputs.root}}/coverage-report"
+          "-reporttypes:Cobertura;MarkdownSummaryGithub"
+artifacts:
+  - type: nuget
+    name: Rexo.Cli
+    settings:
+      project: src/Cli/Cli.csproj
+      output: artifacts/packages
+      target:
+        sourceEnv: NUGET_TARGET_SOURCE
+        apiKeyEnv: NUGET_API_KEY

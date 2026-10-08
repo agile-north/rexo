@@ -12,12 +12,12 @@ single config file and run identically locally and in CI.
 
 | File | Purpose |
 | ---- | ------- |
-| `.rexo/rexo.yaml` (or `.rexo/rexo.json`, root `rexo.yaml`/`rexo.json`) | Main repo config: commands, versioning, artifacts, tests. YAML is the default; JSON is equally supported |
+| `.rexo/rexo.yaml` (or `.rexo/rexo.json`, root `rexo.yaml`/`rexo.json`) | Main repo config: commands, versioning, artifacts, and output paths. YAML is the default; JSON is equally supported |
 | `.rexo/policy.yaml` (or `.rexo/policy.json`, root `policy.*`) | Policy overlay: org-level commands and defaults |
 
 ## Documentation
 
-- **Full configuration reference**: https://github.com/agile-north/rexo/blob/release/next/docs/CONFIGURATION.md
+- **Full configuration reference**: https://github.com/agile-north/rexo/blob/release/next/docs/configuration/README.md
 - **Rexo schema** (all valid config fields with types): https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json
 - **Policy schema** (all valid policy fields with types): https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/policy.schema.json
 - **Architecture overview**: https://github.com/agile-north/rexo/blob/release/next/docs/ARCHITECTURE.md
@@ -39,8 +39,7 @@ YAML files start with a `# yaml-language-server: $schema=...` modeline for edito
   "aliases": { ... },
   "versioning": { ... },
   "artifacts": [ ... ],
-  "tests": { ... },
-  "analysis": { ... }
+  "outputs": { ... }
 }
 ```
 
@@ -66,20 +65,20 @@ Each step uses exactly one of:
 - `"uses"` — built-in primitive (see below)
 - `"command"` — delegate to another configured command
 
-### Built-in primitives (`"uses": "builtin:<name>"`)
+### Built-ins and policy commands
 
 | Primitive | Purpose |
 | --- | --- |
 | `builtin:validate` | Validate the loaded config |
 | `builtin:resolve-version` | Run the version provider; populate `context.Version` |
-| `command:test` | Run overlay-provided test workflow |
-| `command:analyze` | Run overlay-provided analysis workflow |
-| `command:verify` | Run overlay-composed quality gate workflow |
 | `builtin:build-artifacts` | Build all configured artifacts |
 | `builtin:tag-artifacts` | Tag artifacts with version tags |
-| `builtin:push-artifacts` | Push artifacts; write `artifacts/manifest.json` |
+| `builtin:push-artifacts` | Push artifacts; write `<outputs.root>/manifest.json` when `outputs.emit` is enabled |
 | `builtin:config-resolved` | Print the merged config as JSON |
 | `builtin:config-materialize` | Write provider config files (e.g. `GitVersion.yml`) |
+
+`test`, `analyze`, and `verify` are policy-provided commands delegated through
+`"command": "..."` steps, not `uses` builtins.
 
 ### Template variables in `run` steps
 
@@ -97,7 +96,7 @@ Filters: `| slug`, `| upper`, `| lower`, `| default(fallback)`, `| coalesce(a, b
 
 ```jsonc
 "versioning": {
-  "provider": "gitversion",   // fixed | env | gitversion | minver | nbgv
+  "provider": "auto",         // auto | fixed | env | git | gitversion | minver | nbgv
   "settings": { "fallback": "0.1.0" }
 }
 ```
@@ -125,13 +124,14 @@ rx init --with-policy --policy dotnet
 ```bash
 rx list                      # list all available commands (config + policy + built-ins)
 rx explain <command>         # show description, args, options, and steps
+rx graph <command>           # inspect effective steps as text, JSON, or Mermaid
+rx completion <shell>        # generate bash, zsh, fish, or PowerShell command completions
 rx config sources            # show which config files were loaded
 rx config resolved           # show the final merged config as JSON
 rx doctor                    # check tool and provider availability
+rx check [--strict]          # inspect config/tool readiness; warnings fail only with --strict
 rx secrets doctor            # validate configured secret resolution safely
 ```
 
-
-
-
-
+`rx check` does not build, publish, deploy, or resolve secret values. Use `rx secrets preflight`
+when you need to verify that required secret providers can currently resolve their values.

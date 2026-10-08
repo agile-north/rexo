@@ -35,7 +35,7 @@ dotnet test solution.slnx -c Release --no-build
 ```
 
 Build must produce **0 errors, 0 warnings** (`TreatWarningsAsErrors=true`).
-All 234 tests must pass before any PR can be merged.
+Run the current full test suite before handoff; do not treat an old test count as current.
 
 ---
 
@@ -60,7 +60,7 @@ src/
   Core/                     # Domain models, interfaces (no external deps)
   Execution/                # Step executor, command registry, built-in primitives
   Git/                      # Git info detector (branch/SHA/remote/clean)
-  Policies/                 # LocalFilePolicySource
+  Policies/                 # Policy loading and embedded templates
   Templating/               # {{variable.path}} template engine with filters
   Tui/                      # Blazor/RazorConsole interactive TUI (`rx ui`)
   Ui/                       # ConsoleRenderer (Spectre.Console rich output)
@@ -71,13 +71,13 @@ tests/
   Execution.Tests/          # Executor, TemplateRenderer, BuiltinCommandRegistration
   Integration.Tests/        # Smoke: `rx version` exits 0
 docs/
-  scope.md                  # Full product scope (~2300 lines) — source of truth
+  scope.md                  # Product scope and design decisions
   todo.md                   # Implementation checklist with ✅/⬜ status
   ARCHITECTURE.md           # Architecture narrative
-  CONFIGURATION.md          # Config system reference
+  configuration/README.md   # Config system reference
   DEVELOPMENT.md            # Developer guide
 .github/
-  workflows/                # build.yml, release.yml, codeql.yml
+  workflows/                # release.yml, workflow-validation.yml, dependabot-auto-merge.yml
   copilot-instructions.md   # GitHub Copilot workspace instructions
 ```
 
@@ -138,7 +138,7 @@ Every config must start with (JSON shown; YAML is equivalent):
 
 Alternative `$schema` values accepted:
 
-- Remote canonical URL (once the repository is published)
+- Canonical remote URL
 - `https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json`
 - `rexo.schema.json`
 - `./rexo.schema.json`
@@ -175,26 +175,27 @@ CLI args
 
 ### Multi-word command resolution
 
-Given args `branch feature my-change`, the CLI tries longest prefix first:
+Given args `branch feature my-change`, the CLI tries the complete command text first,
+then progressively shorter prefixes:
 
-1. Try `branch feature` as command name → found → arg `my-change`
-2. Try `branch` as command name → would be tried if step 1 fails
-3. Try `branch feature my-change` as exact name
+1. Try `branch feature my-change` as the command name
+2. Try `branch feature` as the command name → if found, `my-change` is the argument
+3. Try `branch` as the command name if the longer candidates are not registered
 
 ### Built-in primitives (`uses:` step type)
 
-| Primitive | Purpose |
+| Core builtin | Purpose |
 | ----------- | --------- |
 | `builtin:validate` | Config validation |
 | `builtin:resolve-version` | Run version provider, set `context.Version` |
-| `command:test` | Policy-provided test command (toolchain overlay) |
-| `command:analyze` | Policy-provided analysis command (toolchain overlay) |
-| `command:verify` | Policy-composed validation/test/analyze/security gate |
 | `builtin:build-artifacts` | Build all configured artifacts |
 | `builtin:tag-artifacts` | Tag artifacts with version tags |
 | `builtin:push-artifacts` | Push artifacts to registries |
 | `builtin:dotnet-sarif-targets` | Write MSBuild targets for per-project SARIF 2.1 `ErrorLog` |
 | `builtin:sarif-merge` | Merge SARIF 2.1.0 logs into one GitHub-compatible file |
+
+`command:test`, `command:analyze`, and `command:verify` are policy-composed command
+dispatch steps, not core builtins.
 
 ### Template engine (`TemplateRenderer`)
 
@@ -207,7 +208,7 @@ Available context paths:
 - `env.<VARIABLE>` — environment variables
 - `repo.<field>` — repo config fields
 - `version.<field>` — resolved version (after `builtin:resolve-version`)
-- `steps.<stepId>.output.<key>` — output from earlier step
+- `steps.<stepId>.outputs.<key>` — output from an earlier step
 
 Filters (pipe syntax): `{{value | slug}}`, `{{value | upper}}`, `{{value | lower}}`,
 `{{value | default(fallback)}}`
@@ -218,9 +219,13 @@ Filters (pipe syntax): `{{value | slug}}`, `{{value | upper}}`, `{{value | lower
 
 | Provider key | Class | Notes |
 | --- | --- | --- |
+| `auto` | `AutoVersionProvider` | Detects provider from repository versioning files and Git metadata |
 | `fixed` | `FixedVersionProvider` | Returns static version string from config |
 | `env` | `EnvVersionProvider` | Reads env var, falls back to config fallback |
+| `git` | `GitTagVersionProvider` | Resolves from the most recent reachable SemVer tag |
 | `gitversion` | `GitVersionVersionProvider` | Runs `gitversion /output json`, parses SemVer 2.0 |
+| `minver` | `MinVerVersionProvider` | Runs MinVer |
+| `nbgv` | `NbgvVersionProvider` | Runs Nerdbank.GitVersioning |
 
 ---
 
@@ -256,10 +261,25 @@ IPolicySource             // LoadAsync(root, ct)
 
 ---
 
-## What Is Not Yet Implemented
+## Current Roadmap Status
 
-See `docs/todo.md` for the full checklist. The implementation is feature-complete per `docs/scope.md`.
-No known gaps remain at this time.
+`docs/scope.md` and the historical checklist in `docs/todo.md` describe the broad product scope,
+not a claim that every production-hardening item is finished. Current behavior and limits are
+documented in the relevant configuration, artifact, and output-contract pages. In particular,
+`rx promote` currently supports only one SHA-256-verified local file artifact; it does not deploy
+remotely or promote registry tags, and run manifests do not yet generate SBOMs or signed
+attestations. `rx config explain` lists repository config files declaring a property, but policy
+source files remain grouped and repository attribution does not resolve field-level merge behavior.
+NuGet push masks API keys in Rexo output,
+but `dotnet nuget push` still receives the key as a process argument.
+
+Do not infer completion from older counts or checklist entries. Run the current Release build and
+all tests before handing off changes:
+
+```powershell
+dotnet build solution.slnx -c Release
+dotnet test solution.slnx -c Release --no-build
+```
 
 ---
 
@@ -272,6 +292,7 @@ No known gaps remain at this time.
 - Avoid `new[] { ... }` literal arrays in hot paths — use `static readonly`
 - `IReadOnlyList<T>` → use `.Count` not `.Length`
 - No circular dependencies between projects — `Core` has zero project references
+- See [docs/CODE_STYLE.md](docs/CODE_STYLE.md) for path safety, cleanup exception, LINQ, and condition-flow guidance
 
 ---
 
@@ -289,4 +310,3 @@ No known gaps remain at this time.
 | Template rendering | `src/Templating/TemplateRenderer.cs` |
 | Version resolution | `src/Versioning/` |
 | Artifact build/push | `src/Artifacts.Docker/`, `src/Artifacts.NuGet/` |
-

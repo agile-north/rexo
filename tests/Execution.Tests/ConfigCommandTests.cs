@@ -53,7 +53,7 @@ public sealed class ConfigCommandTests
     [Fact]
     public async Task ConfigSourcesReturnsSuccessWithConfigPath()
     {
-        var configPath = Path.Combine(Path.GetTempPath(), "rexo.json");
+        var configPath = Path.Join(Path.GetTempPath(), "rexo.json");
 
         var registry = BuiltinCommandRegistration.CreateDefault(configPath: configPath);
         var executor = new DefaultCommandExecutor(registry);

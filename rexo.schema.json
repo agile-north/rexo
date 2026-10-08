@@ -91,6 +91,23 @@
         "$ref": "#/$defs/artifact"
       }
     },
+    "environments": {
+      "type": "object",
+      "description": "Named local promotion targets. Each environment maps to a repository-relative destination directory.",
+      "markdownDescription": "Named local promotion targets. `rx promote <manifest.json> <environment>` copies verified file artifacts into the configured repository-relative `path` without rebuilding. This initial environment contract does not deploy to remote infrastructure.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Repository-relative destination directory for promoted file artifacts."
+          }
+        }
+      }
+    },
     "runtime": {
       "description": "Cross-cutting runtime policy configuration for output and push behavior.",
       "markdownDescription": "Cross-cutting runtime policy configuration for output, push, and command delegation. See [Runtime Configuration](docs/configuration/runtime.md). This is where global defaults such as dry-run, push gating, and same-name command collision behavior live.",
@@ -2640,6 +2657,16 @@
         "image": {
           "type": "string",
           "description": "Container image used to execute the run command."
+        },
+        "fallback": {
+          "type": "string",
+          "enum": [
+            "error",
+            "host"
+          ],
+          "default": "error",
+          "description": "Behavior when the container runtime is unavailable. Defaults to error; host explicitly allows native execution.",
+          "markdownDescription": "Behavior when the container runtime is unavailable. Defaults to `error`; set to `host` only to explicitly permit native execution."
         },
         "env": {
           "type": "object",

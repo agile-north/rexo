@@ -8,14 +8,14 @@ public sealed class RepositoryEnvironmentFilesTests
     [Fact]
     public void LoadMergesRootThenRexoEnv()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-envfiles-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-envfiles-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
-        Directory.CreateDirectory(Path.Combine(dir, ".rexo"));
+        Directory.CreateDirectory(Path.Join(dir, ".rexo"));
 
         try
         {
-            File.WriteAllText(Path.Combine(dir, ".env"), "A=from-root\nB=from-root\n");
-            File.WriteAllText(Path.Combine(dir, ".rexo", ".env"), "B=from-rexo\nC=from-rexo\n");
+            File.WriteAllText(Path.Join(dir, ".env"), "A=from-root\nB=from-root\n");
+            File.WriteAllText(Path.Join(dir, ".rexo", ".env"), "B=from-rexo\nC=from-rexo\n");
 
             var values = RepositoryEnvironmentFiles.Load(dir);
 
@@ -38,14 +38,14 @@ public sealed class RepositoryEnvironmentFilesTests
         const string key = "REXO_TEST_ENV_PRECEDENCE";
         var original = System.Environment.GetEnvironmentVariable(key);
 
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-envctx-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-envctx-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
-        Directory.CreateDirectory(Path.Combine(dir, ".rexo"));
+        Directory.CreateDirectory(Path.Join(dir, ".rexo"));
 
         try
         {
-            File.WriteAllText(Path.Combine(dir, ".env"), $"{key}=from-root\n");
-            File.WriteAllText(Path.Combine(dir, ".rexo", ".env"), $"{key}=from-rexo\n");
+            File.WriteAllText(Path.Join(dir, ".env"), $"{key}=from-root\n");
+            File.WriteAllText(Path.Join(dir, ".rexo", ".env"), $"{key}=from-rexo\n");
             System.Environment.SetEnvironmentVariable(key, "from-process");
 
             var context = ExecutionContext.Empty(dir);

@@ -2,6 +2,7 @@ namespace Rexo.Execution;
 
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Security.Cryptography;
 using Rexo.Ci;
 using Rexo.Configuration.Models;
 using Rexo.Core.Abstractions;
@@ -364,7 +365,7 @@ public sealed class ConfigCommandLoader
             if (emitRuntimeFiles)
             {
                 var manifestDirectory = ResolveOutputPath(resolvedOutputs, "manifests")
-                    ?? Path.Combine(outputRoot, "manifests");
+                    ?? Path.Join(outputRoot, "manifests");
                 await WriteCommandManifestAsync(repositoryRoot, config, manifestDirectory, commandName, commandResult, cancellationToken);
             }
 
@@ -398,6 +399,7 @@ public sealed class ConfigCommandLoader
                 new Dictionary<string, object?> { ["message"] = emptyMessage });
         }
 
+        var manifestEntries = new List<Core.Models.ArtifactManifestEntry>();
         foreach (var artifactCfg in artifacts)
         {
             var provider = _artifactProviders.Resolve(artifactCfg.Type);
@@ -415,10 +417,53 @@ public sealed class ConfigCommandLoader
                 return new StepResult(stepId, false, 5, TimeSpan.Zero,
                     new Dictionary<string, object?> { ["error"] = $"Failed to build artifact '{artifactName}'." });
             }
+
+            var artifactLocation = result.Location;
+            var contentSha256 = artifactLocation is null
+                ? null
+                : await HashArtifactFileAsync(artifactLocation, ctx.RepositoryRoot, cancellationToken);
+            manifestEntries.Add(new Core.Models.ArtifactManifestEntry(
+                artifactCfg.Type,
+                ResolveArtifactName(artifactCfg, config),
+                Built: true,
+                Pushed: false,
+                Tags: Array.Empty<string>())
+            {
+                Location = artifactLocation,
+                ContentSha256 = contentSha256,
+            });
         }
 
         return new StepResult(stepId, true, 0, TimeSpan.Zero,
-            new Dictionary<string, object?> { ["message"] = successMessage });
+            new Dictionary<string, object?>
+            {
+                ["message"] = successMessage,
+                ["__artifacts"] = manifestEntries,
+            });
+    }
+
+    private static async Task<string?> HashArtifactFileAsync(
+        string path,
+        string repositoryRoot,
+        CancellationToken cancellationToken)
+    {
+        var resolvedPath = Path.IsPathRooted(path)
+            ? path
+            : Path.GetFullPath(Path.Join(repositoryRoot, path));
+        if (!File.Exists(resolvedPath))
+        {
+            return null;
+        }
+
+        await using var stream = new FileStream(
+            resolvedPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: 81920,
+            useAsync: true);
+        var hash = await SHA256.HashDataAsync(stream, cancellationToken);
+        return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
     internal async Task<StepResult> TagArtifactsAsync(
@@ -551,7 +596,19 @@ public sealed class ConfigCommandLoader
             }
             else
             {
-                pushResult = await provider.PushAsync(artifactConfig, ctx, cancellationToken);
+                if (ctx.PreparedArtifacts.Count > 0)
+                {
+                    var prepared = ctx.PreparedArtifacts.Single(entry => entry.Type == artifactCfg.Type && entry.Name == artifactName);
+                    if (provider is not IPreparedArtifactProvider preparedProvider)
+                    {
+                        throw new InvalidOperationException($"Provider '{artifactCfg.Type}' does not support prepared publication.");
+                    }
+                    pushResult = await preparedProvider.PushPreparedAsync(artifactConfig, prepared, ctx, cancellationToken);
+                }
+                else
+                {
+                    pushResult = await provider.PushAsync(artifactConfig, ctx, cancellationToken);
+                }
             }
 
             var pushPerformed = pushResult.PublishedReferences.Count > 0;
@@ -819,13 +876,13 @@ public sealed class ConfigCommandLoader
             case "nuget":
                 settings["project"] = TryGetArtifactSettingString(artifact.Settings, "project") ?? string.Empty;
                 settings["source"] = TryGetArtifactSettingString(artifact.Settings, "target.source") ?? "https://api.nuget.org/v3/index.json";
-                settings["output"] = TryGetArtifactSettingString(artifact.Settings, "output") ?? Path.Combine("artifacts", "packages");
+                settings["output"] = TryGetArtifactSettingString(artifact.Settings, "output") ?? Path.Join("artifacts", "packages");
                 break;
             case "helm-oci":
                 settings["chart"] = TryGetArtifactSettingString(artifact.Settings, "chart") ?? artifactName;
                 settings["chartPath"] = TryGetArtifactSettingString(artifact.Settings, "chartPath") ?? "chart";
                 settings["registry"] = TryGetArtifactSettingString(artifact.Settings, "registry") ?? string.Empty;
-                settings["output"] = TryGetArtifactSettingString(artifact.Settings, "output") ?? Path.Combine("artifacts", "charts");
+                settings["output"] = TryGetArtifactSettingString(artifact.Settings, "output") ?? Path.Join("artifacts", "charts");
                 break;
         }
 
@@ -836,8 +893,8 @@ public sealed class ConfigCommandLoader
     {
         return artifact.Type.ToLowerInvariant() switch
         {
-            "nuget" => [Path.Combine(TryGetArtifactSettingString(artifact.Settings, "output") ?? Path.Combine("artifacts", "packages"), $"{artifactName}.*.nupkg")],
-            "helm-oci" => [Path.Combine(TryGetArtifactSettingString(artifact.Settings, "output") ?? Path.Combine("artifacts", "charts"), $"{(TryGetArtifactSettingString(artifact.Settings, "chart") ?? artifactName)}-{ctx.Version?.SemVer ?? "<version>"}.tgz")],
+            "nuget" => [Path.Join(TryGetArtifactSettingString(artifact.Settings, "output") ?? Path.Join("artifacts", "packages"), $"{artifactName}.*.nupkg")],
+            "helm-oci" => [Path.Join(TryGetArtifactSettingString(artifact.Settings, "output") ?? Path.Join("artifacts", "charts"), $"{(TryGetArtifactSettingString(artifact.Settings, "chart") ?? artifactName)}-{ctx.Version?.SemVer ?? "<version>"}.tgz")],
             "docker" => (TryGetArtifactSettingString(artifact.Settings, "image") is { Length: > 0 } image)
                 ? [image]
                 : [artifactName],
@@ -856,7 +913,7 @@ public sealed class ConfigCommandLoader
         };
     }
 
-    private static IReadOnlyList<PlanCredentialCheck> GetCredentialChecks(
+    internal static IReadOnlyList<PlanCredentialCheck> GetCredentialChecks(
         RepoArtifactConfig artifact,
         string repositoryRoot,
         IReadOnlyDictionary<string, string> mappedSecretEnvironment)
@@ -1045,7 +1102,43 @@ public sealed class ConfigCommandLoader
         return (canPush, skipReasons);
     }
 
-    private static ArtifactConfig ToArtifactConfig(RepoArtifactConfig artifactCfg, RepoConfig config, string outputRoot)
+    internal static IReadOnlyList<string> GetPushPolicyBlockers(
+        RepoConfig config,
+        RepoArtifactConfig artifact,
+        bool isPullRequest,
+        bool isCleanTree,
+        string? branch)
+    {
+        var policy = BuildEffectivePushPolicy(ParsePushPolicyRules(config), artifact.Settings);
+        var blockers = new List<string>();
+        if (!policy.Enabled)
+        {
+            blockers.Add("push disabled by policy");
+        }
+
+        if (policy.NoPushInPullRequest && isPullRequest)
+        {
+            blockers.Add("pull request context is blocked by policy");
+        }
+
+        if (policy.RequireCleanWorkingTree && !isCleanTree)
+        {
+            blockers.Add("working tree is not clean");
+        }
+
+        if (policy.Branches.Count > 0 &&
+            (string.IsNullOrWhiteSpace(branch) ||
+             !policy.Branches.Any(pattern => BranchMatches(pattern, branch))))
+        {
+            blockers.Add(string.IsNullOrWhiteSpace(branch)
+                ? "branch is unknown but policy requires an allowed branch"
+                : $"branch '{branch}' is not allowed by policy");
+        }
+
+        return blockers;
+    }
+
+    internal static ArtifactConfig ToArtifactConfig(RepoArtifactConfig artifactCfg, RepoConfig config, string outputRoot)
     {
         var settings = artifactCfg.Settings is not null
             ? CloneSettings(artifactCfg.Settings)
@@ -1054,7 +1147,7 @@ public sealed class ConfigCommandLoader
         if (string.Equals(artifactCfg.Type, "nuget", StringComparison.OrdinalIgnoreCase) &&
             !settings.ContainsKey("output"))
         {
-            var nugetOutput = Path.Combine(outputRoot, "packages");
+            var nugetOutput = Path.Join(outputRoot, "packages");
             settings["output"] = JsonSerializer.SerializeToElement(nugetOutput);
         }
 
@@ -1192,9 +1285,9 @@ public sealed class ConfigCommandLoader
         IReadOnlyList<Core.Models.ArtifactManifestEntry> entries,
         CancellationToken cancellationToken)
     {
-        var artifactsDir = Path.Combine(repositoryRoot, outputRoot);
+        var artifactsDir = ResolvePathFromRoot(repositoryRoot, outputRoot);
         Directory.CreateDirectory(artifactsDir);
-        var manifestPath = Path.Combine(artifactsDir, "manifest.json");
+        var manifestPath = Path.Join(artifactsDir, "manifest.json");
 
         var manifest = new
         {
@@ -1216,7 +1309,7 @@ public sealed class ConfigCommandLoader
         CommandResult commandResult,
         CancellationToken cancellationToken)
     {
-        var manifestsDir = Path.Combine(repositoryRoot, manifestDirectory);
+        var manifestsDir = ResolvePathFromRoot(repositoryRoot, manifestDirectory);
         Directory.CreateDirectory(manifestsDir);
 
         var mode = string.Equals(config.Outputs?.Manifests?.CommandMode, "perCommand", StringComparison.OrdinalIgnoreCase)
@@ -1233,7 +1326,7 @@ public sealed class ConfigCommandLoader
             "perCommand" => $"{safeName}.json",
             _ => "commands.json",
         };
-        var manifestPath = Path.Combine(manifestsDir, manifestFileName);
+        var manifestPath = Path.Join(manifestsDir, manifestFileName);
 
         var stepSummaries = commandResult.Steps
             .Select(s =>
@@ -1347,6 +1440,11 @@ public sealed class ConfigCommandLoader
             {
                 var existingJson = await ReadTextFileAsyncWithRetry(manifestPath, cancellationToken);
                 using var document = JsonDocument.Parse(existingJson);
+                if (document.RootElement.ValueKind != JsonValueKind.Object)
+                {
+                    throw new JsonException("Aggregate command manifest must contain a JSON object.");
+                }
+
                 if (document.RootElement.TryGetProperty("commands", out var commandsElement) &&
                     commandsElement.ValueKind == JsonValueKind.Array)
                 {
@@ -1356,9 +1454,10 @@ public sealed class ConfigCommandLoader
                     }
                 }
             }
-            catch
+            catch (JsonException ex)
             {
-                // Ignore malformed existing aggregate manifest and overwrite with a fresh one.
+                Console.Error.WriteLine(
+                    $"  Warning: replacing malformed aggregate command manifest '{manifestPath}': {ex.Message}");
             }
         }
 
@@ -1422,7 +1521,7 @@ public sealed class ConfigCommandLoader
             return manifestsPath;
         }
 
-        return Path.Combine(repositoryRoot, manifestsPath);
+        return Path.Join(repositoryRoot, manifestsPath);
     }
 
     internal static string ResolveOutputRoot(RepoConfig config) =>
@@ -1496,7 +1595,7 @@ public sealed class ConfigCommandLoader
         string Decision,
         IReadOnlyList<string> SkipReasons);
 
-    private sealed record PlanCredentialCheck(
+    internal sealed record PlanCredentialCheck(
         bool Available,
         string Detail);
 
@@ -1780,7 +1879,7 @@ public sealed class ConfigCommandLoader
         // Resolve directory relative to repo root
         var searchDir = Path.IsPathRooted(dirPattern)
             ? dirPattern
-            : Path.Combine(repositoryRoot, dirPattern.Replace('/', Path.DirectorySeparatorChar));
+            : Path.Join(repositoryRoot, dirPattern.Replace('/', Path.DirectorySeparatorChar));
 
         if (!Directory.Exists(searchDir))
         {
@@ -1845,7 +1944,8 @@ public sealed class ConfigCommandLoader
                 ? null
                 : new Core.Models.StepContainerBuildDefinition(
                     container.Build.Target is null ? null : templateRenderer.Render(container.Build.Target, context),
-                    RenderStringDictionary(container.Build.Args, context, templateRenderer)));
+                    RenderStringDictionary(container.Build.Args, context, templateRenderer)),
+            container.Fallback is null ? "error" : templateRenderer.Render(container.Fallback, context));
 
     private static IReadOnlyDictionary<string, string>? RenderStringDictionary(
         IReadOnlyDictionary<string, string>? source,
@@ -1999,7 +2099,7 @@ public sealed class ConfigCommandLoader
 
         var absolutePath = Path.IsPathRooted(outputPath)
             ? outputPath
-            : Path.GetFullPath(Path.Combine(repositoryRoot, outputPath));
+            : Path.GetFullPath(Path.Join(repositoryRoot, outputPath));
 
         var targetDirectory = treatAsFile
             ? Path.GetDirectoryName(absolutePath)
@@ -2033,7 +2133,7 @@ public sealed class ConfigCommandLoader
         var currentDirectory = repositoryRootFullPath;
         foreach (var segment in relativePath.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            currentDirectory = Path.Combine(currentDirectory, segment);
+            currentDirectory = Path.Join(currentDirectory, segment);
             if (!Directory.Exists(currentDirectory))
             {
                 Directory.CreateDirectory(currentDirectory);
@@ -2075,11 +2175,10 @@ public sealed class ConfigCommandLoader
                 Directory.Delete(directoryFullPath, recursive: false);
             }
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-        }
-        catch (UnauthorizedAccessException)
-        {
+            Console.Error.WriteLine(
+                $"  Warning: could not remove empty output directory '{directoryFullPath}': {ex.Message}");
         }
     }
 
@@ -2170,7 +2269,7 @@ public sealed class ConfigCommandLoader
     {
         if (string.IsNullOrWhiteSpace(configuredPath))
         {
-            return Path.Combine(repositoryRoot, outputRoot, "manifests");
+            return Path.Join(ResolvePathFromRoot(repositoryRoot, outputRoot), "manifests");
         }
 
         if (Path.IsPathRooted(configuredPath))
@@ -2181,11 +2280,16 @@ public sealed class ConfigCommandLoader
         if (configuredPath.StartsWith("~/", StringComparison.Ordinal) ||
             configuredPath.StartsWith("~\\", StringComparison.Ordinal))
         {
-            return Path.Combine(repositoryRoot, CombineOutputPath(outputRoot, configuredPath[2..]));
+            return Path.Join(
+                ResolvePathFromRoot(repositoryRoot, outputRoot),
+                configuredPath[2..].Replace('/', Path.DirectorySeparatorChar));
         }
 
-        return Path.Combine(repositoryRoot, configuredPath);
+        return Path.Join(repositoryRoot, configuredPath);
     }
+
+    private static string ResolvePathFromRoot(string root, string path) =>
+        Path.GetFullPath(Path.IsPathRooted(path) ? path : Path.Join(root, path));
 
     private static string CombineOutputPath(string root, string relative)
     {

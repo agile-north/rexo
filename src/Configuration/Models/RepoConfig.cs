@@ -24,6 +24,7 @@ public sealed record RepoConfig(
 
     public RepoVersioningConfig? Versioning { get; init; }
     public List<RepoArtifactConfig>? Artifacts { get; init; }
+    public Dictionary<string, RepoEnvironmentConfig>? Environments { get; init; }
     public RepoRuntimeConfig? Runtime { get; init; }
 
     /// <summary>Output path contract resolved by Rexo. Defaults are applied when omitted.</summary>
@@ -161,6 +162,12 @@ public sealed record RepoStepContainerConfig(
 
     /// <summary>Registry entries only: name of another registry container to inherit from.</summary>
     public string? Extends { get; init; }
+
+    /// <summary>
+    /// Behavior when the requested container runtime is unavailable. Defaults to <c>error</c>;
+    /// <c>host</c> explicitly permits running the step on the host instead.
+    /// </summary>
+    public string? Fallback { get; init; }
 }
 
 public sealed record RepoStepContainerBuildConfig(
@@ -190,6 +197,8 @@ public sealed record RepoArtifactConfig(
     string Type,
     string? Name = null,
     Dictionary<string, JsonElement>? Settings = null);
+
+public sealed record RepoEnvironmentConfig(string Path);
 
 public sealed record RepoOutputsConfig
 {

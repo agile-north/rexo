@@ -10,7 +10,8 @@ This content has been reorganized for clarity.
 - [node policy](embedded/node.md) — Node.js toolchain overlay
 - [git-tag policy](embedded/git-tag.md) — Version tag creation
 
-These pages contain the same information, organized by policy for easier navigation.
+Use the split policy pages as the current detailed reference; this overview may not include
+newer command steps, options, or policy details.
 
 ## What "Embedded" Means
 
@@ -132,10 +133,12 @@ Options: none.
 Steps:
 
 1. `builtin:validate`
-2. `command:verify` (overlay contribution, when present)
-3. `command:test` (when present)
-4. `command:analyze` (when present)
-5. `command:security` (when present)
+2. `command:pre-verify` (when present)
+3. `command:verify` (overlay contribution, when present)
+4. `command:test` (when present)
+5. `command:analyze` (when present)
+6. `command:security` (when present)
+7. `command:post-verify` (when present; always runs after hard failures)
 
 Contract note:
 
@@ -152,8 +155,11 @@ Steps:
 
 1. `builtin:validate`
 2. `builtin:resolve-version`
-3. `builtin:build-artifacts`
-4. `builtin:tag-artifacts`
+3. `command:build` (layer continuation; skipped when no inner layer contributes steps)
+4. `command:pre-build` (when present)
+5. `builtin:build-artifacts`
+6. `builtin:tag-artifacts`
+7. `command:post-build` (when present; always runs after hard failures)
 
 #### tag
 
@@ -194,17 +200,19 @@ Options:
 
 Steps:
 
-1. `builtin:validate`
-2. `builtin:resolve-version`
-3. `command:verify`
-4. `builtin:build-artifacts`
-5. `builtin:tag-artifacts`
-6. `builtin:push-artifacts` when `{{options.push}}`, with `with.confirm = {{options.push}}`
+1. `command:pre-release` (when present)
+2. `command:verify` (when present)
+3. `command:build`
+4. `command:pre-push` (when `{{options.push}}` and present)
+5. `builtin:push-artifacts` when `{{options.push}}`, with `with.confirm = {{options.push}}`
+6. `command:post-push` (when `{{options.push}}` and present)
+7. `command:post-release` (when present; always runs after hard failures)
 
 Behavior notes:
 
 - `rx release` does not push.
 - `rx release --push` passes explicit push intent into builtin push logic.
+- The delegated `build` command validates, resolves the version, builds and tags configured artifacts, and runs optional build hooks.
 
 #### clean
 
@@ -336,7 +344,7 @@ Use when you want dotnet-centric command aliases and formatting helpers.
   "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
   "schemaVersion": "1.0",
   "name": "billing-service",
-  "extends": ["embedded:dotnet"],
+  "extends": ["embedded:standard", "embedded:dotnet"],
   "artifacts": [
     {
       "type": "nuget",
@@ -362,7 +370,7 @@ Recommended customization path for `embedded:dotnet` is the `vars.dotnet.*` bag 
 
 ```json
 {
-  "extends": ["embedded:dotnet", "embedded:standard"],
+  "extends": ["embedded:standard", "embedded:dotnet"],
   "vars": {
     "dotnet": {
       "solution": "solution.slnx",
@@ -420,4 +428,3 @@ Choose `embedded:dotnet` when:
 - `clean` is intentionally explicit and not part of default release pipelines.
 - Embedded templates can be overridden by repo commands/aliases as needed.
 - Coverage enablement for `embedded:dotnet` lives in the policy command overlay, not in core runtime defaults.
-

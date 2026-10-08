@@ -56,7 +56,7 @@ public sealed partial class RepoConfigurationLoader
             var configDir = Path.GetDirectoryName(configPath) ?? Directory.GetCurrentDirectory();
             var overlayPath = Path.IsPathRooted(overlayEnvPath)
                 ? overlayEnvPath
-                : Path.GetFullPath(Path.Combine(configDir, overlayEnvPath));
+                : Path.GetFullPath(Path.Join(configDir, overlayEnvPath));
 
             if (File.Exists(overlayPath))
             {
@@ -97,7 +97,7 @@ public sealed partial class RepoConfigurationLoader
 
             var basePath = Path.IsPathRooted(extendPath)
                 ? extendPath
-                : Path.GetFullPath(Path.Combine(configDir, extendPath));
+                : Path.GetFullPath(Path.Join(configDir, extendPath));
 
             if (visited.Contains(basePath))
             {
@@ -205,7 +205,7 @@ public sealed partial class RepoConfigurationLoader
 
             var path = Path.IsPathRooted(reference)
                 ? reference
-                : Path.GetFullPath(Path.Combine(baseDirectory!, reference));
+                : Path.GetFullPath(Path.Join(baseDirectory!, reference));
             key = path;
             fallbackName = Path.GetFileNameWithoutExtension(path);
             policyDirectory = Path.GetDirectoryName(path);
@@ -349,6 +349,7 @@ public sealed partial class RepoConfigurationLoader
             PolicySources = MergeLists(@base.PolicySources, child.PolicySources, child.MergeStrategy),
             Versioning = child.Versioning ?? @base.Versioning,
             Artifacts = MergeLists(@base.Artifacts, child.Artifacts, child.MergeStrategy),
+            Environments = MergeDictionaries(@base.Environments, child.Environments),
             Runtime = child.Runtime ?? @base.Runtime,
             Outputs = MergeOutputsConfig(@base.Outputs, child.Outputs),
             Settings = DeepMergeJsonMaps(@base.Settings, child.Settings),
@@ -1226,9 +1227,9 @@ public sealed partial class RepoConfigurationLoader
     {
         string[] candidates =
         [
-            Path.Combine(baseDirectory, schemaFileName),
-            Path.Combine(baseDirectory, "..", schemaFileName),
-            Path.Combine(baseDirectory, ".rexo", schemaFileName),
+            Path.Join(baseDirectory, schemaFileName),
+            Path.Join(baseDirectory, "..", schemaFileName),
+            Path.Join(baseDirectory, ".rexo", schemaFileName),
         ];
 
         return candidates.FirstOrDefault(File.Exists);

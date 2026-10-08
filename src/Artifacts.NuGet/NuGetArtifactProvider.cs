@@ -7,7 +7,7 @@ using Rexo.Core.Abstractions;
 using Rexo.Core.Environment;
 using Rexo.Core.Models;
 
-public sealed class NuGetArtifactProvider : IArtifactProvider
+public sealed class NuGetArtifactProvider : IArtifactProvider, IPreparedArtifactProvider
 {
     public static void Register(ArtifactProviderRegistry registry) =>
         registry.Register("nuget", new NuGetArtifactProvider());
@@ -22,6 +22,45 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
 
     public string Type => "nuget";
 
+    public async Task<PreparedArtifact> PrepareAsync(
+        ArtifactConfig artifact, ExecutionContext context, CancellationToken cancellationToken)
+    {
+        var version = context.Version?.NuGetVersion ?? context.Version?.SemVer
+            ?? throw new InvalidOperationException("Prepared NuGet publication requires a resolved version.");
+        var output = GetSetting(artifact, "output") ?? "artifacts/packages";
+        var paths = new List<string> { $"{output}/{artifact.Name}.{version}.nupkg" };
+        if (IsTrue(GetSetting(artifact.Settings, "symbols.enabled")))
+        {
+            var symbols = ResolveSymbolPattern(artifact, output, version);
+            if (symbols.Contains('*', StringComparison.Ordinal) || symbols.Contains('?', StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Prepared symbol publication requires an exact path, not a pattern.");
+            }
+            paths.Add(symbols);
+        }
+        return await PreparedArtifactFiles.PrepareAsync(artifact, paths, context.RepositoryRoot, cancellationToken);
+    }
+
+    public async Task ValidatePreparedAsync(
+        ArtifactConfig artifact, PreparedArtifact prepared, ExecutionContext context, CancellationToken cancellationToken)
+    {
+        var expected = await PrepareAsync(artifact, context, cancellationToken);
+        if (!PreparedArtifactFiles.SameOutputs(expected, prepared))
+        {
+            throw new InvalidOperationException("Prepared NuGet outputs do not match the configured package and version.");
+        }
+        await PreparedArtifactFiles.ValidateAsync(prepared, context.RepositoryRoot, cancellationToken);
+    }
+
+    public async Task<ArtifactPushResult> PushPreparedAsync(
+        ArtifactConfig artifact, PreparedArtifact prepared, ExecutionContext context, CancellationToken cancellationToken)
+    {
+        await ValidatePreparedAsync(artifact, prepared, context, cancellationToken);
+        var package = prepared.Outputs.Single(output => output.Reference.EndsWith(".nupkg", StringComparison.Ordinal));
+        var symbols = prepared.Outputs.SingleOrDefault(output => output.Reference.EndsWith(".snupkg", StringComparison.Ordinal));
+        return await PushPackagesAsync(artifact, context, [package.Reference], symbols?.Reference, cancellationToken);
+    }
+
     public async Task<ArtifactBuildResult> BuildAsync(
         ArtifactConfig artifact,
         ExecutionContext context,
@@ -31,7 +70,8 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
         var output = GetSetting(artifact, "output") ?? "artifacts/packages";
         var version = context.Version?.SemVer;
 
-        Directory.CreateDirectory(Path.Combine(context.RepositoryRoot, output));
+        var outputPath = ResolveRepositoryPath(context.RepositoryRoot, output);
+        Directory.CreateDirectory(outputPath);
 
         var args = $"pack {project} --configuration Release --output {output}";
         if (!string.IsNullOrEmpty(version))
@@ -42,11 +82,12 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
         Console.WriteLine($"  > dotnet {args}");
 
         var result = await _runDotnetAsync(args, context.RepositoryRoot, cancellationToken);
+        WriteToolOutput(result.Output);
 
         return new ArtifactBuildResult(
             Name: artifact.Name,
             Success: result.ExitCode == 0,
-            Location: result.ExitCode == 0 ? Path.Combine(context.RepositoryRoot, output) : null);
+            Location: result.ExitCode == 0 ? outputPath : null);
     }
 
     public Task<ArtifactTagResult> TagAsync(
@@ -71,6 +112,13 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
         var packageVersion = context.Version?.NuGetVersion ?? context.Version?.SemVer;
         var packageTargets = ResolvePackageTargets(context.RepositoryRoot, output, artifact.Name, packageVersion);
         var symbolPattern = ResolveSymbolPattern(artifact, output, packageVersion);
+        return await PushPackagesAsync(artifact, context, packageTargets, symbolPattern, cancellationToken);
+    }
+
+    private async Task<ArtifactPushResult> PushPackagesAsync(
+        ArtifactConfig artifact, ExecutionContext context, IReadOnlyList<string> packageTargets,
+        string? symbolPattern, CancellationToken cancellationToken)
+    {
         var fileEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
         var source = ResolveSource(artifact, fileEnv);
         var auth = ResolveAuth(artifact, source, GetSetting(artifact.Settings, "target.apiKeyEnv"), fileEnv);
@@ -88,9 +136,10 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
                 args += $" --api-key {auth.Secret}";
             }
 
-            Console.WriteLine($"  > dotnet {args}");
+            Console.WriteLine($"  > dotnet {MaskSecret(args, auth.Secret)}");
 
             var result = await _runDotnetAsync(args, context.RepositoryRoot, cancellationToken);
+            WriteToolOutput(result.Output, auth.Secret);
             if (result.ExitCode != 0)
             {
                 return new ArtifactPushResult(artifact.Name, false, Array.Empty<string>());
@@ -100,7 +149,7 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
         var published = new List<string> { $"{source}/{artifact.Name}" };
 
         var pushSymbols = IsTrue(GetSetting(artifact.Settings, "symbols.enabled"));
-        if (pushSymbols && HasMatchingFiles(context.RepositoryRoot, symbolPattern))
+        if (pushSymbols && symbolPattern is not null && HasMatchingFiles(context.RepositoryRoot, symbolPattern))
         {
             var symbolSource = ResolveSymbolSource(artifact, source, fileEnv);
             var symbolAuth = ResolveSymbolAuth(
@@ -122,9 +171,10 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
                 symbolArgs += $" --api-key {symbolAuth.Secret}";
             }
 
-            Console.WriteLine($"  > dotnet {symbolArgs}");
+            Console.WriteLine($"  > dotnet {MaskSecret(symbolArgs, symbolAuth.Secret)}");
 
             var symbolResult = await _runDotnetAsync(symbolArgs, context.RepositoryRoot, cancellationToken);
+            WriteToolOutput(symbolResult.Output, auth.Secret, symbolAuth.Secret);
             if (symbolResult.ExitCode != 0)
             {
                 return new ArtifactPushResult(artifact.Name, false, Array.Empty<string>());
@@ -148,7 +198,7 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
 
         var absoluteDirectory = string.IsNullOrWhiteSpace(directory)
             ? repositoryRoot
-            : Path.Combine(repositoryRoot, directory);
+            : ResolveRepositoryPath(repositoryRoot, directory);
 
         return Directory.Exists(absoluteDirectory)
             && Directory.EnumerateFiles(absoluteDirectory, searchPattern, SearchOption.TopDirectoryOnly).Any();
@@ -208,7 +258,9 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
         string extension,
         bool includeSymbols)
     {
-        var outputDirectory = Path.Combine(repositoryRoot, output.Replace('/', Path.DirectorySeparatorChar));
+        var outputDirectory = ResolveRepositoryPath(
+            repositoryRoot,
+            output.Replace('/', Path.DirectorySeparatorChar));
         if (!Directory.Exists(outputDirectory))
         {
             return Array.Empty<string>();
@@ -248,6 +300,12 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
         matches.Sort(StringComparer.OrdinalIgnoreCase);
         return matches;
     }
+
+    private static string ResolveRepositoryPath(string repositoryRoot, string path) =>
+        Path.GetFullPath(
+            Path.IsPathRooted(path)
+                ? path
+                : Path.Join(repositoryRoot, path));
 
     private static FeedAuthResolution ResolveSymbolAuth(
         ArtifactConfig artifact,
@@ -334,11 +392,29 @@ public sealed class NuGetArtifactProvider : IArtifactProvider
         var stdout = await stdoutTask;
         var stderr = await stderrTask;
 
-        if (!string.IsNullOrWhiteSpace(stdout)) Console.WriteLine(stdout);
-        if (!string.IsNullOrWhiteSpace(stderr)) Console.Error.WriteLine(stderr);
-
         return (process.ExitCode, stdout + stderr);
     }
+
+    private static void WriteToolOutput(string output, params string?[] secrets)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            return;
+        }
+
+        var maskedOutput = output;
+        foreach (var secret in secrets.Where(secret => !string.IsNullOrEmpty(secret)))
+        {
+            maskedOutput = MaskSecret(maskedOutput, secret);
+        }
+
+        Console.WriteLine(maskedOutput);
+    }
+
+    private static string MaskSecret(string text, string? secret) =>
+        string.IsNullOrEmpty(secret)
+            ? text
+            : text.Replace(secret, "***", StringComparison.Ordinal);
 
     private static string ResolveSource(
         ArtifactConfig artifact,

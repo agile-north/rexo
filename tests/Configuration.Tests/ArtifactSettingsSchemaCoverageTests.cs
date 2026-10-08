@@ -12,7 +12,7 @@ public sealed class ArtifactSettingsSchemaCoverageTests
         Environment.SetEnvironmentVariable("REXO_OVERLAY", null);
 
         var dir = CreateTempDirectory();
-        var configPath = Path.Combine(dir, "rexo.json");
+        var configPath = Path.Join(dir, "rexo.json");
         await File.WriteAllTextAsync(
             configPath,
             """
@@ -112,7 +112,7 @@ public sealed class ArtifactSettingsSchemaCoverageTests
         Environment.SetEnvironmentVariable("REXO_OVERLAY", null);
 
         var dir = CreateTempDirectory();
-        var configPath = Path.Combine(dir, "rexo.json");
+        var configPath = Path.Join(dir, "rexo.json");
         await File.WriteAllTextAsync(
             configPath,
             """
@@ -159,7 +159,7 @@ public sealed class ArtifactSettingsSchemaCoverageTests
         Environment.SetEnvironmentVariable("REXO_OVERLAY", null);
 
         var dir = CreateTempDirectory();
-        var configPath = Path.Combine(dir, "rexo.json");
+        var configPath = Path.Join(dir, "rexo.json");
         await File.WriteAllTextAsync(
             configPath,
             """
@@ -199,7 +199,7 @@ public sealed class ArtifactSettingsSchemaCoverageTests
 
     private static string CreateTempDirectory()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-artifact-schema-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-artifact-schema-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         return dir;
     }

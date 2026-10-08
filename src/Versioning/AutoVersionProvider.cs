@@ -43,29 +43,29 @@ public sealed class AutoVersionProvider : IVersionProvider
     public static string DetectProvider(string repositoryRoot)
     {
         // nbgv: version.json or nbgv.json at repo root (Nerdbank.GitVersioning convention)
-        if (File.Exists(Path.Combine(repositoryRoot, "version.json")) ||
-            File.Exists(Path.Combine(repositoryRoot, "nbgv.json")))
+        if (File.Exists(Path.Join(repositoryRoot, "version.json")) ||
+            File.Exists(Path.Join(repositoryRoot, "nbgv.json")))
         {
             return "nbgv";
         }
 
         // gitversion: GitVersion.yml / .yaml at repo root or inside .gitversion/
-        if (File.Exists(Path.Combine(repositoryRoot, "GitVersion.yml")) ||
-            File.Exists(Path.Combine(repositoryRoot, "GitVersion.yaml")) ||
-            File.Exists(Path.Combine(repositoryRoot, ".gitversion", "GitVersion.yml")) ||
-            File.Exists(Path.Combine(repositoryRoot, ".gitversion", "GitVersion.yaml")))
+        if (File.Exists(Path.Join(repositoryRoot, "GitVersion.yml")) ||
+            File.Exists(Path.Join(repositoryRoot, "GitVersion.yaml")) ||
+            File.Exists(Path.Join(repositoryRoot, ".gitversion", "GitVersion.yml")) ||
+            File.Exists(Path.Join(repositoryRoot, ".gitversion", "GitVersion.yaml")))
         {
             return "gitversion";
         }
 
         // minver: .minverrc at repo root
-        if (File.Exists(Path.Combine(repositoryRoot, ".minverrc")))
+        if (File.Exists(Path.Join(repositoryRoot, ".minverrc")))
         {
             return "minver";
         }
 
         // git: .git directory present — use tag-based versioning
-        if (Directory.Exists(Path.Combine(repositoryRoot, ".git")))
+        if (Directory.Exists(Path.Join(repositoryRoot, ".git")))
         {
             return "git";
         }

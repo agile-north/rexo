@@ -21,8 +21,6 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <PackageReadmeFile>PACKAGE_README.generated.md</PackageReadmeFile>
-    <_DocTag Condition="'$(Version)' != ''">v$(Version)</_DocTag>
-    <_DocTag Condition="'$(_DocTag)' == ''">release/next</_DocTag>
     <!-- RexoSchemaTag is derived from rexo.schema.json $id in Directory.Build.props -->
     <InternalsVisibleTo>Rexo.Configuration.Tests</InternalsVisibleTo>
   </PropertyGroup>
@@ -46,24 +44,36 @@
   <ItemGroup>
     <None Include="@(PackagedMarkdownTemplate -> '%(GeneratedFile)')" Pack="true" PackagePath="%(PackagePath)" Visible="false" />
   </ItemGroup>
-  <!--
-    Batched target: runs once per PackagedMarkdownTemplate item.
-    Replaces __REXO_DOC_TAG__ with the resolved doc tag and writes the generated file.
-  -->
+  <UsingTask TaskName="RenderPackagedMarkdown"
+             TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <TemplateFile ParameterType="System.String" Required="true" />
+      <OutputFile ParameterType="System.String" Required="true" />
+      <DocTag ParameterType="System.String" Required="true" />
+      <SchemaTag ParameterType="System.String" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        var markdown = System.IO.File.ReadAllText(TemplateFile)
+            .Replace("__REXO_DOC_TAG__", DocTag)
+            .Replace("__REXO_SCHEMA_TAG__", SchemaTag);
+        System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(OutputFile));
+        System.IO.File.WriteAllText(OutputFile, markdown, new System.Text.UTF8Encoding(false));
+      ]]></Code>
+    </Task>
+  </UsingTask>
   <Target Name="GeneratePackagedMarkdown"
-          BeforeTargets="GenerateNuspec"
-          Outputs="%(PackagedMarkdownTemplate.GeneratedFile)">
-    <ReadLinesFromFile File="%(PackagedMarkdownTemplate.Identity)">
-      <Output TaskParameter="Lines" ItemName="_MdTemplateLines" />
-    </ReadLinesFromFile>
-    <ItemGroup>
-      <_MdGeneratedLines Include="@(_MdTemplateLines->Replace('__REXO_DOC_TAG__', '$(_DocTag)')->Replace('__REXO_SCHEMA_TAG__', '$(RexoSchemaTag)'))" />
-    </ItemGroup>
-    <WriteLinesToFile File="%(PackagedMarkdownTemplate.GeneratedFile)" Lines="@(_MdGeneratedLines)" Overwrite="true" />
-    <ItemGroup>
-      <_MdTemplateLines Remove="@(_MdTemplateLines)" />
-      <_MdGeneratedLines Remove="@(_MdGeneratedLines)" />
-    </ItemGroup>
+          BeforeTargets="GenerateNuspec">
+    <PropertyGroup>
+      <_DocTag Condition="'$(_DocTag)' == '' and '$(Version)' != ''">v$(Version)</_DocTag>
+    </PropertyGroup>
+    <Error Condition="'$(_DocTag)' == ''" Text="A package version is required for versioned documentation links." />
+    <Error Condition="'$(RexoSchemaVersion)' == ''" Text="Could not resolve the schema version from rexo.schema.json." />
+    <RenderPackagedMarkdown TemplateFile="%(PackagedMarkdownTemplate.Identity)"
+                            OutputFile="%(PackagedMarkdownTemplate.GeneratedFile)"
+                            DocTag="$(_DocTag)"
+                            SchemaTag="$(RexoSchemaTag)" />
   </Target>
   <ItemGroup>
     <PackageReference Include="System.CommandLine" />

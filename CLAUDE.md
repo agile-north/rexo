@@ -21,7 +21,7 @@ Build must be clean: **0 errors, 0 warnings**. Tests must all pass before commit
 - **Product**: Rexo — config-driven repository automation CLI
 - **CLI command**: `rx`
 - **Stack**: .NET 10, C#, xUnit, Spectre.Console, NJsonSchema
-- **Solution**: `solution.slnx` (15 src + 4 test projects)
+- **Solution**: `solution.slnx`
 - **Config file**: `.rexo/rexo.yaml` (default; `.rexo/rexo.json` and root `rexo.yaml|json` also supported) — requires `$schema` (key or YAML modeline) + `schemaVersion: "1.0"`
 - **Schema**: `rexo.schema.json` (repo root)
 
@@ -44,7 +44,8 @@ Build must be clean: **0 errors, 0 warnings**. Tests must all pass before commit
 
 ## What is implemented
 
-See `docs/todo.md` for the complete checklist. Working today:
+`docs/todo.md` is a historical scope checklist; current production-hardening status is in
+`docs/ROADMAP.md`. Implemented behavior includes:
 
 - CLI routing (built-in + config commands, multi-word resolution, global flags)
 - Config loading with JSON Schema validation
@@ -52,18 +53,23 @@ See `docs/todo.md` for the complete checklist. Working today:
 - Core built-in step primitives (validate, resolve-version, artifacts lifecycle, config-resolved, config-materialize, etc.)
 - Policy-overlay commands for toolchains (`test`, `analyze`, `verify` via embedded overlays)
 - Version providers: `fixed`, `env`, `gitversion`, `minver`, `nbgv`, `git`
-- Artifact providers: `docker`, `nuget`, `helm-oci`
+- Artifact providers: Docker, NuGet, Helm/Helm OCI, npm, PyPI, Maven, Gradle, RubyGems, Terraform, and generic file packaging
 - Git + CI environment detection
 - Spectre.Console rich output renderer + Blazor/RazorConsole interactive TUI (`rx ui`)
 - Dotnet and node policy overlays for test/analyze/verify flows
 - `extends` config merge, policy-provided commands, parallel step execution, output capture
 - `config resolved` / `config sources` / `config materialize` sub-commands
 - Artifact manifest file output, secret masking, structured error taxonomy
-- 189 passing tests
+- Full-suite counts change as coverage grows; run the Release build and tests before handoff.
 
 ## What is not yet implemented
 
-The implementation is feature-complete per `docs/scope.md`. No known gaps remain.
+Production-hardening status and remaining acceptance are tracked in [docs/ROADMAP.md](docs/ROADMAP.md);
+older scope/checklist entries are historical and must not be treated as proof that the roadmap is
+complete. Current limits include local-file-only promotion (no remote deploy or registry-tag
+promotion), no generated SBOM or signed attestation, and layer-level rather than exact per-file
+configuration provenance. NuGet push masks API keys in Rexo output, but the key is still passed to
+`dotnet nuget push` as a process argument.
 
 ---
 
@@ -82,4 +88,3 @@ The implementation is feature-complete per `docs/scope.md`. No known gaps remain
 | `src/Templating/TemplateRenderer.cs` | Template variable/filter engine |
 | `src/Configuration/RepoConfigurationLoader.cs` | Config load + schema validation |
 | `rexo.schema.json` | JSON Schema for the rexo config (YAML or JSON) |
-

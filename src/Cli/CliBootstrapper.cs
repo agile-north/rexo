@@ -27,8 +27,20 @@ using Rexo.Versioning;
 /// </summary>
 internal static class CliBootstrapper
 {
-    public static async Task<(CommandRegistry registry, DefaultCommandExecutor executor, RepoConfig? config)>
-        BuildServicesAsync(string workingDir, bool debug, IReadOnlyList<string>? setOverrides, CancellationToken cancellationToken)
+    public static async Task<(
+        CommandRegistry registry,
+        DefaultCommandExecutor executor,
+        RepoConfig? config,
+        ConfigProvenanceSnapshot provenance)>
+        BuildServicesAsync(
+            string workingDir,
+            bool debug,
+            IReadOnlyList<string>? setOverrides,
+            CancellationToken cancellationToken,
+            bool updatePolicies = false,
+            bool requirePolicyLock = false,
+            bool captureConfigProvenance = false,
+            bool registerConfigCommands = true)
     {
         if (debug) Console.WriteLine($"[debug] Loading configuration from {workingDir}");
 
@@ -40,7 +52,13 @@ internal static class CliBootstrapper
         PolicyConfig? policyConfig = null;
         if (config is not null)
         {
-            policyConfig = await ConfigBuilder.LoadAndMergePoliciesAsync(config, workingDir, debug, cancellationToken);
+            policyConfig = await ConfigBuilder.LoadAndMergePoliciesAsync(
+                config,
+                workingDir,
+                debug,
+                cancellationToken,
+                ignorePolicyLock: updatePolicies,
+                requirePolicyLock: requirePolicyLock);
 
             // Policy defaults (vars, settings, containers, ...) sit underneath the repo config; the repo always wins.
             config = RepoConfigurationLoader.ApplyPolicyDefaults(config, policyConfig);
@@ -54,7 +72,11 @@ internal static class CliBootstrapper
             if (debug)
             {
                 foreach (var s in setOverrides)
-                    Console.WriteLine($"[debug] --set override: {s}");
+                {
+                    var separator = s.IndexOf('=', StringComparison.Ordinal);
+                    var path = separator > 0 ? s[..separator] : "<invalid>";
+                    Console.WriteLine($"[debug] --set override: {path}=<redacted>");
+                }
             }
 
             var (mergedConfig, warnings) = ConfigBuilder.ApplySetOverridesWithWarnings(effectiveConfig, setOverrides);
@@ -70,16 +92,28 @@ internal static class CliBootstrapper
         // Create command registry
         var configPath = ConfigFileLocator.FindConfigPath(workingDir)
             ?? ConfigFileLocator.GetDefaultConfigPath(workingDir);
+        var repositoryLayers = captureConfigProvenance && File.Exists(configPath)
+            ? await ConfigProvenanceReader.ReadRepositoryLayersAsync(configPath, cancellationToken)
+            : Array.Empty<ConfigLayerSnapshot>();
         var registry = BuiltinCommandRegistration.CreateDefault(effectiveConfig, File.Exists(configPath) ? configPath : null);
         var executor = new DefaultCommandExecutor(registry);
 
         // Register config commands if config is present
-        if (config is not null)
+        if (config is not null && registerConfigCommands)
         {
             RegisterConfigCommands(registry, config, workingDir, executor, policyConfig ?? new PolicyConfig());
         }
 
-        return (registry, executor, effectiveConfig);
+        return (
+            registry,
+            executor,
+            effectiveConfig,
+            new ConfigProvenanceSnapshot(
+                configBeforePolicyDefaults,
+                policyConfig,
+                setOverrides ?? [],
+                File.Exists(configPath) ? configPath : null,
+                repositoryLayers));
     }
 
     private static void RegisterConfigCommands(
@@ -119,3 +153,10 @@ internal static class CliBootstrapper
         configLoader.LoadPolicyCommandsInto(registry, policyConfig, config, workingDir, executor);
     }
 }
+
+internal sealed record ConfigProvenanceSnapshot(
+    RepoConfig? RepositoryConfig,
+    PolicyConfig? PolicyConfig,
+    IReadOnlyList<string> SetOverrides,
+    string? ConfigPath,
+    IReadOnlyList<ConfigLayerSnapshot> RepositoryLayers);

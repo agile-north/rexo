@@ -58,12 +58,12 @@ public sealed class VersioningTests
         var original = Environment.GetEnvironmentVariable(envVar);
         Environment.SetEnvironmentVariable(envVar, null);
 
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-version-env-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(dir, ".rexo"));
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-version-env-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(dir, ".rexo"));
 
         try
         {
-            await File.WriteAllTextAsync(Path.Combine(dir, ".rexo", ".env"), $"{envVar}=9.8.7\n");
+            await File.WriteAllTextAsync(Path.Join(dir, ".rexo", ".env"), $"{envVar}=9.8.7\n");
 
             var provider = new EnvVersionProvider();
             var config = new VersioningConfig(
@@ -136,7 +136,7 @@ public sealed class VersioningTests
     [Fact]
     public void AutoDetectReturnsFixedWhenNoEvidence()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-auto-empty-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-auto-empty-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         try
         {
@@ -152,8 +152,8 @@ public sealed class VersioningTests
     [Fact]
     public void AutoDetectReturnsGitWhenDotGitPresent()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-auto-git-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(dir, ".git"));
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-auto-git-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(dir, ".git"));
         try
         {
             var detected = AutoVersionProvider.DetectProvider(dir);
@@ -168,11 +168,11 @@ public sealed class VersioningTests
     [Fact]
     public void AutoDetectReturnsNbgvWhenVersionJsonPresent()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-auto-nbgv-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-auto-nbgv-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         try
         {
-            File.WriteAllText(Path.Combine(dir, "version.json"), "{}");
+            File.WriteAllText(Path.Join(dir, "version.json"), "{}");
             var detected = AutoVersionProvider.DetectProvider(dir);
             Assert.Equal("nbgv", detected);
         }
@@ -185,11 +185,11 @@ public sealed class VersioningTests
     [Fact]
     public void AutoDetectReturnsGitVersionWhenGitVersionYmlPresent()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-auto-gitversion-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-auto-gitversion-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         try
         {
-            File.WriteAllText(Path.Combine(dir, "GitVersion.yml"), "mode: ContinuousDelivery");
+            File.WriteAllText(Path.Join(dir, "GitVersion.yml"), "mode: ContinuousDelivery");
             var detected = AutoVersionProvider.DetectProvider(dir);
             Assert.Equal("gitversion", detected);
         }
@@ -202,11 +202,11 @@ public sealed class VersioningTests
     [Fact]
     public void AutoDetectReturnsMinVerWhenMinverrcPresent()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-auto-minver-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-auto-minver-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         try
         {
-            File.WriteAllText(Path.Combine(dir, ".minverrc"), "tag-prefix: v");
+            File.WriteAllText(Path.Join(dir, ".minverrc"), "tag-prefix: v");
             var detected = AutoVersionProvider.DetectProvider(dir);
             Assert.Equal("minver", detected);
         }
@@ -219,12 +219,12 @@ public sealed class VersioningTests
     [Fact]
     public void AutoDetectPrefersNbgvOverGit()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-auto-priority-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(dir, ".git"));
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-auto-priority-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(dir, ".git"));
         try
         {
             // Both .git and version.json present — nbgv should win
-            File.WriteAllText(Path.Combine(dir, "version.json"), "{}");
+            File.WriteAllText(Path.Join(dir, "version.json"), "{}");
             var detected = AutoVersionProvider.DetectProvider(dir);
             Assert.Equal("nbgv", detected);
         }
@@ -237,7 +237,7 @@ public sealed class VersioningTests
     [Fact]
     public async Task AutoVersionProviderFallsBackToFixedWithNoEvidence()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-auto-fallback-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-auto-fallback-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
         try
         {

@@ -1,28 +1,25 @@
 name: release
 
 on:
+  pull_request:
+    branches: [main, alpha, alpha-*, beta, beta-*, edge, edge-*]
   push:
-    branches:
-      - main
-      - alpha
-      - alpha-*
-      - beta
-      - beta-*
-      - edge
-      - edge-*
+    branches: [main, alpha, alpha-*, beta, beta-*, edge, edge-*]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish from a release branch
+        type: boolean
+        default: false
 
 permissions:
   contents: write
-  checks: write
-  pull-requests: write
   packages: write
-  id-token: write   # required for OIDC trusted publishing to NuGet.org
+  id-token: write
 
 jobs:
-  pack-and-publish:
+  release:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -43,101 +40,79 @@ jobs:
         id: gitversion
         uses: gittools/actions/gitversion/execute@v3
 
-      - name: Restore
-        run: dotnet restore
+      - name: Select publication
+        id: publication
+        env:
+          REQUESTED: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish) }}
+          NUGET_ORG_USER: ${{ secrets.NUGET_ORG_USER }}
+          GITHUB_PACKAGES: ${{ vars.PUBLISH_TO_GITHUB_PACKAGES }}
+        run: |
+          publish=false
+          source=
+          if [ "$REQUESTED" = true ] && [ "$GITHUB_REF_TYPE" = branch ]; then
+            case "$GITHUB_REF_NAME" in
+              main|alpha|alpha-*|beta|beta-*|edge|edge-*)
+                if [ -n "$NUGET_ORG_USER" ]; then
+                  source=https://api.nuget.org/v3/index.json
+                  publish=true
+                elif [ "$GITHUB_PACKAGES" = true ]; then
+                  source="https://nuget.pkg.github.com/${GITHUB_REPOSITORY_OWNER}/index.json"
+                  publish=true
+                fi
+                ;;
+            esac
+          fi
+          echo "enabled=$publish" >> "$GITHUB_OUTPUT"
+          echo "source=$source" >> "$GITHUB_OUTPUT"
 
-      - name: Build
-        run: dotnet build solution.slnx -c Release -p:Version=${{ steps.gitversion.outputs.semVer }} --no-restore
-
-      - name: Test
-        run: >
-          dotnet test solution.slnx -c Release --no-build
-          --logger "trx;LogFilePrefix=test-results"
-          --results-directory TestResults
-          --collect:"XPlat Code Coverage"
-
-      - name: Publish test results to GitHub Checks
-        if: always()
-        uses: dorny/test-reporter@v3
+      - name: NuGet login
+        id: nuget-login
+        if: ${{ steps.publication.outputs.enabled == 'true' && steps.publication.outputs.source == 'https://api.nuget.org/v3/index.json' }}
+        uses: NuGet/login@v1
         with:
-          name: .NET Test Results (Release)
-          path: TestResults/**/*.trx
-          reporter: dotnet-trx
-          fail-on-error: true
+          user: ${{ secrets.NUGET_ORG_USER }}
+
+      - name: Bootstrap source-built Rexo
+        run: dotnet publish src/Cli/Cli.csproj -c Release --output artifacts/rx-bootstrap
+
+      - name: Run Rexo release lifecycle
+        env:
+          GITVERSION_SEMVER: ${{ steps.gitversion.outputs.semVer }}
+          REXO_PUBLISH: ${{ steps.publication.outputs.enabled }}
+          NUGET_TARGET_SOURCE: ${{ steps.publication.outputs.source }}
+          NUGET_API_KEY: ${{ steps.publication.outputs.enabled == 'true' && (steps.publication.outputs.source == 'https://api.nuget.org/v3/index.json' && steps.nuget-login.outputs.NUGET_API_KEY || steps.publication.outputs.source != 'https://api.nuget.org/v3/index.json' && github.token) || '' }}
+        run: dotnet artifacts/rx-bootstrap/Rexo.Cli.dll --non-interactive --json-file artifacts/selfhost/release.json release
 
       - name: Generate coverage summary
-        if: always()
+        if: ${{ always() && hashFiles('artifacts/test-results/**/*.cobertura.xml') != '' }}
         run: |
-          dotnet tool install --global dotnet-reportgenerator-globaltool
-          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
-          reportgenerator \
-            -reports:"**/coverage.cobertura.xml" \
-            -targetdir:"CoverageReport" \
-            -reporttypes:"Cobertura;MarkdownSummaryGithub"
-          cat CoverageReport/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
+          dotnet artifacts/rx-bootstrap/Rexo.Cli.dll --non-interactive ci coverage
+          cat artifacts/coverage-report/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload test results artifact
+      - name: Upload lifecycle evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: release-test-results
-          path: TestResults/**/*.trx
-          if-no-files-found: warn
-
-      - name: Upload coverage artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-coverage-report
+          name: lifecycle-evidence
           path: |
-            CoverageReport/**
-            **/coverage.cobertura.xml
+            artifacts/selfhost/**
+            artifacts/packages/*.nupkg
+            artifacts/test-results/**
+            artifacts/sarif/**
+            artifacts/coverage-report/**
           if-no-files-found: warn
 
-      - name: Pack
-        run: dotnet pack src/Cli/Cli.csproj -c Release -o artifacts/packages -p:Version=${{ steps.gitversion.outputs.semVer }} --no-build
-
-      - name: Create and push release tag
-        env:
-          TAG_NAME: v${{ steps.gitversion.outputs.semVer }}
+      - name: Publish schema branch
+        if: ${{ steps.publication.outputs.enabled == 'true' }}
         run: |
-          git fetch --tags
-          if git rev-parse "$TAG_NAME" >/dev/null 2>&1; then
-            echo "Tag $TAG_NAME already exists; continuing."
-          else
-            git tag "$TAG_NAME" "$GITHUB_SHA"
-            git push origin "$TAG_NAME"
-          fi
-
-      - name: Publish schema branch (schema/v<major.minor>, moving)
-        run: |
-          SCHEMA_VERSION=$(jq -r '.properties.schemaVersion.const' rexo.schema.json)
-          SCHEMA_BRANCH="schema/v${SCHEMA_VERSION}"
-          git push origin "$GITHUB_SHA:refs/heads/$SCHEMA_BRANCH" --force
-          echo "Updated schema branch $SCHEMA_BRANCH to $GITHUB_SHA"
+          schema_version=$(jq -r '.properties.schemaVersion.const' rexo.schema.json)
+          git push origin "$GITHUB_SHA:refs/heads/schema/v${schema_version}" --force
 
       - name: Create GitHub Release
+        if: ${{ steps.publication.outputs.enabled == 'true' }}
         uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ steps.gitversion.outputs.semVer }}
           target_commitish: ${{ github.sha }}
           prerelease: ${{ steps.gitversion.outputs.preReleaseTag != '' }}
           generate_release_notes: true
-
-      - name: Publish to GitHub Packages
-        env:
-          NUGET_ORG_USER: ${{ secrets.NUGET_ORG_USER }}
-        if: ${{ env.NUGET_ORG_USER == '' }}
-        run: dotnet nuget push "artifacts/packages/*.nupkg" --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" --api-key "${{ secrets.GITHUB_TOKEN }}" --skip-duplicate
-
-      - name: NuGet login (OIDC -> temporary API key)
-        env:
-          NUGET_ORG_USER: ${{ secrets.NUGET_ORG_USER }}
-        id: nuget-login
-        if: ${{ env.NUGET_ORG_USER != '' }}
-        uses: NuGet/login@v1
-        with:
-          user: ${{ secrets.NUGET_ORG_USER }}
-
-      - name: Push to NuGet.org (trusted publishing)
-        run: dotnet nuget push "artifacts/packages/*.nupkg" --source "https://api.nuget.org/v3/index.json" --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" --skip-duplicate

@@ -31,7 +31,7 @@ public sealed class InitCommandTests
 
             var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
 
-            Assert.True(result.Success, result.Message);
+            Assert.True(result.Success, result.Message ?? string.Empty);
             var configPath = Path.Join(dir, ".rexo", "rexo.yaml");
             var policyPath = Path.Join(dir, ".rexo", "policy.yaml");
             Assert.True(File.Exists(configPath));
@@ -95,7 +95,7 @@ public sealed class InitCommandTests
                 WorkingDirectory: dir);
 
             var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
-            Assert.True(result.Success, result.Message);
+            Assert.True(result.Success, result.Message ?? string.Empty);
 
             var configPath = Rexo.Configuration.ConfigFileLocator.FindConfigPath(dir);
             var policyPath = Rexo.Configuration.ConfigFileLocator.FindPolicyPath(dir);
@@ -119,7 +119,7 @@ public sealed class InitCommandTests
     [InlineData("yml")]
     public async Task InitRejectsInvalidFormat(string format)
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-format-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-format-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         try
@@ -146,7 +146,7 @@ public sealed class InitCommandTests
     [Fact]
     public async Task InitCreatesConfigInDotRexoByDefaultWhenNonInteractive()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         try
@@ -164,10 +164,10 @@ public sealed class InitCommandTests
             var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
 
             Assert.True(result.Success);
-            var configPath = Path.Combine(dir, ".rexo", "rexo.json");
+            var configPath = Path.Join(dir, ".rexo", "rexo.json");
             Assert.True(File.Exists(configPath));
             // Default schema source is remote — no local schema file written.
-            var schemaPath = Path.Combine(dir, ".rexo", "rexo.schema.json");
+            var schemaPath = Path.Join(dir, ".rexo", "rexo.schema.json");
             Assert.False(File.Exists(schemaPath));
             var content = await File.ReadAllTextAsync(configPath);
             Assert.Contains("\"$schema\": \"https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json\"", content, StringComparison.Ordinal);
@@ -183,12 +183,12 @@ public sealed class InitCommandTests
     [Fact]
     public async Task InitReturnsFailureWhenConfigExistsAndNoForce()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-exists-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-exists-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         try
         {
-            var existingPath = Path.Combine(dir, "rexo.json");
+            var existingPath = Path.Join(dir, "rexo.json");
             await File.WriteAllTextAsync(existingPath, "{}");
 
             var registry = BuiltinCommandRegistration.CreateDefault();
@@ -213,9 +213,60 @@ public sealed class InitCommandTests
     }
 
     [Fact]
+    public async Task InitForceRemovesOnlySupersededDotRexoVariants()
+    {
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-force-variants-{Guid.NewGuid():N}");
+        var rexoDir = Path.Join(dir, ".rexo");
+        Directory.CreateDirectory(rexoDir);
+
+        try
+        {
+            var rootConfig = Path.Join(dir, "rexo.json");
+            await File.WriteAllTextAsync(Path.Join(rexoDir, "rexo.json"), "old-json-config");
+            await File.WriteAllTextAsync(Path.Join(rexoDir, "rexo.yml"), "old-yaml-config");
+            await File.WriteAllTextAsync(Path.Join(rexoDir, "policy.json"), "old-json-policy");
+            await File.WriteAllTextAsync(Path.Join(rexoDir, "policy.yml"), "old-yaml-policy");
+            await File.WriteAllTextAsync(rootConfig, "preserve-root-config");
+
+            var executor = new DefaultCommandExecutor(BuiltinCommandRegistration.CreateDefault());
+            var invocation = new CommandInvocation(
+                new Dictionary<string, string>(),
+                new Dictionary<string, string?>
+                {
+                    ["yes"] = "true",
+                    ["force"] = "true",
+                    ["format"] = "yaml",
+                    ["with-policy"] = "true",
+                    ["policy"] = "standard",
+                },
+                Json: false,
+                JsonFile: null,
+                WorkingDirectory: dir);
+
+            var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
+
+            Assert.True(result.Success, result.Message);
+            Assert.True(File.Exists(Path.Join(rexoDir, "rexo.yaml")));
+            Assert.True(File.Exists(Path.Join(rexoDir, "policy.yaml")));
+            Assert.False(File.Exists(Path.Join(rexoDir, "rexo.json")));
+            Assert.False(File.Exists(Path.Join(rexoDir, "rexo.yml")));
+            Assert.False(File.Exists(Path.Join(rexoDir, "policy.json")));
+            Assert.False(File.Exists(Path.Join(rexoDir, "policy.yml")));
+            Assert.Equal("preserve-root-config", await File.ReadAllTextAsync(rootConfig));
+            Assert.Contains($"Removed superseded config: {Path.Join(".rexo", "rexo.json")}", result.Message ?? string.Empty, StringComparison.Ordinal);
+            Assert.Contains($"Removed superseded config: {Path.Join(".rexo", "policy.json")}", result.Message ?? string.Empty, StringComparison.Ordinal);
+            Assert.Contains("Preserved out-of-slot config candidate: rexo.json", result.Message ?? string.Empty, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
     public async Task InitCreatesPolicyWhenRequested()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-policy-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-policy-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         try
@@ -239,7 +290,7 @@ public sealed class InitCommandTests
             var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
 
             Assert.True(result.Success);
-            var policyPath = Path.Combine(dir, ".rexo", "policy.json");
+            var policyPath = Path.Join(dir, ".rexo", "policy.json");
             Assert.True(File.Exists(policyPath));
             var content = await File.ReadAllTextAsync(policyPath);
             Assert.Contains("dotnet-policy", content, StringComparison.Ordinal);
@@ -250,7 +301,7 @@ public sealed class InitCommandTests
             Assert.DoesNotContain("\"ci\":", content, StringComparison.Ordinal);
             Assert.DoesNotContain("\"release\":", content, StringComparison.Ordinal);
 
-            var configPath = Path.Combine(dir, ".rexo", "rexo.json");
+            var configPath = Path.Join(dir, ".rexo", "rexo.json");
             var configContent = await File.ReadAllTextAsync(configPath);
             Assert.DoesNotContain("\"build\":", configContent, StringComparison.Ordinal);
             Assert.Contains("\"local build\":", configContent, StringComparison.Ordinal);
@@ -264,7 +315,7 @@ public sealed class InitCommandTests
     [Fact]
     public async Task InitWithStandardPolicyRenamesCollidingStarterBuildCommand()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-standard-policy-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-standard-policy-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         try
@@ -288,7 +339,7 @@ public sealed class InitCommandTests
             var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
 
             Assert.True(result.Success);
-            var configPath = Path.Combine(dir, ".rexo", "rexo.json");
+            var configPath = Path.Join(dir, ".rexo", "rexo.json");
             var content = await File.ReadAllTextAsync(configPath);
             Assert.DoesNotContain("\"build\":", content, StringComparison.Ordinal);
             Assert.Contains("\"local build\":", content, StringComparison.Ordinal);
@@ -302,7 +353,7 @@ public sealed class InitCommandTests
     [Fact]
     public async Task InitFailsWhenPolicyTemplateIsInvalid()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-policy-invalid-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-policy-invalid-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         try
@@ -337,12 +388,12 @@ public sealed class InitCommandTests
     [Fact]
     public async Task InitAutoDetectsPythonTemplate()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-python-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-python-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         try
         {
-            await File.WriteAllTextAsync(Path.Combine(dir, "requirements.txt"), "pytest\n");
+            await File.WriteAllTextAsync(Path.Join(dir, "requirements.txt"), "pytest\n");
 
             var registry = BuiltinCommandRegistration.CreateDefault();
             var executor = new DefaultCommandExecutor(registry);
@@ -362,7 +413,7 @@ public sealed class InitCommandTests
             var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
 
             Assert.True(result.Success);
-            var configPath = Path.Combine(dir, ".rexo", "rexo.json");
+            var configPath = Path.Join(dir, ".rexo", "rexo.json");
             var content = await File.ReadAllTextAsync(configPath);
             Assert.Contains("python -m compileall .", content, StringComparison.Ordinal);
             Assert.Contains("python -m pytest", content, StringComparison.Ordinal);
@@ -376,13 +427,13 @@ public sealed class InitCommandTests
     [Fact]
     public async Task InitAutoWithPolicyPrefersDotnetTemplateForLibraryProjects()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-dotnet-lib-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-dotnet-lib-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         try
         {
             await File.WriteAllTextAsync(
-                Path.Combine(dir, "Library.csproj"),
+                Path.Join(dir, "Library.csproj"),
                 """
                 <Project Sdk="Microsoft.NET.Sdk">
                   <PropertyGroup>
@@ -410,7 +461,7 @@ public sealed class InitCommandTests
             var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
 
             Assert.True(result.Success);
-            var policyPath = Path.Combine(dir, ".rexo", "policy.json");
+            var policyPath = Path.Join(dir, ".rexo", "policy.json");
             var content = await File.ReadAllTextAsync(policyPath);
             Assert.Contains("dotnet-policy", content, StringComparison.Ordinal);
         }
@@ -423,13 +474,13 @@ public sealed class InitCommandTests
     [Fact]
     public async Task InitAutoWithPolicyPrefersDotnetTemplateWhenDockerfileDetected()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-dotnet-api-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-dotnet-api-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         try
         {
             await File.WriteAllTextAsync(
-                Path.Combine(dir, "Api.csproj"),
+                Path.Join(dir, "Api.csproj"),
                 """
                 <Project Sdk="Microsoft.NET.Sdk.Web">
                   <PropertyGroup>
@@ -438,7 +489,7 @@ public sealed class InitCommandTests
                 </Project>
                 """);
 
-            await File.WriteAllTextAsync(Path.Combine(dir, "Dockerfile"), "FROM mcr.microsoft.com/dotnet/aspnet:10.0");
+            await File.WriteAllTextAsync(Path.Join(dir, "Dockerfile"), "FROM mcr.microsoft.com/dotnet/aspnet:10.0");
 
             var registry = BuiltinCommandRegistration.CreateDefault();
             var executor = new DefaultCommandExecutor(registry);
@@ -459,7 +510,7 @@ public sealed class InitCommandTests
             var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
 
             Assert.True(result.Success);
-            var policyPath = Path.Combine(dir, ".rexo", "policy.json");
+            var policyPath = Path.Join(dir, ".rexo", "policy.json");
             var content = await File.ReadAllTextAsync(policyPath);
             Assert.Contains("dotnet-policy", content, StringComparison.Ordinal);
             Assert.Contains("Dockerfile detected", result.Message ?? string.Empty, StringComparison.OrdinalIgnoreCase);
@@ -473,14 +524,14 @@ public sealed class InitCommandTests
     [Fact]
     public async Task InitDetectPreviewReturnsDetectionWithoutWritingFiles()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-detect-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-detect-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         try
         {
-            await File.WriteAllTextAsync(Path.Combine(dir, "Dockerfile"), "FROM mcr.microsoft.com/dotnet/aspnet:10.0");
+            await File.WriteAllTextAsync(Path.Join(dir, "Dockerfile"), "FROM mcr.microsoft.com/dotnet/aspnet:10.0");
             await File.WriteAllTextAsync(
-                Path.Combine(dir, "Api.csproj"),
+                Path.Join(dir, "Api.csproj"),
                 """
                 <Project Sdk="Microsoft.NET.Sdk.Web">
                   <PropertyGroup>
@@ -524,7 +575,7 @@ public sealed class InitCommandTests
             Assert.True(policyRecommendation.GetProperty("Confidence").GetDouble() > 0.5);
             Assert.True(policyRecommendation.GetProperty("Reasons").GetArrayLength() > 0);
 
-            Assert.False(File.Exists(Path.Combine(dir, ".rexo", "rexo.json")));
+            Assert.False(File.Exists(Path.Join(dir, ".rexo", "rexo.json")));
         }
         finally
         {
@@ -535,7 +586,7 @@ public sealed class InitCommandTests
     [Fact]
     public async Task InitWithDockerArtifactOptionAddsDockerArtifactToConfig()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-with-docker-artifact-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-with-docker-artifact-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         try
@@ -558,7 +609,7 @@ public sealed class InitCommandTests
             var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
 
             Assert.True(result.Success);
-            var configPath = Path.Combine(dir, ".rexo", "rexo.json");
+            var configPath = Path.Join(dir, ".rexo", "rexo.json");
             var content = await File.ReadAllTextAsync(configPath);
             Assert.Contains("\"artifacts\"", content, StringComparison.Ordinal);
             Assert.Contains("\"type\": \"docker\"", content, StringComparison.Ordinal);
@@ -579,12 +630,12 @@ public sealed class InitCommandTests
     [Fact]
     public async Task InitWithDockerfileDefaultsToAddingDockerArtifact()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-dockerfile-default-artifact-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-dockerfile-default-artifact-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         try
         {
-            await File.WriteAllTextAsync(Path.Combine(dir, "Dockerfile"), "FROM alpine:3.20");
+            await File.WriteAllTextAsync(Path.Join(dir, "Dockerfile"), "FROM alpine:3.20");
 
             var registry = BuiltinCommandRegistration.CreateDefault();
             var executor = new DefaultCommandExecutor(registry);
@@ -603,7 +654,7 @@ public sealed class InitCommandTests
             var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
 
             Assert.True(result.Success);
-            var configPath = Path.Combine(dir, ".rexo", "rexo.json");
+            var configPath = Path.Join(dir, ".rexo", "rexo.json");
             var content = await File.ReadAllTextAsync(configPath);
             Assert.Contains("\"artifacts\"", content, StringComparison.Ordinal);
             Assert.Contains("\"type\": \"docker\"", content, StringComparison.Ordinal);
@@ -624,14 +675,14 @@ public sealed class InitCommandTests
     [Fact]
     public async Task InitWithNestedDockerfileAddsExplicitDockerfileAndContext()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-nested-dockerfile-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-nested-dockerfile-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         try
         {
-            var appDir = Path.Combine(dir, "services", "api");
+            var appDir = Path.Join(dir, "services", "api");
             Directory.CreateDirectory(appDir);
-            await File.WriteAllTextAsync(Path.Combine(appDir, "Dockerfile"), "FROM alpine:3.20");
+            await File.WriteAllTextAsync(Path.Join(appDir, "Dockerfile"), "FROM alpine:3.20");
 
             var registry = BuiltinCommandRegistration.CreateDefault();
             var executor = new DefaultCommandExecutor(registry);
@@ -650,7 +701,7 @@ public sealed class InitCommandTests
             var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
 
             Assert.True(result.Success);
-            var configPath = Path.Combine(dir, ".rexo", "rexo.json");
+            var configPath = Path.Join(dir, ".rexo", "rexo.json");
             var content = await File.ReadAllTextAsync(configPath);
             Assert.Contains("\"artifacts\"", content, StringComparison.Ordinal);
             Assert.Contains("\"type\": \"docker\"", content, StringComparison.Ordinal);
@@ -671,12 +722,12 @@ public sealed class InitCommandTests
     [Fact]
     public async Task InitWithDockerfileAndWithoutDockerArtifactDoesNotAddArtifact()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-dockerfile-without-artifact-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-dockerfile-without-artifact-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         try
         {
-            await File.WriteAllTextAsync(Path.Combine(dir, "Dockerfile"), "FROM alpine:3.20");
+            await File.WriteAllTextAsync(Path.Join(dir, "Dockerfile"), "FROM alpine:3.20");
 
             var registry = BuiltinCommandRegistration.CreateDefault();
             var executor = new DefaultCommandExecutor(registry);
@@ -696,7 +747,7 @@ public sealed class InitCommandTests
             var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
 
             Assert.True(result.Success);
-            var configPath = Path.Combine(dir, ".rexo", "rexo.json");
+            var configPath = Path.Join(dir, ".rexo", "rexo.json");
             var content = await File.ReadAllTextAsync(configPath);
             Assert.DoesNotContain("\"artifacts\"", content, StringComparison.Ordinal);
         }
@@ -709,12 +760,12 @@ public sealed class InitCommandTests
     [Fact]
     public async Task InitFailsWhenBothWithAndWithoutDockerArtifactFlagsAreSupplied()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-dockerfile-conflicting-flags-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-dockerfile-conflicting-flags-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         try
         {
-            await File.WriteAllTextAsync(Path.Combine(dir, "Dockerfile"), "FROM alpine:3.20");
+            await File.WriteAllTextAsync(Path.Join(dir, "Dockerfile"), "FROM alpine:3.20");
 
             var registry = BuiltinCommandRegistration.CreateDefault();
             var executor = new DefaultCommandExecutor(registry);
@@ -746,7 +797,7 @@ public sealed class InitCommandTests
     [Fact]
     public async Task InitFailsWhenInstructionsPathEscapesRepository()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-instructions-path-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-instructions-path-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         try
@@ -781,12 +832,12 @@ public sealed class InitCommandTests
     [Fact]
     public async Task InitFailsWhenInstructionsFileExistsAndNoForce()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-instructions-exists-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-instructions-exists-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         try
         {
-            var instructionsPath = Path.Combine(dir, ".github", "instructions", "rexo.instructions.md");
+            var instructionsPath = Path.Join(dir, ".github", "instructions", "rexo.instructions.md");
             Directory.CreateDirectory(Path.GetDirectoryName(instructionsPath)!);
             await File.WriteAllTextAsync(instructionsPath, "existing");
 
@@ -819,7 +870,7 @@ public sealed class InitCommandTests
     [Fact]
     public async Task InitFailsWhenLocationIsRoot()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-root-schema-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-root-schema-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         try
@@ -853,7 +904,7 @@ public sealed class InitCommandTests
     [Fact]
     public async Task InitWithRemoteSchemaDoesNotCreateLocalSchemaFile()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-remote-schema-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-remote-schema-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         try
@@ -876,8 +927,8 @@ public sealed class InitCommandTests
             var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
 
             Assert.True(result.Success);
-            var configPath = Path.Combine(dir, ".rexo", "rexo.json");
-            var schemaPath = Path.Combine(dir, ".rexo", "rexo.schema.json");
+            var configPath = Path.Join(dir, ".rexo", "rexo.json");
+            var schemaPath = Path.Join(dir, ".rexo", "rexo.schema.json");
             Assert.True(File.Exists(configPath));
             Assert.False(File.Exists(schemaPath));
             var content = await File.ReadAllTextAsync(configPath);
@@ -892,7 +943,7 @@ public sealed class InitCommandTests
     [Fact]
     public async Task InitCiCreatesGitHubAndAzdoTemplatesByDefault()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-ci-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-ci-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         try
@@ -913,8 +964,8 @@ public sealed class InitCommandTests
             var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
 
             Assert.True(result.Success);
-            var githubPath = Path.Combine(dir, ".github", "workflows", "rexo-release.yml");
-            var azdoPath = Path.Combine(dir, ".azuredevops", "rexo-release.yml");
+            var githubPath = Path.Join(dir, ".github", "workflows", "rexo-release.yml");
+            var azdoPath = Path.Join(dir, ".azuredevops", "rexo-release.yml");
             Assert.True(File.Exists(githubPath));
             Assert.True(File.Exists(azdoPath));
 
@@ -949,9 +1000,73 @@ public sealed class InitCommandTests
     }
 
     [Fact]
+    public async Task InitCiDryRunDoesNotWriteFiles()
+    {
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-ci-dry-run-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+
+        try
+        {
+            var executor = new DefaultCommandExecutor(BuiltinCommandRegistration.CreateDefault());
+            var invocation = new CommandInvocation(
+                new Dictionary<string, string>(),
+                new Dictionary<string, string?>
+                {
+                    ["mode"] = "ci",
+                    ["dry-run"] = "true",
+                },
+                Json: false,
+                JsonFile: null,
+                WorkingDirectory: dir);
+
+            var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
+
+            Assert.True(result.Success);
+            Assert.Contains("Dry run: would initialize", result.Message, StringComparison.Ordinal);
+            Assert.False(Directory.Exists(Path.Join(dir, ".github")));
+            Assert.False(Directory.Exists(Path.Join(dir, ".azuredevops")));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task InitCiChecksAllTargetsBeforeWritingAnyFile()
+    {
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-ci-conflict-{Guid.NewGuid():N}");
+        var azdoDirectory = Path.Join(dir, ".azuredevops");
+        Directory.CreateDirectory(azdoDirectory);
+        var azdoPath = Path.Join(azdoDirectory, "rexo-release.yml");
+        await File.WriteAllTextAsync(azdoPath, "existing");
+
+        try
+        {
+            var executor = new DefaultCommandExecutor(BuiltinCommandRegistration.CreateDefault());
+            var invocation = new CommandInvocation(
+                new Dictionary<string, string>(),
+                new Dictionary<string, string?> { ["mode"] = "ci", ["provider"] = "both" },
+                Json: false,
+                JsonFile: null,
+                WorkingDirectory: dir);
+
+            var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
+
+            Assert.False(result.Success);
+            Assert.False(Directory.Exists(Path.Join(dir, ".github")));
+            Assert.Equal("existing", await File.ReadAllTextAsync(azdoPath));
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
     public async Task InitCiFailsForUnknownProvider()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-ci-invalid-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-ci-invalid-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         try
@@ -996,7 +1111,7 @@ public sealed class InitCommandTests
     [Fact]
     public async Task InitWithBlankTemplateCreatesMinimalConfigWithoutExtends()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-blank-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-blank-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         try
@@ -1014,7 +1129,7 @@ public sealed class InitCommandTests
             var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
 
             Assert.True(result.Success);
-            var configPath = Path.Combine(dir, ".rexo", "rexo.json");
+            var configPath = Path.Join(dir, ".rexo", "rexo.json");
             var content = await File.ReadAllTextAsync(configPath);
             Assert.DoesNotContain("\"extends\"", content, StringComparison.Ordinal);
             Assert.DoesNotContain("embedded:standard", content, StringComparison.Ordinal);
@@ -1030,7 +1145,7 @@ public sealed class InitCommandTests
     [Fact]
     public async Task InitWithBlankTemplateAndWithPolicyButNoPolicyTemplateReturnsError()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-blank-policy-error-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-blank-policy-error-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         try
@@ -1059,7 +1174,7 @@ public sealed class InitCommandTests
     [Fact]
     public async Task InitWithSpecificPolicyTemplateStacksExtendsOverStandard()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"rexo-init-extends-stack-{Guid.NewGuid():N}");
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-init-extends-stack-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         try
@@ -1084,7 +1199,7 @@ public sealed class InitCommandTests
             var result = await executor.ExecuteAsync("init", invocation, CancellationToken.None);
 
             Assert.True(result.Success);
-            var configPath = Path.Combine(dir, ".rexo", "rexo.json");
+            var configPath = Path.Join(dir, ".rexo", "rexo.json");
             var content = await File.ReadAllTextAsync(configPath);
 
             // extends must contain both standard (lifecycle) and the selected policy template

@@ -101,7 +101,7 @@ Calls:
 - Merge per-artifact push overrides from artifact settings
 - Enforce local explicit confirmation (`confirm`/`push` option)
 - For allowed artifacts: provider `PushAsync(...)`
-- Writes `<runtime.output.root>/manifest.json` when `runtime.output.emitRuntimeFiles=true` (default)
+- Writes `<outputs.root>/manifest.json` when `outputs.emit=true` (default)
 
 Dry-run changes the provider call path: the builtin still evaluates push decisions and
 produces manifest output, but it skips external push operations and marks artifacts as
@@ -130,3 +130,34 @@ Exit behavior:
 - Policy-gated skip: success `0` with decision reasons
 - Dry-run: success `0`, no provider calls, simulated push output only
 - Provider push failure: exit code `6`
+## Verified artifact handoff
+
+`builtin:validate-release-evidence` checks configured `with.runManifest`, `result`,
+`tests`, `sarif`, `archive` and `entry` inputs. It requires successful result/manifest
+outputs, fresh TRX/coverage/SARIF/package files since the release started, and an archive
+entry without unresolved template tokens. Paths and entry names belong in config,
+not an external lifecycle script. A consumer can place it before sealing in a multi-stage
+pipeline; this repository does not use it in its normal single-job lifecycle.
+
+`builtin:seal-artifact-handoff` accepts `with.runManifest` and `with.path` as portable,
+repository-relative paths. It requires a successful, unpublished `release` run with
+the same commit, effective config hash, policy lock hash, resolved version and CI run
+identity. Providers describe their prepared outputs through `IPreparedArtifactProvider`;
+the receipt records artifact type/name and each output's kind, reference and identity.
+
+`builtin:push-artifact-handoff` accepts `with.path`, requires `--confirm`, verifies the
+entire inventory before pushing, and uses existing provider and push-policy gates.
+Missing/changed outputs, identity mismatches and denied pushes fail explicitly.
+Global `--dry-run` verifies evidence and simulates publication without calling providers.
+It does not invoke build/test/pack. Configured post-push hooks must be gated separately.
+
+Consumers can configure separate seal/publish stages with these primitives.
+This repository uses the normal single-job release lifecycle instead.
+NuGet packages (including exact-path symbols) and generic
+archives implement the capability. Both use shared repository-contained file hashes,
+reject symbolic-link traversal, and publish only their validated outputs.
+Unsupported providers fail explicitly rather than falling back to build or discovery.
+Remote artifact providers can implement their own immutable reference validation and
+publication through the same interface; Docker/OCI support is not implemented here.
+The receipt is integrity evidence, not a signature or remote promotion/deployment record.
+Do not consume a receipt from an untrusted PR run in a privileged release run.

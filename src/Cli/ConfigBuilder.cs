@@ -46,14 +46,22 @@ internal static class ConfigBuilder
         }
     }
 
-    public static async Task<PolicyConfig> LoadAndMergePoliciesAsync(RepoConfig config, string workingDir, bool debug, CancellationToken cancellationToken)
+    public static async Task<PolicyConfig> LoadAndMergePoliciesAsync(
+        RepoConfig config,
+        string workingDir,
+        bool debug,
+        CancellationToken cancellationToken,
+        bool ignorePolicyLock = false,
+        bool requirePolicyLock = false)
     {
         // Layer 1: config-declared policy sources (opt-in, version-controlled in rexo.json)
         var configSources = (IReadOnlyList<string>?)config.PolicySources ?? [];
-        var configRemotePolicies = await PolicySourceLoader.LoadPoliciesFromSourcesAsync(configSources, workingDir, debug, cancellationToken);
+        var configRemotePolicies = await PolicySourceLoader.LoadPoliciesFromSourcesAsync(
+            configSources, workingDir, debug, cancellationToken, ignorePolicyLock, requirePolicyLock);
 
         // Layer 2: env-declared policy sources (org-enforced, always wins over config-declared)
-        var envRemotePolicies = await PolicySourceLoader.LoadPoliciesFromEnvironmentAsync(workingDir, debug, cancellationToken);
+        var envRemotePolicies = await PolicySourceLoader.LoadPoliciesFromEnvironmentAsync(
+            workingDir, debug, cancellationToken, ignorePolicyLock, requirePolicyLock);
 
         // Layer 3: local policy file (repo-local tweaks, always highest remote priority)
         var localPolicy = await LoadLocalPolicyAsync(workingDir, debug, cancellationToken);

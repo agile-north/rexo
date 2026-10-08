@@ -40,7 +40,7 @@ public sealed class PyPiArtifactProvider : IArtifactProvider
         return new ArtifactBuildResult(
             artifact.Name,
             result.ExitCode == 0,
-            result.ExitCode == 0 ? Path.Combine(workDir, "dist") : null);
+            result.ExitCode == 0 ? Path.Join(workDir, "dist") : null);
     }
 
     public Task<ArtifactTagResult> TagAsync(

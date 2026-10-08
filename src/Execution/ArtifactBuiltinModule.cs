@@ -6,6 +6,83 @@ internal sealed class ArtifactBuiltinModule : IConfigBuiltinModule
 {
     public void Register(BuiltinRegistry registry, ConfigBuiltinModuleContext context)
     {
+        registry.Register("builtin:validate-release-evidence", (step, ctx, ct) => ExecuteHandoffAsync(step, async () =>
+        {
+            var renderer = new Rexo.Templating.TemplateRenderer();
+            await ReleaseEvidenceValidator.ValidateAsync(context.RepositoryRoot,
+                (step.With ?? throw new InvalidOperationException("Evidence inputs are required."))
+                    .ToDictionary(input => input.Key, input => renderer.Render(input.Value, ctx)),
+                ct);
+            return new StepResult(step.Id ?? "release-evidence", true, 0, TimeSpan.Zero,
+                new Dictionary<string, object?> { ["message"] = "Release evidence validated." });
+        }));
+
+        registry.Register("builtin:seal-artifact-handoff", (step, ctx, ct) => ExecuteHandoffAsync(step, async () =>
+        {
+            if (ctx.IsDryRun)
+            {
+                return new StepResult(step.Id ?? "seal-handoff", true, 0, TimeSpan.Zero,
+                    new Dictionary<string, object?> { ["message"] = "Dry run: handoff not written." });
+            }
+
+            await VerifiedArtifactHandoff.SealAsync(
+                RequiredInput(step, "runManifest"),
+                RequiredInput(step, "path"),
+                context.Config, ctx, context.Loader.ArtifactProviders, ct);
+            return new StepResult(step.Id ?? "seal-handoff", true, 0, TimeSpan.Zero,
+                new Dictionary<string, object?> { ["message"] = "Verified artifact handoff sealed." });
+        }));
+
+        registry.Register("builtin:push-artifact-handoff", (step, ctx, ct) => ExecuteHandoffAsync(step, async () =>
+        {
+            if (ConfigCommandLoader.TryGetOptionBoolean(ctx.Options, "confirm") != true)
+            {
+                throw new InvalidOperationException("Verified publication requires --confirm.");
+            }
+            var handoff = await VerifiedArtifactHandoff.VerifyAsync(
+                RequiredInput(step, "path"),
+                context.Config, ctx, context.Loader.ArtifactProviders, ct);
+            var version = handoff.Run.Version!;
+            var result = await context.Loader.PushArtifactsAsync(
+                step.Id ?? "push-handoff", context.Config, context.RepositoryRoot,
+                ConfigCommandLoader.ResolveOutputRoot(context.Config, ctx),
+                ConfigCommandLoader.ShouldEmitRuntimeFiles(context.Config),
+                ctx.WithVersion(version) with { PreparedArtifacts = handoff.Artifacts },
+                static _ => true, "Verified artifacts pushed.", "No artifacts configured.", ct);
+            if (result.Success && result.Outputs.TryGetValue("__pushDecisions", out var decisions) &&
+                decisions is List<PushDecision> pushDecisions && pushDecisions.Any(decision => !decision.Allowed))
+            {
+                return result with
+                {
+                    Success = false,
+                    ExitCode = 6,
+                    Outputs = new Dictionary<string, object?>(result.Outputs)
+                    {
+                        ["error"] = "Verified publication was denied by push policy.",
+                    },
+                };
+            }
+            if (result.Success && !ctx.IsDryRun &&
+                (!result.Outputs.TryGetValue("__artifacts", out var artifacts) ||
+                 artifacts is not List<ArtifactManifestEntry> entries ||
+                 entries.Count == 0 || entries.Any(entry => !entry.Pushed)))
+            {
+                return result with
+                {
+                    Success = false,
+                    ExitCode = 6,
+                    Outputs = new Dictionary<string, object?>(result.Outputs)
+                    {
+                        ["error"] = "Verified publication did not publish every configured artifact.",
+                    },
+                };
+            }
+            return result with
+            {
+                Outputs = new Dictionary<string, object?>(result.Outputs) { ["__version"] = version },
+            };
+        }));
+
         registry.Register("builtin:build-artifacts", (step, ctx, ct) =>
             context.Loader.BuildArtifactsAsync(
                 step.Id ?? "build-artifacts",
@@ -144,5 +221,25 @@ internal sealed class ArtifactBuiltinModule : IConfigBuiltinModule
                 ? all(step, ctx, ct)
                 : Task.FromResult(new StepResult(step.Id ?? "all", false, 1, TimeSpan.Zero,
                     new Dictionary<string, object?> { ["error"] = "builtin:all-artifacts is not registered." }))));
+    }
+
+    private static string RequiredInput(StepDefinition step, string name) =>
+        step.With is not null && step.With.TryGetValue(name, out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value
+            : throw new InvalidOperationException($"{name} is required.");
+
+    private static async Task<StepResult> ExecuteHandoffAsync(StepDefinition step, Func<Task<StepResult>> action)
+    {
+        try
+        {
+            return await action();
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or
+            UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            Console.Error.WriteLine($"Artifact handoff failed: {ex.Message}");
+            return new StepResult(step.Id ?? "artifact-handoff", false, 6, TimeSpan.Zero,
+                new Dictionary<string, object?> { ["error"] = ex.Message });
+        }
     }
 }

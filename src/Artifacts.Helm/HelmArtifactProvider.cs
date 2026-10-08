@@ -96,9 +96,9 @@ public sealed class HelmArtifactProvider : IArtifactProvider
         if (!repo.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
             !repo.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
         {
-            foreach (var tgz in Directory.EnumerateFiles(outputDir, "*.tgz"))
+            foreach (var (tgz, dest) in Directory.EnumerateFiles(outputDir, "*.tgz")
+                .Select(tgz => (Source: tgz, Destination: Path.Join(repo, Path.GetFileName(tgz)))))
             {
-                var dest = Path.Combine(repo, Path.GetFileName(tgz));
                 File.Copy(tgz, dest, overwrite: true);
                 Console.WriteLine($"  > copied {Path.GetFileName(tgz)} -> {repo}");
             }

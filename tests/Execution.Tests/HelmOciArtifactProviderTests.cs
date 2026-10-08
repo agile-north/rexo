@@ -177,14 +177,14 @@ public sealed class HelmOciArtifactProviderTests
     {
         using var _ = CiEnvironmentVariableScope.CreateIsolatedCiScope();
 
-        var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-helm-ghcr-default-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(repoRoot, "artifacts", "charts"));
+        var repoRoot = Path.Join(Path.GetTempPath(), $"rexo-helm-ghcr-default-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(repoRoot, "artifacts", "charts"));
         await File.WriteAllTextAsync(
-            Path.Combine(repoRoot, "artifacts", "charts", "orders-1.2.3.tgz"),
+            Path.Join(repoRoot, "artifacts", "charts", "orders-1.2.3.tgz"),
             "stub");
-        Directory.CreateDirectory(Path.Combine(repoRoot, ".rexo"));
+        Directory.CreateDirectory(Path.Join(repoRoot, ".rexo"));
         await File.WriteAllTextAsync(
-            Path.Combine(repoRoot, ".rexo", ".env"),
+            Path.Join(repoRoot, ".rexo", ".env"),
             "GITHUB_ACTIONS=true\nGITHUB_REPOSITORY=agile-north/rexo\nGITHUB_ACTOR=copilot\nGITHUB_TOKEN=gh-token\n");
 
         try
@@ -235,14 +235,14 @@ public sealed class HelmOciArtifactProviderTests
     {
         using var _ = CiEnvironmentVariableScope.CreateIsolatedCiScope();
 
-        var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-helm-ghcr-dedup-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(repoRoot, "artifacts", "charts"));
+        var repoRoot = Path.Join(Path.GetTempPath(), $"rexo-helm-ghcr-dedup-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(repoRoot, "artifacts", "charts"));
         await File.WriteAllTextAsync(
-            Path.Combine(repoRoot, "artifacts", "charts", "rexo-1.2.3.tgz"),
+            Path.Join(repoRoot, "artifacts", "charts", "rexo-1.2.3.tgz"),
             "stub");
-        Directory.CreateDirectory(Path.Combine(repoRoot, ".rexo"));
+        Directory.CreateDirectory(Path.Join(repoRoot, ".rexo"));
         await File.WriteAllTextAsync(
-            Path.Combine(repoRoot, ".rexo", ".env"),
+            Path.Join(repoRoot, ".rexo", ".env"),
             "GITHUB_ACTIONS=true\nGITHUB_REPOSITORY=agile-north/rexo\nGITHUB_ACTOR=copilot\nGITHUB_TOKEN=gh-token\n");
 
         try
@@ -292,10 +292,10 @@ public sealed class HelmOciArtifactProviderTests
     [Fact]
     public async Task PushAsyncDoesNotInferCiDestinationWhenCiInferenceDisabled()
     {
-        var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-helm-ghcr-disabled-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(repoRoot, ".rexo"));
+        var repoRoot = Path.Join(Path.GetTempPath(), $"rexo-helm-ghcr-disabled-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(repoRoot, ".rexo"));
         await File.WriteAllTextAsync(
-            Path.Combine(repoRoot, ".rexo", ".env"),
+            Path.Join(repoRoot, ".rexo", ".env"),
             "GITHUB_ACTIONS=true\nGITHUB_REPOSITORY=agile-north/rexo\nGITHUB_ACTOR=copilot\nGITHUB_TOKEN=gh-token\n");
 
         try
@@ -345,14 +345,14 @@ public sealed class HelmOciArtifactProviderTests
     {
         using var _ = CiEnvironmentVariableScope.CreateIsolatedCiScope();
 
-        var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-helm-ghcr-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(repoRoot, "artifacts", "charts"));
+        var repoRoot = Path.Join(Path.GetTempPath(), $"rexo-helm-ghcr-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(repoRoot, "artifacts", "charts"));
         await File.WriteAllTextAsync(
-            Path.Combine(repoRoot, "artifacts", "charts", "orders-1.2.3.tgz"),
+            Path.Join(repoRoot, "artifacts", "charts", "orders-1.2.3.tgz"),
             "stub");
-        Directory.CreateDirectory(Path.Combine(repoRoot, ".rexo"));
+        Directory.CreateDirectory(Path.Join(repoRoot, ".rexo"));
         await File.WriteAllTextAsync(
-            Path.Combine(repoRoot, ".rexo", ".env"),
+            Path.Join(repoRoot, ".rexo", ".env"),
             "HELM_OCI_TARGET_REGISTRY=ghcr.io\nGITHUB_ACTIONS=true\nGITHUB_REPOSITORY=agile-north/rexo\nGITHUB_ACTOR=copilot\nGITHUB_TOKEN=gh-token\n");
 
         try
@@ -404,14 +404,14 @@ public sealed class HelmOciArtifactProviderTests
     {
         using var _ = CiEnvironmentVariableScope.CreateIsolatedCiScope();
 
-        var repoRoot = Path.Combine(Path.GetTempPath(), $"rexo-helm-gitlab-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(repoRoot, "artifacts", "charts"));
+        var repoRoot = Path.Join(Path.GetTempPath(), $"rexo-helm-gitlab-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(repoRoot, "artifacts", "charts"));
         await File.WriteAllTextAsync(
-            Path.Combine(repoRoot, "artifacts", "charts", "orders-1.2.3.tgz"),
+            Path.Join(repoRoot, "artifacts", "charts", "orders-1.2.3.tgz"),
             "stub");
-        Directory.CreateDirectory(Path.Combine(repoRoot, ".rexo"));
+        Directory.CreateDirectory(Path.Join(repoRoot, ".rexo"));
         await File.WriteAllTextAsync(
-            Path.Combine(repoRoot, ".rexo", ".env"),
+            Path.Join(repoRoot, ".rexo", ".env"),
             "GITLAB_CI=true\nCI_REGISTRY=registry.gitlab.example.com:5050\nCI_PROJECT_PATH=team/rexo\nCI_REGISTRY_USER=gitlab-ci-token\nCI_JOB_TOKEN=gl-token\n");
 
         try

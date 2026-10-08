@@ -140,8 +140,37 @@ rx list
 rx explain build
 rx config sources
 rx config resolved --json
+rx config resolved --provenance
+rx config explain versioning.provider
 rx doctor
+rx check
+rx graph release --format mermaid
+rx completion powershell
+rx update
+rx restore
 ```
+
+Lifecycle commands are opt-in: initialize with `--with-policy` or extend
+`embedded:standard` in your config.
+
+```bash
+rx plan
+rx release          # Standard policy: verify, build and tag without pushing
+rx release --push   # Request publication, subject to runtime push policy
+```
+
+Repositories may override the release command and configure publication gates.
+The Rexo repository uses one CI job calling plain `release`; its config controls
+push eligibility. This is a repository-specific override, not the standard policy default.
+
+`rx check` is non-publishing readiness diagnostics; `rx plan --push` (when the selected policy
+provides it) reports release-flow push eligibility without publishing. `rx update` refreshes remote
+policy content hashes in `.rexo/rexo.lock.yaml`; `rx restore` verifies the lock without updating it.
+
+For local promotion, configure an `environments.<name>.path`, build with `--json-file`, then run
+`rx promote <run-manifest.json> <environment>`. This currently supports exactly one locally
+available file artifact with a verified SHA-256. It does not deploy remotely or promote mutable
+registry tags. `--dry-run` validates the promotion request without writing promotion objects.
 
 ## Configuration Discovery
 
@@ -162,14 +191,16 @@ YAML and JSON are validated against the same schema. Add a
 - Use `rx` directly to run configured commands.
 - Use `rx run <command>` if you want explicit run semantics.
 - Use `--json` or `--json-file <path>` for machine-readable output.
-- Full JSON and manifest field semantics: [Output Contract](../../docs/configuration/output-contract.md).
+- Full JSON and manifest field semantics: [Output Contract](https://github.com/agile-north/rexo/blob/__REXO_DOC_TAG__/docs/configuration/output-contract.md).
 
 ## Documentation
 
 | Resource | Link |
 | --- | --- |
 | GitHub repository | <https://github.com/agile-north/rexo> |
-| Configuration reference | <https://github.com/agile-north/rexo/blob/__REXO_DOC_TAG__/docs/CONFIGURATION.md> |
+| Configuration reference | <https://github.com/agile-north/rexo/blob/__REXO_DOC_TAG__/docs/configuration/README.md> |
+| Lifecycle policies | <https://github.com/agile-north/rexo/blob/__REXO_DOC_TAG__/docs/embedded/README.md> |
+| Artifact providers | <https://github.com/agile-north/rexo/blob/__REXO_DOC_TAG__/docs/artifacts/README.md> |
 | Rexo config schema | <https://raw.githubusercontent.com/agile-north/rexo/__REXO_SCHEMA_TAG__/rexo.schema.json> |
 | Policy schema | <https://raw.githubusercontent.com/agile-north/rexo/__REXO_SCHEMA_TAG__/policy.schema.json> |
 | Architecture overview | <https://github.com/agile-north/rexo/blob/__REXO_DOC_TAG__/docs/ARCHITECTURE.md> |

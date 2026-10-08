@@ -1,14 +1,52 @@
-# repoOS Implementation TODO
+# Rexo Implementation Checklist
 
-Last updated: 2026-05-03
+Last updated: 2026-10-07
 
-This checklist maps the current implementation against the project scope in `docs/scope.md`.
+This long-lived checklist records implementation against the historical product scope in
+`docs/scope.md`. It is not a current completion claim; some sections retain the original `repo`
+terminology and counts. The production-hardening tranche has its own current status summary below.
+The full 3,264-line initiative is **not complete**. See [ROADMAP.md](ROADMAP.md) for
+requirements-to-evidence status and focused follow-up boundaries; PR #76 is a foundation.
 
 Legend:
 
 - [x] Done
 - [ ] Not done
 - [~] Partial / implemented in basic form only
+
+## Current Production-Hardening Tranche
+
+| Workstream | Status | Current boundary |
+| --- | --- | --- |
+| Production execution safety | Delivered with documented limits | Container execution fails closed by default and output is redacted. Built-in push, promotion, policy-lock update, CI scaffolding, and config materialization honor dry-run; arbitrary configured `run` steps still execute unless they inspect `options.dry-run`. NuGet keys are still passed to `dotnet nuget push` as process arguments. |
+| Release self-hosting | Delivered | The workflow builds/tests/packs from the checked-out source via an isolated bootstrap. External publish remains explicitly gated and was not used for acceptance. |
+| Init lifecycle | Delivered | `rx init --force` removes only superseded same-slot `.rexo` variants and preserves root/legacy candidates. |
+| Readiness diagnostics | Partial | `rx check` reports configuration, provider/tool availability, auto/env version readiness, artifact source paths, policy-lock coverage/validity, and push/credential limitations. It does not resolve configured secret providers or contact registries; comprehensive safe readiness remains. |
+| Config identity and explain | Delivered with attribution limits | Canonical secret-redacted config/lock hashes are recorded; explain lists repository files declaring the requested property (including local `extends`/overlay) plus policy/CLI layers, but does not compute field-level merge ownership, source locations, or individual policy-file attribution. |
+| CLI workflow UX | Partial | Color controls, global non-interactive behavior, and actionable initialization errors are implemented. Graph expansion and deeper shell completions remain. |
+| Policy lockfile | Partial | `rx update` refreshes content hashes; `rx restore` verifies complete lock coverage; normal source failures are surfaced. Immutable resolved identities and exact locked retrieval remain. |
+| Artifact provenance | Delivered for available metadata | Run/CI metadata and local artifact SHA-256 are recorded. SBOMs, signed attestations, and provider-reported registry digests require a separate tooling/provider capability tranche. |
+| Artifact promotion | Delivered for local files | One verified local file can be copied immutably into a repository-relative environment. Remote deployment and registry-tag promotion are not implemented without a selected deployment/provider contract. |
+| Extension design | Delivered as an architecture decision | Arbitrary in-process plugin loading is rejected; any future extension contract must be out-of-process and capability-limited. |
+| Documentation and acceptance | Partial | This worktree's actionable documentation accuracy audit is complete; consolidation of historical scope/archive into a single authoritative reference remains separate work. Prior Windows build/test and package README checks are local evidence, not full roadmap acceptance. No cross-platform run or upstream SchemaStore change was performed. |
+
+### Explicitly deferred capabilities
+
+These are recorded decisions, not silently successful implementations:
+
+- **NuGet API-key process visibility:** `dotnet nuget push` requires the key as an argument in the current provider. Output is masked, but same-user process inspection may expose it. CI guidance requires a dedicated runner identity; replacing this safely requires an explicit credential-provider/feed-auth contract.
+- **Arbitrary command dry-run isolation:** `--dry-run` is not a sandbox for repository-authored shell steps. Such steps must branch on `options.dry-run`; enforcing isolation would require a separate command execution contract.
+- **Remote deployment and registry promotion:** the implemented promotion contract verifies and copies a local file artifact only. No deployment target/provider or registry immutable identity contract was selected, so the CLI refuses to imply remote deployment or tag immutability.
+- **SBOMs and signed attestations:** these require external generator/signing tools and provider-specific subject identity. The run manifest records available build/CI/config/lock/local-file metadata but does not claim an SBOM or cryptographic attestation.
+- **SchemaStore registration:** repository schemas currently use JSON Schema 2020-12 and strict unknown-property rejection. SchemaStore's contribution guidance recommends draft-07 and cautions against blanket `additionalProperties: false`; an upstream catalog change should follow a compatibility review and dedicated positive/negative schema tests. YAML modelines and the canonical raw schema URLs remain available now.
+- **Platform matrix:** local acceptance runs on Windows, and source-built no-publish acceptance is now required by Linux PR CI. macOS and the full scenario matrix remain follow-ups; no external publication or deployment is used for acceptance.
+
+Foundation acceptance: the single-job workflow bootstraps the checked-out CLI and calls
+normal `release` directly with identical arguments on all events; config gates push.
+It uploads result/manifest, package,
+TRX/coverage/SARIF evidence. Prepared-artifact and evidence-validation primitives are
+tested capabilities, not additional stages in this repository's pipeline.
+This is not proof of full roadmap acceptance or real publishing.
 
 ## 1) CLI Surface and Routing
 
@@ -185,7 +223,7 @@ Legend:
 ## 16) Testing and Quality Gates
 
 - [x] Build passes (`dotnet build`)
-- [x] Tests pass (234 total — added tests for secret masking, template expressions, versioning, builtin commands)
+- [x] Original MVP test count was 234 at the time of that snapshot; see the current suite count from `dotnet test solution.slnx -c Release`.
 - [x] Added tests for template rendering behavior
 - [x] Added tests for built-in command registration paths
 - [x] Coverage breadth expanded: REXO_OVERLAY, commands merge, StepExecutor when-condition + unknown builtin tests
@@ -245,7 +283,7 @@ Items expected in MVP (per scope section 56) and status:
 - [x] Introduce pluggable provider discovery/registration mechanism — static `Register()` method on each provider, called from `CliBootstrapper.cs`
 - [x] Ensure provider projects (`Artifacts.Docker`, `Artifacts.NuGet`, `Artifacts.Helm`) depend only on `Rexo.Core` — no CLI/Execution references
 - [x] Add provider-availability diagnostics to `rx doctor` — toolchain checks for docker-compose, npm, python/python3, mvn, gradle, gem, terraform
-- [ ] Clear error when a config references an unknown provider type (e.g. `type: "npm"` without provider loaded)
+- [x] Clear structured readiness error when a config references an unknown artifact provider type
 
 ### Lifecycle builtins
 
@@ -275,4 +313,3 @@ Items expected in MVP (per scope section 56) and status:
 
 - [ ] Registry-credentials helper / shared auth provider abstraction (usable by any provider)
 - [ ] Package-index provider for GitHub Packages / Artifactory / Azure Artifacts
-

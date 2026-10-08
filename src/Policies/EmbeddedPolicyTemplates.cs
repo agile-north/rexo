@@ -63,7 +63,7 @@ public static class EmbeddedPolicyTemplates
         var content = ReadTemplate(templateName);
 
         var filePath = System.IO.Directory.Exists(outputPath)
-            ? System.IO.Path.Combine(outputPath, $"{templateName}.policy.json")
+            ? System.IO.Path.Join(outputPath, $"{templateName}.policy.json")
             : outputPath;
 
         var dir = System.IO.Path.GetDirectoryName(filePath);

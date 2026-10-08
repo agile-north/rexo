@@ -1,6 +1,7 @@
 # Build output
 bin/
 obj/
+src/Cli/PACKAGE_README.generated.md
 
 # IDE
 .vs/
@@ -16,6 +17,8 @@ Thumbs.db
 TestResults/
 coverage/
 /artifacts/
+/test-results/
+/sarif/
 
 # Generated runtime/provider configs
 .repo/generated/

@@ -309,7 +309,7 @@ public sealed class DockerArtifactProvider : IArtifactProvider
             return (false, null, null);
         }
 
-        var tempDockerConfig = Path.Combine(Path.GetTempPath(), $"rexo-docker-config-{Guid.NewGuid():N}");
+        var tempDockerConfig = Path.Join(Path.GetTempPath(), $"rexo-docker-config-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDockerConfig);
 
         envOverrides["DOCKER_CONFIG"] = tempDockerConfig;
@@ -1391,11 +1391,10 @@ public sealed class DockerArtifactProvider : IArtifactProvider
         {
             Directory.Delete(tempDockerConfigDirectory, recursive: true);
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-        }
-        catch (UnauthorizedAccessException)
-        {
+            Console.Error.WriteLine(
+                $"  Warning: could not remove temporary Docker config directory '{tempDockerConfigDirectory}': {ex.Message}");
         }
     }
 

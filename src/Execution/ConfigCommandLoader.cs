@@ -389,9 +389,15 @@ public sealed class ConfigCommandLoader
         string emptyMessage,
         CancellationToken cancellationToken)
     {
-        var artifacts = (config.Artifacts ?? [])
-            .Where(includePredicate)
-            .ToList();
+        List<RepoArtifactConfig> artifacts;
+        try
+        {
+            artifacts = SelectArtifacts(config, ctx, includePredicate).ToList();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ArtifactSelectionFailure(stepId, ex.Message);
+        }
 
         if (artifacts.Count == 0)
         {
@@ -475,9 +481,15 @@ public sealed class ConfigCommandLoader
         string emptyMessage,
         CancellationToken cancellationToken)
     {
-        var artifacts = (config.Artifacts ?? [])
-            .Where(includePredicate)
-            .ToList();
+        List<RepoArtifactConfig> artifacts;
+        try
+        {
+            artifacts = SelectArtifacts(config, ctx, includePredicate).ToList();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ArtifactSelectionFailure(stepId, ex.Message);
+        }
 
         if (artifacts.Count == 0)
         {
@@ -512,9 +524,15 @@ public sealed class ConfigCommandLoader
         string emptyMessage,
         CancellationToken cancellationToken)
     {
-        var artifacts = (config.Artifacts ?? [])
-            .Where(includePredicate)
-            .ToList();
+        List<RepoArtifactConfig> artifacts;
+        try
+        {
+            artifacts = SelectArtifacts(config, ctx, includePredicate).ToList();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ArtifactSelectionFailure(stepId, ex.Message);
+        }
 
         if (artifacts.Count == 0)
         {
@@ -666,9 +684,17 @@ public sealed class ConfigCommandLoader
         string successMessage,
         string emptyMessage)
     {
-        var artifacts = (config.Artifacts ?? [])
-            .Where(includePredicate)
-            .ToList();
+        ArtifactGroupSelection selection;
+        List<RepoArtifactConfig> artifacts;
+        try
+        {
+            selection = ResolveArtifactGroup(ctx);
+            artifacts = SelectArtifacts(config, selection, includePredicate).ToList();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ArtifactSelectionFailure(stepId, ex.Message);
+        }
 
         if (artifacts.Count == 0)
         {
@@ -698,6 +724,7 @@ public sealed class ConfigCommandLoader
                     ctx.Version.NuGetVersion,
                     ctx.Version.InformationalVersion),
             planArtifacts,
+            selection.DisplayName,
             new PlanPushSection(
                 pushRequested,
                 pushRequested ? overallCanPush : null,
@@ -718,6 +745,9 @@ public sealed class ConfigCommandLoader
             planLines.Add($"  commit:  {commitSha}");
         if (!string.IsNullOrWhiteSpace(ctx.RemoteUrl))
             planLines.Add($"  remote:  {ctx.RemoteUrl}");
+        planLines.Add("");
+
+        planLines.Add($"Artifact group selection: {selection.DisplayName}");
         planLines.Add("");
 
         // Version section
@@ -811,6 +841,122 @@ public sealed class ConfigCommandLoader
                 ["canPush"] = overallCanPush,
                 ["skipReasons"] = overallSkipReasons,
             });
+    }
+
+    internal static IReadOnlyList<RepoArtifactConfig> SelectArtifacts(
+        RepoConfig config,
+        ExecutionContext context,
+        Func<RepoArtifactConfig, bool> includePredicate) =>
+        SelectArtifacts(config, ResolveArtifactGroup(context), includePredicate);
+
+    internal static ArtifactGroupSelection ResolveArtifactGroup(ExecutionContext context)
+    {
+        var selectedGroup = context.Options
+            .FirstOrDefault(option => string.Equals(option.Key, "artifact-group", StringComparison.OrdinalIgnoreCase));
+        var groupSpecified = selectedGroup.Key is not null;
+        var allGroups = TryGetOptionBoolean(context.Options, "all-artifact-groups") == true;
+
+        if (groupSpecified && allGroups)
+        {
+            throw new InvalidOperationException(
+                "Use either --artifact-group <name> or --all-artifact-groups, not both.");
+        }
+
+        if (groupSpecified)
+        {
+            ValidateArtifactGroupName(selectedGroup.Value, "selected");
+            return new ArtifactGroupSelection(selectedGroup.Value!, AllGroups: false);
+        }
+
+        return new ArtifactGroupSelection(null, allGroups);
+    }
+
+    internal static IReadOnlyList<RepoArtifactConfig> SelectArtifacts(
+        RepoConfig config,
+        ArtifactGroupSelection selection,
+        Func<RepoArtifactConfig, bool> includePredicate)
+    {
+        var configuredArtifacts = config.Artifacts ?? [];
+        foreach (var artifact in configuredArtifacts)
+        {
+            if (artifact.Group is not null)
+            {
+                ValidateArtifactGroupName(artifact.Group, "configured artifact");
+            }
+        }
+
+        if (configuredArtifacts.Count == 0)
+        {
+            return [];
+        }
+
+        if (selection.AllGroups)
+        {
+            return configuredArtifacts.Where(includePredicate).ToList();
+        }
+
+        var groupArtifacts = configuredArtifacts
+            .Where(artifact => string.Equals(artifact.Group, selection.Group, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (groupArtifacts.Count == 0)
+        {
+            var availableGroups = FormatAvailableArtifactGroups(configuredArtifacts);
+            if (selection.Group is null)
+            {
+                throw new InvalidOperationException(
+                    $"The default artifact group contains no artifacts.{Environment.NewLine}{Environment.NewLine}" +
+                    $"Available groups:{Environment.NewLine}{availableGroups}{Environment.NewLine}{Environment.NewLine}" +
+                    "Select a group with --artifact-group <name> or include all groups with --all-artifact-groups.");
+            }
+
+            throw new InvalidOperationException(
+                $"Artifact group '{selection.Group}' does not contain any configured artifacts.{Environment.NewLine}{Environment.NewLine}" +
+                $"Available groups:{Environment.NewLine}{availableGroups}");
+        }
+
+        return groupArtifacts.Where(includePredicate).ToList();
+    }
+
+    private static void ValidateArtifactGroupName(string? name, string source)
+    {
+        if (string.IsNullOrWhiteSpace(name) ||
+            name.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-')))
+        {
+            throw new InvalidOperationException(
+                $"The {source} artifact group must contain only ASCII letters, numbers, '.', '_' or '-'.");
+        }
+
+        if (string.Equals(name, "default", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "The artifact group name 'default' is reserved for ungrouped artifacts; omit 'group' for the default group.");
+        }
+    }
+
+    private static string FormatAvailableArtifactGroups(IReadOnlyList<RepoArtifactConfig> artifacts)
+    {
+        var groups = artifacts
+            .Where(artifact => artifact.Group is not null)
+            .Select(artifact => artifact.Group!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(group => group, StringComparer.Ordinal)
+            .ToList();
+
+        if (artifacts.Any(artifact => artifact.Group is null))
+        {
+            groups.Insert(0, "default");
+        }
+
+        return string.Join(Environment.NewLine, groups.Select(group => $"  {group}"));
+    }
+
+    private static StepResult ArtifactSelectionFailure(string stepId, string message) =>
+        new(stepId, false, 2, TimeSpan.Zero, new Dictionary<string, object?> { ["error"] = message });
+
+    internal sealed record ArtifactGroupSelection(string? Group, bool AllGroups)
+    {
+        public string DisplayName => AllGroups ? "all-artifact-groups" : Group ?? "default";
     }
 
     private static PlanArtifact BuildPlanArtifact(
@@ -1559,6 +1705,7 @@ public sealed class ConfigCommandLoader
         PlanRepoSection Repo,
         PlanVersionSection? Version,
         IReadOnlyList<PlanArtifact> Artifacts,
+        string ArtifactGroup,
         PlanPushSection Push);
 
     private sealed record PlanRepoSection(

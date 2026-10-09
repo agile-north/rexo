@@ -25,7 +25,7 @@ public static class VerifiedArtifactHandoff
         ValidateRun(run, config, context);
         await ValidateLockAsync(run, context.RepositoryRoot, cancellationToken);
         var artifacts = new List<PreparedArtifact>();
-        foreach (var artifact in config.Artifacts ?? [])
+        foreach (var artifact in ConfigCommandLoader.SelectArtifacts(config, context, static _ => true))
         {
             var artifactConfig = ConfigCommandLoader.ToArtifactConfig(artifact, config, ConfigCommandLoader.ResolveOutputRoot(config, context));
             var built = run.Artifacts.Where(entry => entry.Name == artifactConfig.Name && entry.Type == artifact.Type).ToArray();
@@ -52,7 +52,15 @@ public static class VerifiedArtifactHandoff
 
         var destination = ResolvePath(context.RepositoryRoot, handoffPath);
         Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-        await File.WriteAllTextAsync(destination, JsonSerializer.Serialize(new ArtifactHandoff(run, artifacts), JsonOptions), cancellationToken);
+        var selection = ConfigCommandLoader.ResolveArtifactGroup(context);
+        await File.WriteAllTextAsync(
+            destination,
+            JsonSerializer.Serialize(new ArtifactHandoff(run, artifacts)
+            {
+                ArtifactGroup = selection.Group,
+                AllArtifactGroups = selection.AllGroups,
+            }, JsonOptions),
+            cancellationToken);
     }
 
     public static async Task<ArtifactHandoff> VerifyAsync(
@@ -70,7 +78,14 @@ public static class VerifiedArtifactHandoff
 
         ValidateRun(handoff.Run, config, context);
         await ValidateLockAsync(handoff.Run, context.RepositoryRoot, cancellationToken);
-        var expected = config.Artifacts ?? [];
+        var expected = ConfigCommandLoader.SelectArtifacts(config, context, static _ => true);
+        var selectedGroup = ConfigCommandLoader.ResolveArtifactGroup(context);
+        if (handoff.AllArtifactGroups != selectedGroup.AllGroups ||
+            !string.Equals(handoff.ArtifactGroup, selectedGroup.Group, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Handoff artifact group selection does not match this invocation.");
+        }
+
         if (expected.Count == 0 || handoff.Artifacts.Count != expected.Count ||
             handoff.Artifacts.Select(artifact => (artifact.Type, artifact.Name)).Distinct().Count() != expected.Count)
         {
@@ -97,10 +112,11 @@ public static class VerifiedArtifactHandoff
 
     private static void ValidateRun(RunManifest run, RepoConfig config, ExecutionContext context)
     {
+        var expectedArtifacts = ConfigCommandLoader.SelectArtifacts(config, context, static _ => true);
         if (run.SchemaVersion != "1.0" || !run.Success || run.ExitCode != 0 ||
             run.CommandExecuted != "release" || run.Version is null ||
             run.Steps is null || run.Steps.Count == 0 || run.Steps.Any(step => !step.Success) ||
-            run.Artifacts is null || run.Artifacts.Count != (config.Artifacts?.Count ?? 0) ||
+            run.Artifacts is null || run.Artifacts.Count != expectedArtifacts.Count ||
             run.Artifacts.Any(artifact => !artifact.Built || artifact.Pushed) ||
             run.PushDecisions is null || run.PushDecisions.Count != 0)
         {
@@ -150,4 +166,8 @@ public static class VerifiedArtifactHandoff
     }
 }
 
-public sealed record ArtifactHandoff(RunManifest Run, IReadOnlyList<PreparedArtifact> Artifacts);
+public sealed record ArtifactHandoff(RunManifest Run, IReadOnlyList<PreparedArtifact> Artifacts)
+{
+    public string? ArtifactGroup { get; init; }
+    public bool AllArtifactGroups { get; init; }
+}

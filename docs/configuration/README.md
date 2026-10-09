@@ -217,6 +217,47 @@ When `rx init --schema-source local --with-policy` is used, both schema files ar
 }
 ```
 
+## Artifact lifecycle groups
+
+Assign an optional top-level `group` to put an artifact in an exclusive lifecycle lane.
+Artifacts without a group remain in the implicit `default` lane:
+
+```yaml
+artifacts:
+  - type: generic
+    name: runtime-package
+  - type: generic
+    name: contract-package
+    group: contracts
+```
+
+Artifact operations select the default lane unless a selector is supplied:
+
+```powershell
+rx plan
+rx release --artifact-group contracts --push
+rx release --all-artifact-groups --push
+```
+
+For example, a repository that ships runtime packages alongside public API/abstractions packages
+can put the contracts in `group: contracts`. A contracts-only release lets downstream integrators
+consume interface changes without republishing unchanged runtime packages; a runtime-only fix
+likewise avoids republishing unchanged contracts. Use `--all-artifact-groups` when coordinating a
+release of every configured artifact.
+
+Group matching is case-insensitive. Names may contain ASCII letters, digits, `.`, `_`, and `-`;
+`default` is reserved and should be represented by omitting `group`. Selecting an unknown group
+or a missing default lane fails safely and lists the configured groups. A repository with no
+artifacts keeps its existing empty-artifact behavior.
+
+`--artifact-group <name>` selects one named group; `--all-artifact-groups` selects every artifact,
+both grouped and ungrouped. These options cannot be combined. Groups filter artifact planning,
+build, tag, push, manifests, and verified artifact handoff inventories. They do not change the
+repository version, source builds, tests, verification, credentials, hooks, or arbitrary repository
+commands. Every selection uses the same resolved repository version, so groups are artifact
+selection lanes, not independent version tracks. See [Artifact lifecycle builtins](../builtins/artifacts.md)
+for a complete package example.
+
 ## Fully Emitted Effective Defaults
 
 When optional fields are omitted, runtime behavior applies defaults. The example below

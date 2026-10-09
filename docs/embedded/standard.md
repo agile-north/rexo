@@ -10,6 +10,12 @@ It provides user-facing commands (`plan`, `validate`, `version`, `test`, `analyz
 
 Description: Validate and show what would be built/pushed.
 
+Options:
+
+- `--push` (`bool`, default `false`)
+- `--artifact-group` (`string`, optional; defaults to ungrouped artifacts)
+- `--all-artifact-groups` (`bool`, default `false`; selects all artifacts)
+
 Steps:
 
 1. `builtin:validate`
@@ -72,6 +78,11 @@ Notes:
 
 Description: Build and tag configured artifacts locally.
 
+Options:
+
+- `--artifact-group` (`string`, optional; defaults to ungrouped artifacts)
+- `--all-artifact-groups` (`bool`, default `false`; selects all artifacts)
+
 Steps:
 
 1. `builtin:validate`
@@ -91,6 +102,11 @@ Notes:
 
 Description: Tag configured artifacts.
 
+Options:
+
+- `--artifact-group` (`string`, optional; defaults to ungrouped artifacts)
+- `--all-artifact-groups` (`bool`, default `false`; selects all artifacts)
+
 Steps:
 
 1. `builtin:resolve-version`
@@ -103,6 +119,8 @@ Description: Push configured artifacts when explicitly confirmed.
 Options:
 
 - `--confirm` (`bool`, default `false`)
+- `--artifact-group` (`string`, optional; defaults to ungrouped artifacts)
+- `--all-artifact-groups` (`bool`, default `false`; selects all artifacts)
 
 Steps:
 
@@ -115,6 +133,8 @@ Description: Validate, verify, build, tag, and optionally push.
 Options:
 
 - `--push` (`bool`, default `false`)
+- `--artifact-group` (`string`, optional; defaults to ungrouped artifacts)
+- `--all-artifact-groups` (`bool`, default `false`; selects all artifacts)
 
 Steps:
 
@@ -128,6 +148,15 @@ Steps:
 
 The `build` command performs validation, version resolution, configured artifact build/tag,
 and its own optional build hooks. Push and post-push hooks are controlled by `--push`.
+`--artifact-group` and `--all-artifact-groups` scope artifact planning/build/tag/push and manifests;
+they cannot be combined and do not scope repository
+verification, source builds, tests, or hooks. Both grouped and default releases use the same
+repository version. Repositories that introduce multiple groups should review external Git tag,
+release, changelog, and post-push automation that may assume all artifacts ship together.
+
+Use a named group when one artifact lane should be published without republishing unrelated
+artifacts—for example, release public contracts for downstream integrators while leaving unchanged
+runtime packages alone. Use `--all-artifact-groups` for a coordinated release of every artifact.
 
 ### clean
 

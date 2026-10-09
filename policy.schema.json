@@ -892,6 +892,12 @@
           "type": "string",
           "description": "Logical artifact name used in logs and manifests. When omitted, falls back to the root config name."
         },
+        "group": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?![dD][eE][fF][aA][uU][lL][tT]$)[A-Za-z0-9._-]+$",
+          "description": "Optional artifact lifecycle group. Ungrouped artifacts belong to the default group."
+        },
         "settings": {
           "description": "Provider-specific docker build, tag, and push settings.",
           "$ref": "#/$defs/dockerArtifactSettings"
@@ -914,6 +920,12 @@
         "name": {
           "type": "string",
           "description": "Logical artifact name used in logs and manifests. When omitted, falls back to the root config name."
+        },
+        "group": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?![dD][eE][fF][aA][uU][lL][tT]$)[A-Za-z0-9._-]+$",
+          "description": "Optional artifact lifecycle group. Ungrouped artifacts belong to the default group."
         },
         "settings": {
           "description": "Provider-specific nuget pack/push settings.",
@@ -953,6 +965,12 @@
           "type": "string",
           "description": "Logical artifact name used in logs and manifests. When omitted, falls back to the root config name."
         },
+        "group": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?![dD][eE][fF][aA][uU][lL][tT]$)[A-Za-z0-9._-]+$",
+          "description": "Optional artifact lifecycle group. Ungrouped artifacts belong to the default group."
+        },
         "settings": {
           "type": "object",
           "description": "Provider-specific arbitrary settings for custom artifact providers.",
@@ -979,6 +997,12 @@
           "type": "string",
           "description": "Logical artifact name used in logs and manifests. When omitted, falls back to the root config name."
         },
+        "group": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?![dD][eE][fF][aA][uU][lL][tT]$)[A-Za-z0-9._-]+$",
+          "description": "Optional artifact lifecycle group. Ungrouped artifacts belong to the default group."
+        },
         "settings": {
           "description": "Provider-specific Helm package and OCI push settings.",
           "$ref": "#/$defs/helmOciArtifactSettings"
@@ -1001,6 +1025,12 @@
         "name": {
           "type": "string",
           "description": "Logical artifact name used in logs and manifests."
+        },
+        "group": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?![dD][eE][fF][aA][uU][lL][tT]$)[A-Za-z0-9._-]+$",
+          "description": "Optional artifact lifecycle group. Ungrouped artifacts belong to the default group."
         },
         "settings": {
           "type": "object",
@@ -1079,6 +1109,12 @@
           "type": "string",
           "description": "Logical artifact name used in logs and manifests."
         },
+        "group": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?![dD][eE][fF][aA][uU][lL][tT]$)[A-Za-z0-9._-]+$",
+          "description": "Optional artifact lifecycle group. Ungrouped artifacts belong to the default group."
+        },
         "settings": {
           "type": "object",
           "description": "python -m build / twine upload settings.",
@@ -1156,6 +1192,12 @@
           "type": "string",
           "description": "Logical artifact name used in logs and manifests."
         },
+        "group": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?![dD][eE][fF][aA][uU][lL][tT]$)[A-Za-z0-9._-]+$",
+          "description": "Optional artifact lifecycle group. Ungrouped artifacts belong to the default group."
+        },
         "settings": {
           "type": "object",
           "description": "mvn package/deploy settings.",
@@ -1220,6 +1262,12 @@
         "name": {
           "type": "string",
           "description": "Logical artifact name used in logs and manifests."
+        },
+        "group": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?![dD][eE][fF][aA][uU][lL][tT]$)[A-Za-z0-9._-]+$",
+          "description": "Optional artifact lifecycle group. Ungrouped artifacts belong to the default group."
         },
         "settings": {
           "type": "object",
@@ -1298,6 +1346,12 @@
           "type": "string",
           "description": "Logical artifact name used in logs and manifests."
         },
+        "group": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?![dD][eE][fF][aA][uU][lL][tT]$)[A-Za-z0-9._-]+$",
+          "description": "Optional artifact lifecycle group. Ungrouped artifacts belong to the default group."
+        },
         "settings": {
           "type": "object",
           "description": "gem build/push settings.",
@@ -1371,6 +1425,12 @@
           "type": "string",
           "description": "Logical artifact name used in logs and manifests."
         },
+        "group": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?![dD][eE][fF][aA][uU][lL][tT]$)[A-Za-z0-9._-]+$",
+          "description": "Optional artifact lifecycle group. Ungrouped artifacts belong to the default group."
+        },
         "settings": {
           "type": "object",
           "description": "terraform init/plan/apply settings.",
@@ -1439,6 +1499,12 @@
         "name": {
           "type": "string",
           "description": "Logical artifact name used in logs and manifests."
+        },
+        "group": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?![dD][eE][fF][aA][uU][lL][tT]$)[A-Za-z0-9._-]+$",
+          "description": "Optional artifact lifecycle group. Ungrouped artifacts belong to the default group."
         },
         "settings": {
           "type": "object",
@@ -1516,6 +1582,12 @@
         "name": {
           "type": "string",
           "description": "Logical artifact name used in logs and manifests."
+        },
+        "group": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?![dD][eE][fF][aA][uU][lL][tT]$)[A-Za-z0-9._-]+$",
+          "description": "Optional artifact lifecycle group. Ungrouped artifacts belong to the default group."
         },
         "settings": {
           "type": "object",

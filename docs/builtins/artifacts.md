@@ -2,6 +2,65 @@
 
 Builtins for building, tagging, and pushing artifacts with planning and policy gates.
 
+## Artifact groups
+
+Each configured artifact may have one top-level `group` string. Artifact groups scope
+planning, provider build/tag/push calls, manifests, and verified handoff inventories; they do
+not create independent version providers or change repository verification.
+
+Artifacts without `group` belong to the implicit `default` group:
+
+```yaml
+artifacts:
+  - type: nuget
+    name: Acme.Runtime
+    settings:
+      project: src/runtime/Acme.Runtime.csproj
+  - type: nuget
+    name: Acme.Abstractions
+    group: contracts
+    settings:
+      project: src/abstractions/Acme.Abstractions.csproj
+  - type: nuget
+    name: Acme.DependencyInjection
+    group: contracts
+    settings:
+      project: src/dependency-injection/Acme.DependencyInjection.csproj
+```
+
+This is useful when an API/abstractions package has a different publication cadence from the
+runtime packages that implement it. For example, downstream plugin authors may need the updated
+contracts as soon as the public interfaces change, while runtime packages do not need to be
+repacked and re-published for that contracts-only release. Conversely, runtime-only fixes can
+ship without publishing unchanged contracts packages.
+
+```powershell
+# Review only the contracts lane, then publish it after repository verification.
+rx plan --artifact-group contracts --push
+rx release --artifact-group contracts --push
+
+# For a coordinated release, include the default and every named artifact group.
+rx release --all-artifact-groups --push
+```
+
+With this example, the default commands select `Acme.Runtime`; the contracts command selects
+`Acme.Abstractions` and `Acme.DependencyInjection`; all-groups selects all three. These lanes
+share Rexo's resolved repository version: grouping controls which artifacts participate, not
+their version or repository verification.
+
+The standard `rx build`, `rx tag`, `rx push`, `rx plan`, and `rx release` commands select
+ungrouped artifacts by default. `--artifact-group <name>` selects only that named group, while
+`--all-artifact-groups` includes every configured artifact, grouped and ungrouped. The selectors
+cannot be combined. Matching is case-insensitive. Group names use ASCII letters, digits, `.`,
+`_`, or `-`; `default` is reserved for ungrouped artifacts.
+
+An unknown group or an empty default group in a repository with configured artifacts fails
+with the available groups instead of succeeding with an empty lifecycle. Repositories with no
+artifacts retain the existing empty-artifact behavior. Source verification, tests, build hooks,
+and repository-defined commands continue to run normally; hooks can inspect
+`{{options.artifact-group}}` or `{{options.all-artifact-groups}}` if they need group-specific
+behavior.
+
 ## builtin:plan-artifacts
 
 Purpose:
@@ -15,13 +74,14 @@ Calls:
 Inputs:
 
 - Artifact selection predicate (caller-provided)
+- Optional `ctx.Options.artifact-group` or `ctx.Options.all-artifact-groups` selector (composed with the caller predicate)
 - Context version/branch/commit/PR/clean-tree flags
 - Option `push` (typically mapped via `with`) to indicate push intent
 
 Outputs:
 
 - `message`
-- `plan` (JSON string with `repo`, `version`, `artifacts`, and `push` sections)
+- `plan` (JSON string with `Repo`, `Version`, `Artifacts`, `ArtifactGroup`, and `Push` sections)
 - `pushRequested` (`bool`)
 - `canPush` (`bool`)
 - `skipReasons` (`string[]`)
@@ -159,5 +219,7 @@ reject symbolic-link traversal, and publish only their validated outputs.
 Unsupported providers fail explicitly rather than falling back to build or discovery.
 Remote artifact providers can implement their own immutable reference validation and
 publication through the same interface; Docker/OCI support is not implemented here.
-The receipt is integrity evidence, not a signature or remote promotion/deployment record.
+The receipt records the selected artifact group as well as the exact artifact inventory, and
+publication must use the same group. It is integrity evidence, not a signature or remote
+promotion/deployment record.
 Do not consume a receipt from an untrusted PR run in a privileged release run.

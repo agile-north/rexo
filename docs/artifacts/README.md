@@ -25,6 +25,22 @@ This folder contains provider-specific artifact documentation.
 | `terraform` | [terraform.md](terraform.md) |
 | `generic` | [generic.md](generic.md) |
 
+## Artifact lifecycle groups
+
+Set the top-level `group` on an artifact to select it independently during plan/build/tag/push
+operations. Ungrouped artifacts belong to the implicit `default` group, selected when no
+group selector is supplied. For example, `rx release --artifact-group contracts --push` publishes
+only artifacts marked `group: contracts`; `rx release --all-artifact-groups --push` publishes all
+configured artifacts. Both still use the repository's normal resolved version and verification
+lifecycle. This is useful when a smaller artifact lane—such as public contracts consumed by
+integrators—needs a release without republishing unchanged runtime packages. A coordinated
+release can include every lane with `--all-artifact-groups`; groups do not create separate
+version tracks.
+
+Groups are exclusive, case-insensitive selectors; they are not artifact labels, project-build
+filters, or separate versioning tracks. See [artifact lifecycle builtins](../builtins/artifacts.md)
+for selection and empty-group failure behavior.
+
 ## Shared behavior across many providers
 
 The following settings are intentionally consistent across the tool-based providers (`npm`, `pypi`, `maven`, `gradle`, `rubygems`, `terraform`, `helm`):

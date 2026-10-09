@@ -26,6 +26,45 @@ public sealed class VerifiedArtifactHandoffTests : IDisposable
     public void Dispose() => Directory.Delete(_root, true);
 
     [Fact]
+    public async Task HandoffInventoryIsLimitedToSelectedGroup()
+    {
+        var runtime = new RepoArtifactConfig("nuget", "Contracts");
+        var contracts = new RepoArtifactConfig("nuget", "Contracts") { Group = "contracts" };
+        var config = _config with { Artifacts = [runtime, contracts] };
+        Directory.CreateDirectory(Path.Join(_root, "artifacts", "packages"));
+        await File.WriteAllTextAsync(
+            Path.Join(_root, "artifacts", "packages", "Contracts.1.2.3.nupkg"),
+            "verified contracts bytes");
+        var run = new RunManifest
+        {
+            Success = true,
+            CommandExecuted = "release",
+            CommitSha = "commit",
+            IsCi = true,
+            CiBuildId = "run",
+            Version = _version,
+            ConfigHash = CanonicalConfigHasher.Compute(config),
+            Steps = [new StepManifestEntry("verify", true, 0, 1)],
+            Artifacts = [new ArtifactManifestEntry("nuget", "Contracts", true, false, [])],
+        };
+        await File.WriteAllTextAsync(Path.Join(_root, "run.json"), JsonSerializer.Serialize(run));
+
+        var selectedContext = Context() with
+        {
+            Options = new Dictionary<string, string?> { ["artifact-group"] = "contracts" },
+        };
+        await VerifiedArtifactHandoff.SealAsync(
+            "run.json", "handoff.json", config, selectedContext, Providers(), CancellationToken.None);
+        var handoff = await VerifiedArtifactHandoff.VerifyAsync(
+            "handoff.json", config, selectedContext, Providers(), CancellationToken.None);
+        Assert.Equal("Contracts", Assert.Single(handoff.Artifacts).Name);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            VerifiedArtifactHandoff.VerifyAsync("handoff.json", config, Context(), Providers(), CancellationToken.None));
+        Assert.Contains("group selection does not match", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task HandoffTransfersExactPackagesBetweenRepositoryRoots()
     {
         await PrepareAsync();

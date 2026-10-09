@@ -190,6 +190,13 @@ Schema default:
 
 `default` may be a string, boolean, integer, or number value.
 
+The `embedded:standard` artifact lifecycle commands (`plan`, `build`, `tag`, `push`, and
+`release`) accept `--artifact-group <name>` or `--all-artifact-groups`. Use one selector at a
+time. These options scope artifact operations only; they do not filter repository verification,
+source builds, tests, or command hooks. Selectors propagate through delegated commands, and
+custom steps may inspect `{{options.artifact-group}}` or
+`{{options.all-artifact-groups}}`.
+
 ---
 
 ## Steps

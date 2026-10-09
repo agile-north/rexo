@@ -196,7 +196,10 @@ public sealed record RepoVersioningConfig(
 public sealed record RepoArtifactConfig(
     string Type,
     string? Name = null,
-    Dictionary<string, JsonElement>? Settings = null);
+    Dictionary<string, JsonElement>? Settings = null)
+{
+    public string? Group { get; init; }
+}
 
 public sealed record RepoEnvironmentConfig(string Path);
 

@@ -10,6 +10,13 @@
         "push": {
           "type": "bool",
           "default": false
+        },
+        "artifact-group": {
+          "type": "string"
+        },
+        "all-artifact-groups": {
+          "type": "bool",
+          "default": false
         }
       },
       "steps": [
@@ -115,7 +122,15 @@
     },
     "build": {
       "description": "Build and tag configured artifacts locally.",
-      "options": {},
+      "options": {
+        "artifact-group": {
+          "type": "string"
+        },
+        "all-artifact-groups": {
+          "type": "bool",
+          "default": false
+        }
+      },
       "steps": [
         {
           "id": "validate",
@@ -153,7 +168,15 @@
     },
     "tag": {
       "description": "Tag configured artifacts.",
-      "options": {},
+      "options": {
+        "artifact-group": {
+          "type": "string"
+        },
+        "all-artifact-groups": {
+          "type": "bool",
+          "default": false
+        }
+      },
       "steps": [
         {
           "id": "version",
@@ -169,6 +192,13 @@
       "description": "Push configured artifacts when explicitly confirmed.",
       "options": {
         "confirm": {
+          "type": "bool",
+          "default": false
+        },
+        "artifact-group": {
+          "type": "string"
+        },
+        "all-artifact-groups": {
           "type": "bool",
           "default": false
         }
@@ -187,6 +217,13 @@
       "description": "Verify, build, and optionally push configured artifacts.",
       "options": {
         "push": {
+          "type": "bool",
+          "default": false
+        },
+        "artifact-group": {
+          "type": "string"
+        },
+        "all-artifact-groups": {
           "type": "bool",
           "default": false
         }
@@ -250,4 +287,3 @@
     "ship": "push"
   }
 }
-

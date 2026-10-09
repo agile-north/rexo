@@ -1,6 +1,7 @@
 namespace Rexo.Execution;
 
 using System.Text.Json;
+using Rexo.Configuration.Models;
 using Rexo.Core.Models;
 
 internal sealed class DockerBuiltinModule : IConfigBuiltinModule
@@ -106,9 +107,23 @@ internal sealed class DockerBuiltinModule : IConfigBuiltinModule
                     new Dictionary<string, object?> { ["error"] = "Missing stage name. Provide args.stage or --stage." });
             }
 
-            var dockerArtifacts = (context.Config.Artifacts ?? [])
-                .Where(a => string.Equals(a.Type, "docker", StringComparison.OrdinalIgnoreCase))
-                .ToList();
+            List<RepoArtifactConfig> dockerArtifacts;
+            try
+            {
+                dockerArtifacts = ConfigCommandLoader.SelectArtifacts(
+                    context.Config,
+                    ctx,
+                    static a => string.Equals(a.Type, "docker", StringComparison.OrdinalIgnoreCase)).ToList();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return new StepResult(
+                    step.Id ?? "docker-stage",
+                    false,
+                    2,
+                    TimeSpan.Zero,
+                    new Dictionary<string, object?> { ["error"] = ex.Message });
+            }
 
             if (dockerArtifacts.Count == 0)
             {

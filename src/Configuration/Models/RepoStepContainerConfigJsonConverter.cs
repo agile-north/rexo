@@ -62,7 +62,7 @@ internal sealed class RepoStepContainerConfigJsonConverter : JsonConverter<RepoS
             Dockerfile = value.InlineDockerfile is not null
                 ? JsonSerializer.SerializeToElement(new DockerfileObject { Content = value.InlineDockerfile }, options)
                 : value.Dockerfile is not null
-                    ? JsonSerializer.SerializeToElement(value.Dockerfile, options)
+                    ? JsonSerializer.SerializeToElement(new DockerfilePathObject { Path = value.Dockerfile }, options)
                     : null,
             Context = value.Context,
             Build = value.Build,
@@ -168,5 +168,11 @@ internal sealed class RepoStepContainerConfigJsonConverter : JsonConverter<RepoS
     {
         [JsonPropertyName("content")]
         public required string Content { get; init; }
+    }
+
+    private sealed class DockerfilePathObject
+    {
+        [JsonPropertyName("path")]
+        public required string Path { get; init; }
     }
 }

@@ -210,6 +210,56 @@ public sealed class CliCommandPresentationTests
     }
 
     [Fact]
+    public async Task BuiltinProgressMessagesRespectEffectiveEchoMode()
+    {
+        var directory = CreateTempDirectory();
+        await WriteConfigAsync(directory, """
+        {
+          "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+          "schemaVersion": "1.0",
+          "name": "sample",
+          "versioning": { "provider": "fixed", "fallback": "1.2.3" },
+          "commands": {
+            "quiet-validation": { "steps": [{ "uses": "builtin:validate", "echo": "none" }] },
+            "loud-validation": { "steps": [{ "uses": "builtin:validate", "echo": "full" }] },
+            "quiet-version": { "steps": [{ "uses": "builtin:resolve-version", "echo": "none" }] },
+            "loud-version": { "steps": [{ "uses": "builtin:resolve-version", "echo": "full" }] },
+            "quiet-clean": { "steps": [{ "uses": "builtin:clean", "echo": "none" }] }
+          }
+        }
+        """);
+
+        try
+        {
+            var (exitCode, stdout, stderr) = await ExecuteAsync(
+                directory,
+                ["--no-color", "quiet-validation"]);
+            Assert.True(exitCode == 0, stderr);
+            Assert.DoesNotContain("Validating configuration", stdout, StringComparison.Ordinal);
+
+            (exitCode, stdout, stderr) = await ExecuteAsync(directory, ["--no-color", "loud-validation"]);
+            Assert.True(exitCode == 0, stderr);
+            Assert.Contains("Validating configuration", stdout, StringComparison.Ordinal);
+
+            (exitCode, stdout, stderr) = await ExecuteAsync(directory, ["--no-color", "quiet-version"]);
+            Assert.True(exitCode == 0, stderr);
+            Assert.DoesNotContain("Resolved version: 1.2.3", stdout, StringComparison.Ordinal);
+
+            (exitCode, stdout, stderr) = await ExecuteAsync(directory, ["--no-color", "loud-version"]);
+            Assert.True(exitCode == 0, stderr);
+            Assert.Contains("Resolved version: 1.2.3", stdout, StringComparison.Ordinal);
+
+            (exitCode, stdout, stderr) = await ExecuteAsync(directory, ["--no-color", "quiet-clean"]);
+            Assert.True(exitCode == 0, stderr);
+            Assert.DoesNotContain("Cleaning generated output", stdout, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task EchoGlobalFlagDoesNotConsumeDeclaredCommandOption()
     {
         var directory = CreateTempDirectory();

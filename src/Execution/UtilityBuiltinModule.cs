@@ -11,11 +11,11 @@ internal sealed class UtilityBuiltinModule : IConfigBuiltinModule
             const string cacheKey = "builtin:validate";
             if (context.Loader.RunCache.TryGetValue(cacheKey, out var cached))
             {
-                Console.WriteLine("  Using cached validation result.");
+                BuiltinProgress.Write(ctx, "  Using cached validation result.");
                 return Task.FromResult(cached);
             }
 
-            Console.WriteLine("  Validating configuration...");
+            BuiltinProgress.Write(ctx, "  Validating configuration...");
             var result = new StepResult(
                 step.Id ?? "validate",
                 true,
@@ -28,7 +28,7 @@ internal sealed class UtilityBuiltinModule : IConfigBuiltinModule
 
         registry.Register("builtin:clean", (step, ctx, ct) =>
         {
-            Console.WriteLine("  Cleaning generated output...");
+            BuiltinProgress.Write(ctx, "  Cleaning generated output...");
             var outputRoot = ConfigCommandLoader.ResolveOutputRoot(context.Config, ctx);
             var artifactsDir = Path.GetFullPath(
                 Path.IsPathRooted(outputRoot)
@@ -42,11 +42,11 @@ internal sealed class UtilityBuiltinModule : IConfigBuiltinModule
                 {
                     Directory.Delete(artifactsDir, true);
                     cleaned.Add(artifactsDir);
-                    Console.WriteLine($"    Removed: {artifactsDir}");
+                    BuiltinProgress.Write(ctx, $"    Removed: {artifactsDir}");
                 }
-                catch (Exception ex)
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    Console.WriteLine($"    Failed to clean {artifactsDir}: {ex.Message}");
+                    Console.Error.WriteLine($"    Failed to clean {artifactsDir}: {ex.Message}");
                 }
             }
 
@@ -62,4 +62,5 @@ internal sealed class UtilityBuiltinModule : IConfigBuiltinModule
                 }));
         });
     }
+
 }

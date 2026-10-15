@@ -2,6 +2,7 @@ namespace Rexo.Configuration.Tests;
 
 using System.Text.Json;
 using Rexo.Configuration;
+using Rexo.Configuration.Models;
 using Rexo.Policies;
 
 [Collection("EnvironmentVariableSensitive")]
@@ -1582,6 +1583,20 @@ public sealed class RepoConfigurationLoaderTests
     {
       Directory.Delete(dir, recursive: true);
     }
+  }
+
+  [Fact]
+  public void ContainerDockerfilePathWithNewlineRoundTripsAsPath()
+  {
+    const string dockerfilePath = "Dockerfile\n.production";
+    var container = new RepoStepContainerConfig(Image: "test", Dockerfile: dockerfilePath);
+
+    var json = JsonSerializer.Serialize(container);
+    var reloaded = JsonSerializer.Deserialize<RepoStepContainerConfig>(json);
+
+    Assert.Contains("\"path\"", json, StringComparison.Ordinal);
+    Assert.Equal(dockerfilePath, reloaded?.Dockerfile);
+    Assert.Null(reloaded?.InlineDockerfile);
   }
 
   [Fact]

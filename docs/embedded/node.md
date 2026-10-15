@@ -31,6 +31,13 @@ vars:
 
 Policy vars are deep-merged underneath your repository's `vars`; your repository always wins.
 
+This policy explicitly sets `outputs.precreateDirectories: true` so audit shell redirection can
+write to `outputs.security.audit` without a missing-parent error, and custom test/SARIF scripts
+can use the configured output directories. Newly created directories are removed after execution
+if still empty. Set `outputs.precreateDirectories: false` in your repository to disable this
+behavior when your scripts prepare their own parents. `outputs.emit: false` also disables
+precreation. This policy does not opt in to automatic command or artifact manifests.
+
 ## Commands
 
 | Command | Steps (ids) |

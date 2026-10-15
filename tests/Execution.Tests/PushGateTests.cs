@@ -243,7 +243,12 @@ public sealed class PushGateTests
                     Aliases: new Dictionary<string, string>())
                 {
                     Artifacts = [new RepoArtifactConfig("docker", "a")],
-                    Outputs = new RepoOutputsConfig { Emit = true, Root = "output" },
+                    Outputs = new RepoOutputsConfig
+                    {
+                        Emit = true,
+                        Root = "output",
+                        Manifests = new RepoManifestOutputsConfig { Emit = true },
+                    },
                 },
                 repoRoot);
 
@@ -255,6 +260,8 @@ public sealed class PushGateTests
 
             Assert.True(result.Success);
             Assert.True(File.Exists(Path.Join(repoRoot, "output", "manifest.json")));
+            Assert.True(File.Exists(Path.Join(repoRoot, "output", "manifests", "commands.json")));
+            Assert.False(Directory.Exists(Path.Join(repoRoot, "output", "tests")));
         }
         finally
         {
@@ -265,10 +272,27 @@ public sealed class PushGateTests
         }
     }
 
-    [Fact]
-    public async Task PushDoesNotWriteManifestWhenEmitRuntimeFilesDisabled()
+    [Theory]
+    [InlineData(null, null, "skip")]
+    [InlineData(null, null, "success")]
+    [InlineData(null, null, "failure")]
+    [InlineData(true, false, "skip")]
+    [InlineData(true, false, "success")]
+    [InlineData(true, false, "failure")]
+    [InlineData(false, true, "skip")]
+    [InlineData(false, true, "success")]
+    [InlineData(false, true, "failure")]
+    [InlineData(null, true, "skip")]
+    [InlineData(null, true, "success")]
+    [InlineData(null, true, "failure")]
+    [InlineData(true, true, "skip")]
+    [InlineData(true, true, "success")]
+    [InlineData(true, true, "failure")]
+    public async Task AutomaticArtifactAndCommandManifestsRequireBothEmissionPermissions(
+        bool? emit, bool? manifestsEmit, string outcome)
     {
-        var provider = new RecordingArtifactProvider("docker");
+        using var _ = new CiEnvironmentScope();
+        var provider = new RecordingArtifactProvider("docker", outcome != "failure");
         var repoRoot = Path.Join(Path.GetTempPath(), $"rexo-emit-off-{Guid.NewGuid():N}");
         Directory.CreateDirectory(repoRoot);
 
@@ -288,18 +312,37 @@ public sealed class PushGateTests
                     Aliases: new Dictionary<string, string>())
                 {
                     Artifacts = [new RepoArtifactConfig("docker", "a")],
-                    Outputs = new RepoOutputsConfig { Emit = false, Root = "output" },
+                    Outputs = new RepoOutputsConfig
+                    {
+                        Emit = emit,
+                        Root = "output",
+                        Manifests = new RepoManifestOutputsConfig { Emit = manifestsEmit },
+                    },
                 },
                 repoRoot);
 
             var result = await ExecuteAsync(
                 executor,
                 "push",
-                new Dictionary<string, string?> { ["confirm"] = "true" },
+                new Dictionary<string, string?> { ["confirm"] = outcome == "skip" ? "false" : "true" },
                 repoRoot);
 
-            Assert.True(result.Success);
-            Assert.False(File.Exists(Path.Join(repoRoot, "output", "manifest.json")));
+            Assert.Equal(outcome != "failure", result.Success);
+            Assert.Single(result.Artifacts);
+            Assert.Single(result.PushDecisions);
+            Assert.Equal(outcome == "skip" ? 0 : 1, provider.PushedArtifacts.Count);
+            var expected = emit != false && manifestsEmit == true;
+            var manifestPath = Path.Join(repoRoot, "output", "manifest.json");
+            Assert.Equal(expected, File.Exists(manifestPath));
+            Assert.Equal(expected, File.Exists(Path.Join(repoRoot, "output", "manifests", "commands.json")));
+            Assert.Equal(expected, Directory.Exists(Path.Join(repoRoot, "output")));
+            Assert.False(Directory.Exists(Path.Join(repoRoot, "output", "tests")));
+            if (expected)
+            {
+                using var manifest = JsonDocument.Parse(await File.ReadAllTextAsync(manifestPath));
+                Assert.Equal("a", Assert.Single(manifest.RootElement.GetProperty("Artifacts").EnumerateArray())
+                    .GetProperty("Name").GetString());
+            }
         }
         finally
         {
@@ -310,7 +353,7 @@ public sealed class PushGateTests
         }
     }
 
-    private sealed class RecordingArtifactProvider(string type) : IArtifactProvider
+    private sealed class RecordingArtifactProvider(string type, bool pushSuccess = true) : IArtifactProvider
     {
         public string Type { get; } = type;
         public List<string> PushedArtifacts { get; } = [];
@@ -324,7 +367,7 @@ public sealed class PushGateTests
         public Task<ArtifactPushResult> PushAsync(ArtifactConfig artifact, ExecutionContext context, CancellationToken cancellationToken)
         {
             PushedArtifacts.Add(artifact.Name);
-            return Task.FromResult(new ArtifactPushResult(artifact.Name, true, [$"{artifact.Name}:latest"]));
+            return Task.FromResult(new ArtifactPushResult(artifact.Name, pushSuccess, pushSuccess ? [$"{artifact.Name}:latest"] : []));
         }
     }
 

@@ -569,8 +569,11 @@ public sealed class RepoConfigurationLoaderTests
     }
   }
 
-  [Fact]
-  public async Task LoadAsyncMergesOutputsSettingsAndVarsAcrossExtends()
+  [Theory]
+  [InlineData("", true)]
+  [InlineData("\"precreateDirectories\": false,", false)]
+  [InlineData("\"precreateDirectories\": true,", true)]
+  public async Task LoadAsyncMergesOutputsSettingsAndVarsAcrossExtends(string precreateSetting, bool expectedPrecreate)
   {
     var dir = Path.Join(Path.GetTempPath(), $"rexo-extends-outputs-settings-vars-{Guid.NewGuid():N}");
     Directory.CreateDirectory(dir);
@@ -585,6 +588,7 @@ public sealed class RepoConfigurationLoaderTests
         "aliases": {},
         "outputs": {
           "root": "artifacts/base",
+          "precreateDirectories": true,
           "tests": {
             "results": "artifacts/base-tests"
           },
@@ -602,7 +606,7 @@ public sealed class RepoConfigurationLoaderTests
       """);
 
     var childPath = Path.Join(dir, "child.json");
-    await File.WriteAllTextAsync(childPath, """
+    await File.WriteAllTextAsync(childPath, $$"""
       {
         "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
         "schemaVersion": "1.0",
@@ -611,6 +615,7 @@ public sealed class RepoConfigurationLoaderTests
         "commands": {},
         "aliases": {},
         "outputs": {
+          {{precreateSetting}}
           "analysis": {
             "sarif": "artifacts/analysis/sarif"
           }
@@ -631,6 +636,7 @@ public sealed class RepoConfigurationLoaderTests
       var config = await RepoConfigurationLoader.LoadAsync(childPath, CancellationToken.None);
 
       Assert.Equal("artifacts/base", config.Outputs?.Root);
+      Assert.Equal(expectedPrecreate, config.Outputs?.PrecreateDirectories);
       Assert.Equal("artifacts/base-tests", config.Outputs?.Tests?.Results);
       Assert.Equal("artifacts/analysis/sarif", config.Outputs?.Analysis?.Sarif);
       Assert.Equal("artifacts/base-packages", config.Outputs?.Packages);
@@ -1864,6 +1870,7 @@ public sealed class RepoConfigurationLoaderTests
     var root = document.RootElement;
     var commands = root.GetProperty("commands");
 
+    Assert.True(root.GetProperty("outputs").GetProperty("precreateDirectories").GetBoolean());
     Assert.True(commands.TryGetProperty("restore", out _), "Should have 'restore'");
     Assert.True(commands.TryGetProperty("build", out _), "Should have 'build'");
     Assert.True(commands.TryGetProperty("test", out _), "Should have 'test'");
@@ -1872,6 +1879,35 @@ public sealed class RepoConfigurationLoaderTests
     Assert.False(commands.TryGetProperty("release", out _), "Should not have 'release' — lifecycle is provided by standard");
 
     Assert.False(root.TryGetProperty("aliases", out _), "Should have no aliases — node contributes commands, not shortcuts");
+  }
+
+  [Theory]
+  [InlineData("", true)]
+  [InlineData("outputs: { precreateDirectories: false }", false)]
+  [InlineData("outputs: { precreateDirectories: true }", true)]
+  public async Task NodePolicyPrecreationDefaultCanBeOverriddenByRepository(string outputs, bool expected)
+  {
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-node-output-defaults-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(dir);
+    try
+    {
+      var configPath = Path.Join(dir, "rexo.yaml");
+      await File.WriteAllTextAsync(configPath, $$"""
+        $schema: https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json
+        schemaVersion: "1.0"
+        name: sample
+        extends: [embedded:node]
+        {{outputs}}
+        """);
+      var config = await RepoConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
+
+      Assert.Equal(expected, config.Outputs?.PrecreateDirectories);
+      Assert.Null(config.Outputs?.Manifests?.Emit);
+    }
+    finally
+    {
+      Directory.Delete(dir, true);
+    }
   }
 
   [Fact]

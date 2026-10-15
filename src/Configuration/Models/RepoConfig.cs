@@ -216,8 +216,11 @@ public sealed record RepoEnvironmentConfig(string Path);
 
 public sealed record RepoOutputsConfig
 {
-    /// <summary>When false, Rexo does not collect or write any output files (manifests, step outputs). Default: <c>true</c>.</summary>
+    /// <summary>Master permission for automatic runtime output files. Explicit JSON-file output is unaffected. Default: <c>true</c>.</summary>
     public bool? Emit { get; init; }
+
+    /// <summary>When true and emission is enabled, prepare all configured output directories before steps run. Default: <c>false</c>.</summary>
+    public bool? PrecreateDirectories { get; init; }
 
     /// <summary>Defaults for command stdout and JSON output. CLI flags still override these values.</summary>
     public RepoCommandOutputConfig? Command { get; init; }
@@ -252,7 +255,7 @@ public sealed record RepoOutputsConfig
 
 public sealed record RepoManifestOutputsConfig
 {
-    /// <summary>When true, persist command manifests automatically. Default: <c>false</c>.</summary>
+    /// <summary>When true and emission is enabled, persist command and artifact manifests automatically. Default: <c>false</c>.</summary>
     public bool? Emit { get; init; }
 
     /// <summary>Manifest output directory. Default: <c>~/manifests</c> (relative to <c>outputs.root</c>).</summary>

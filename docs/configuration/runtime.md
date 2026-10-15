@@ -65,6 +65,7 @@ This is a top-level config section, separate from `runtime`.
 ```jsonc
 "outputs": {
   "emit": true,
+  "precreateDirectories": false,
   "root": "artifacts",
   "tests": {
     "results": "~/tests",
@@ -87,13 +88,14 @@ This is a top-level config section, separate from `runtime`.
 }
 ```
 
-- `emit` (default: `true`): when `false`, Rexo does not collect or write runtime output files such as manifests and step file outputs.
+- `emit` (default: `true`): master permission for automatic runtime output files. Explicit `--json-file` results and their run-manifest sidecars are unaffected.
+- `precreateDirectories` (default: `false`): when `true` and `emit` is enabled, prepare the full configured output directory tree before steps run, then clean up newly created directories that remain empty. Otherwise file-producing operations create only the parents they need. Custom shell commands must prepare their own directories when required.
 - `root` (default: `artifacts`): root folder used by runtime artifact outputs.
 - `tests` — overrides where test results, coverage data, and coverage reports are written. The policy overlay (e.g. `embedded:dotnet`) reads these paths when constructing test commands.
 - `analysis` — overrides where analysis reports and SARIF files are written. The policy overlay reads these paths when constructing analysis commands.
 - `packages` (default: `~/packages` under `outputs.root`): NuGet and other package output directory.
 - `manifests.path` (default: `~/manifests`): manifest directory. `~/...` resolves under `outputs.root`.
-- `manifests.emit` (default: `false`): opt in to automatic command-manifest persistence. This is independent of `outputs.emit`, which is the broader switch for runtime output files.
+- `manifests.emit` (default: `false`): opt in to both automatic command and artifact manifests. Both require `outputs.emit` to be enabled. Artifact manifests remain at `outputs.root/manifest.json`; `manifests.path` controls only command manifests.
 - `manifests.commandMode` (default: `aggregate`): command-manifest file strategy.
   - `single`: alias for aggregate; write one aggregated manifest file (`commands.json`) containing every command run.
   - `perCommand`: write one manifest file per command (`<command>.json`).

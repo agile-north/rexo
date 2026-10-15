@@ -20,10 +20,19 @@ When `outputs.ci.emit` is enabled, Rexo can emit CI-native variables after comma
 `include`, and `exclude` masks. Masks match the canonical field path and can be exact names,
 wildcards, or `regex:...` expressions.
 
-Configured output paths are materialized before command steps run, which keeps commands
-portable while still letting analyzers and test runners write into the resolved paths.
-Any directories created for that materialization are cleaned up after the command finishes if
-they remain empty.
+`outputs.emit` defaults to `true` and is the master permission for automatic runtime output files.
+`outputs.precreateDirectories` defaults to `false`: Rexo file-producing operations create their
+needed parent directories, not unrelated output directories. Custom shell commands and external
+tools must create their own parents if needed, or explicitly opt in to
+`outputs.precreateDirectories: true`. With that opt-in and `outputs.emit` enabled, Rexo prepares
+the full configured output directory tree before steps run (including the manifest directory,
+even when manifest persistence is disabled). Newly created directories are cleaned up after
+success or failure if they remain empty; existing directories and produced files are preserved.
+
+The `embedded:node` policy explicitly enables precreation because its audit commands redirect
+JSON into `outputs.security.audit`. Repositories can override it with `false` when their commands
+prepare their own directories. The .NET policy and Rexo's self-hosted configuration do not need
+precreation: test runners and SARIF builtins create their required directories.
 
 For a defaults-and-provider quick reference, see [CI Output Emission](ci-output-emission.md).
 
@@ -128,14 +137,17 @@ Template linkage:
 
 Written only when `--json-file` is provided.
 
-## Automatic Command Manifests (`outputs.manifests`)
+## Automatic Command and Artifact Manifests (`outputs.manifests`)
 
-Automatic command manifests are opt-in with `outputs.manifests.emit: true` (default: `false`).
-When enabled, and `outputs.emit` is also true (default), Rexo writes them under
+Automatic command and artifact manifests are both opt-in with `outputs.manifests.emit: true`
+(default: `false`). Both also require `outputs.emit` to be true (default). Command manifests use
 `outputs.manifests.path` (default `~/manifests`, which resolves under `outputs.root`).
-Setting `outputs.emit: false` disables automatic command manifests along with other runtime
-output files. This switch does not disable an explicitly requested `--json-file` result or its
-run-manifest sidecar.
+Artifact manifests retain their existing location at `outputs.root/manifest.json`, including
+when a push is skipped or fails. Disabling persistence does not remove artifact entries or push
+decisions from in-memory command results, JSON output, or CI emission.
+Setting `outputs.emit: false` disables both automatic manifest types along with other automatic
+runtime output files. Neither switch disables an explicitly requested `--json-file` result or
+its run-manifest sidecar.
 
 Paths that begin with `~/` are rooted under `outputs.root`. Plain relative paths are
 repo-relative.
@@ -165,9 +177,10 @@ Example:
 }
 ```
 
-Repositories upgrading from releases that wrote command manifests automatically should set
-`outputs.manifests.emit: true` to retain that behavior. Direct `--json-file` output and its
-sidecar remain available regardless of this setting.
+Repositories upgrading from releases that wrote command or artifact manifests automatically
+should set `outputs.manifests.emit: true` to retain that behavior. Workflows that relied on eager
+directory creation must also set `outputs.precreateDirectories: true`. Direct `--json-file`
+output and its sidecar remain available regardless of these settings.
 
 Example shape:
 

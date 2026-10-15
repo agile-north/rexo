@@ -1,6 +1,7 @@
 namespace Rexo.Integration.Tests;
 
 using System.Globalization;
+using System.Text.Json;
 using Rexo.Cli;
 
 [Collection("IntegrationSequential")]
@@ -710,6 +711,80 @@ public sealed class CliCommandPresentationTests
             (exitCode, _, _) = await ExecuteAsync(directory, ["--no-color", "hello"]);
             Assert.Equal(0, exitCode);
             Assert.Equal("existing-manifest", await File.ReadAllTextAsync(priorManifest));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task ExplicitJsonFileAndSidecarIgnoreAutomaticOutputSwitches(bool emit, bool manifestsEmit)
+    {
+        var directory = CreateTempDirectory();
+        await WriteConfigAsync(directory, $$"""
+        {
+          "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+          "schemaVersion": "1.0",
+          "name": "sample",
+          "outputs": {
+            "emit": {{(emit ? "true" : "false")}},
+            "precreateDirectories": false,
+            "manifests": { "emit": {{(manifestsEmit ? "true" : "false")}} }
+          },
+          "commands": {
+            "hello": { "steps": [{ "run": "echo hello" }] }
+          }
+        }
+        """);
+        try
+        {
+            var (exitCode, _, _) = await ExecuteAsync(directory,
+                ["--no-color", "hello", "--json-file", Path.Join("runs", "nested", "hello.json")]);
+
+            Assert.Equal(0, exitCode);
+            using var result = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Join(directory, "runs", "nested", "hello.json")));
+            using var sidecar = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Join(directory, "runs", "nested", "hello-manifest.json")));
+            Assert.True(result.RootElement.GetProperty("Success").GetBoolean());
+            Assert.Equal("hello", sidecar.RootElement.GetProperty("CommandExecuted").GetString());
+            Assert.Equal(emit && manifestsEmit, File.Exists(Path.Join(directory, "artifacts", "manifests", "commands.json")));
+            Assert.Equal(emit && manifestsEmit, Directory.Exists(Path.Join(directory, "artifacts")));
+            Assert.False(Directory.Exists(Path.Join(directory, "artifacts", "tests")));
+            Assert.False(Directory.Exists(Path.Join(directory, "artifacts", "tmp")));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task StepFileOutputCreatesOnlyItsRequiredParentsWithoutPrecreation()
+    {
+        var directory = CreateTempDirectory();
+        await WriteConfigAsync(directory, """
+        {
+          "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+          "schemaVersion": "1.0",
+          "name": "sample",
+          "commands": {
+            "hello": {
+              "steps": [{ "run": "echo hello", "outputFile": "capture/nested/stdout.txt" }]
+            }
+          }
+        }
+        """);
+        try
+        {
+            var (exitCode, _, _) = await ExecuteAsync(directory, ["--no-color", "hello"]);
+
+            Assert.Equal(0, exitCode);
+            Assert.Equal("hello", (await File.ReadAllTextAsync(Path.Join(directory, "capture", "nested", "stdout.txt"))).Trim());
+            Assert.False(Directory.Exists(Path.Join(directory, "artifacts")));
         }
         finally
         {

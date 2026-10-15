@@ -514,6 +514,7 @@ public sealed partial class RepoConfigurationLoader
         return new RepoOutputsConfig
         {
             Emit = child.Emit ?? @base.Emit,
+            PrecreateDirectories = child.PrecreateDirectories ?? @base.PrecreateDirectories,
             Command = MergeCommandOutputsConfig(@base.Command, child.Command),
             Ci = MergeCiOutputsConfig(@base.Ci, child.Ci),
             Root = child.Root ?? @base.Root,

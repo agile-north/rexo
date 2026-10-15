@@ -1602,8 +1602,23 @@ public static class Program
         {
             var candidateName = string.Join(" ", args.Skip(startIndex).Take(wordCount));
             var candidateEndIndex = startIndex + wordCount;
-            if (occurrences.Any(occurrence =>
-                    occurrence.Position > startIndex && occurrence.Position < candidateEndIndex))
+            var hasCommandOwnedEchoBoundary = occurrences.Any(occurrence =>
+            {
+                if (occurrence.Position <= startIndex || occurrence.Position >= candidateEndIndex)
+                {
+                    return false;
+                }
+
+                var precedingCommandName = string.Join(
+                    " ",
+                    args.Skip(startIndex).Take(occurrence.Position - startIndex));
+                var precedingCommand = commandNames.FirstOrDefault(name =>
+                    string.Equals(name, precedingCommandName, StringComparison.OrdinalIgnoreCase));
+                return precedingCommand is not null &&
+                    FindConfiguredCommandConfig(precedingCommand, config)?.Options.Keys.Any(option =>
+                        string.Equals(option, "echo", StringComparison.OrdinalIgnoreCase)) == true;
+            });
+            if (hasCommandOwnedEchoBoundary)
             {
                 continue;
             }

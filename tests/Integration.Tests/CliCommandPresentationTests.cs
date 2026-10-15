@@ -260,6 +260,39 @@ public sealed class CliCommandPresentationTests
     }
 
     [Fact]
+    public async Task AutoVersionProviderProgressRespectsEffectiveEchoMode()
+    {
+        var directory = CreateTempDirectory();
+        await WriteConfigAsync(directory, """
+        {
+          "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+          "schemaVersion": "1.0",
+          "name": "sample",
+          "versioning": { "provider": "auto", "fallback": "1.2.3" },
+          "commands": {
+            "quiet-version": { "steps": [{ "uses": "builtin:resolve-version", "echo": "none" }] },
+            "loud-version": { "steps": [{ "uses": "builtin:resolve-version", "echo": "full" }] }
+          }
+        }
+        """);
+
+        try
+        {
+            var (exitCode, stdout, stderr) = await ExecuteAsync(directory, ["--no-color", "quiet-version"]);
+            Assert.True(exitCode == 0, stderr);
+            Assert.DoesNotContain("[auto] Detected version provider:", stdout, StringComparison.Ordinal);
+
+            (exitCode, stdout, stderr) = await ExecuteAsync(directory, ["--no-color", "loud-version"]);
+            Assert.True(exitCode == 0, stderr);
+            Assert.Contains("[auto] Detected version provider:", stdout, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task EchoGlobalFlagDoesNotConsumeDeclaredCommandOption()
     {
         var directory = CreateTempDirectory();
@@ -589,6 +622,43 @@ public sealed class CliCommandPresentationTests
 
             Assert.Equal(0, exitCode);
             Assert.Contains("echo longer-command", stdout, StringComparison.Ordinal);
+            Assert.DoesNotContain("shorter-command", stdout, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task GlobalEchoBetweenCommandWordsDoesNotHideLongerCommandOption()
+    {
+        var directory = CreateTempDirectory();
+        await WriteConfigAsync(directory, """
+        {
+          "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+          "schemaVersion": "1.0",
+          "name": "sample",
+          "commands": {
+            "build": {
+              "steps": [{ "run": "echo shorter-command" }]
+            },
+            "build release": {
+              "options": { "echo": { "type": "string" } },
+              "steps": [{ "run": "echo {{options.echo}}" }]
+            }
+          }
+        }
+        """);
+
+        try
+        {
+            var (exitCode, stdout, stderr) = await ExecuteAsync(
+                directory,
+                ["--no-color", "build", "--echo", "full", "release", "--echo", "custom-value"]);
+
+            Assert.Equal(0, exitCode);
+            Assert.Contains("custom-value", stdout, StringComparison.Ordinal);
             Assert.DoesNotContain("shorter-command", stdout, StringComparison.Ordinal);
         }
         finally

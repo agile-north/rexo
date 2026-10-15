@@ -97,7 +97,7 @@ public sealed class GenericArtifactProvider : IArtifactProvider, IPreparedArtifa
         var archiveName = $"{artifact.Name}-{version}.{format}";
         var archivePath = System.IO.Path.Join(absoluteOutput, archiveName);
 
-        Console.WriteLine($"  > Creating {format} archive: {archiveName}");
+        ArtifactOutput.WriteCommand(context, $"  > Creating {format} archive: {archiveName}");
 
         try
         {
@@ -175,7 +175,7 @@ public sealed class GenericArtifactProvider : IArtifactProvider, IPreparedArtifa
                 .Select(file => (Source: file, Destination: System.IO.Path.Join(absoluteDestination, System.IO.Path.GetFileName(file)))))
             {
                 File.Copy(file, destFile, overwrite: true);
-                Console.WriteLine($"  Copied: {destFile}");
+                ArtifactOutput.WriteCommand(context, $"  Copied: {destFile}");
             }
 
             return Task.FromResult(new ArtifactPushResult(artifact.Name, true, [absoluteDestination]));

@@ -59,7 +59,11 @@ public sealed class StepExecutor : IStepExecutor
         }
         else if (!string.IsNullOrEmpty(stepDefinition.Uses))
         {
-            result = await ExecuteUsesAsync(stepId, stepDefinition.Uses, stepDefinition, stepContext, sw, cancellationToken);
+            var builtinContext = stepContext with
+            {
+                CliEchoMode = ResolveEchoMode(stepDefinition.Echo, stepContext),
+            };
+            result = await ExecuteUsesAsync(stepId, stepDefinition.Uses, stepDefinition, builtinContext, sw, cancellationToken);
         }
         else if (!string.IsNullOrEmpty(stepDefinition.Command))
         {
@@ -472,7 +476,23 @@ public sealed class StepExecutor : IStepExecutor
             $"rexo-{Guid.NewGuid():N}.Dockerfile");
         try
         {
-            await File.WriteAllTextAsync(temporaryDockerfilePath, container.InlineDockerfile, cancellationToken);
+            var fileOptions = new FileStreamOptions
+            {
+                Mode = FileMode.CreateNew,
+                Access = FileAccess.Write,
+                Share = FileShare.None,
+            };
+            if (!OperatingSystem.IsWindows())
+            {
+                fileOptions.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+            }
+
+            await using (var file = new FileStream(temporaryDockerfilePath, fileOptions))
+            {
+                var contents = System.Text.Encoding.UTF8.GetBytes(container.InlineDockerfile);
+                await file.WriteAsync(contents, cancellationToken);
+            }
+
             return await EnsureContainerImageFromPathAsync(
                 container with { Dockerfile = temporaryDockerfilePath, InlineDockerfile = null },
                 context,
@@ -484,9 +504,14 @@ public sealed class StepExecutor : IStepExecutor
         }
         finally
         {
-            if (File.Exists(temporaryDockerfilePath))
+            try
             {
                 File.Delete(temporaryDockerfilePath);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Console.Error.WriteLine(
+                    $"[warn] Could not remove temporary Dockerfile '{temporaryDockerfilePath}': {SecretMasker.Mask(ex.Message, secrets)}");
             }
         }
     }

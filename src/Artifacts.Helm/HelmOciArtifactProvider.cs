@@ -58,7 +58,7 @@ public sealed class HelmOciArtifactProvider : IArtifactProvider
             args.Add(version);
         }
 
-        Console.WriteLine($"  > helm {FormatArguments(args)}");
+        ArtifactOutput.WriteCommand(context, $"  > helm {FormatArguments(args)}");
         var result = await _runHelmAsync(artifact, args, context.RepositoryRoot, null, null, cancellationToken);
         if (result.ExitCode != 0 && ShouldRetryWithDependencyUpdate(result.Output))
         {
@@ -69,14 +69,14 @@ public sealed class HelmOciArtifactProvider : IArtifactProvider
                 chartPath,
             };
 
-            Console.WriteLine($"  > helm {FormatArguments(dependencyArgs)}");
+            ArtifactOutput.WriteCommand(context, $"  > helm {FormatArguments(dependencyArgs)}");
             var dependencyResult = await _runHelmAsync(artifact, dependencyArgs, context.RepositoryRoot, null, null, cancellationToken);
             if (dependencyResult.ExitCode != 0)
             {
                 return new ArtifactBuildResult(artifact.Name, false, null);
             }
 
-            Console.WriteLine($"  > helm {FormatArguments(args)}");
+            ArtifactOutput.WriteCommand(context, $"  > helm {FormatArguments(args)}");
             result = await _runHelmAsync(artifact, args, context.RepositoryRoot, null, null, cancellationToken);
         }
 
@@ -140,7 +140,7 @@ public sealed class HelmOciArtifactProvider : IArtifactProvider
         destination = RemoveDuplicateChartNameLeaf(destination, chartName);
 
         var pushArgs = new[] { "push", packagePath, destination };
-        Console.WriteLine($"  > helm {FormatArguments(pushArgs)}");
+        ArtifactOutput.WriteCommand(context, $"  > helm {FormatArguments(pushArgs)}");
         var pushResult = await _runHelmAsync(artifact, pushArgs, context.RepositoryRoot, null, null, cancellationToken);
 
         if (pushResult.ExitCode != 0)
@@ -238,7 +238,7 @@ public sealed class HelmOciArtifactProvider : IArtifactProvider
         }
 
         var args = new[] { "registry", "login", registry, "--username", auth.Username!, "--password-stdin" };
-        Console.WriteLine($"  > helm {FormatArguments(args)}");
+        ArtifactOutput.WriteCommand(context, $"  > helm {FormatArguments(args)}");
         await _runHelmAsync(artifact, args, context.RepositoryRoot, null, auth.Secret! + Environment.NewLine, cancellationToken);
     }
 
@@ -452,7 +452,6 @@ public sealed class HelmOciArtifactProvider : IArtifactProvider
         var dockerImage = Environment.GetEnvironmentVariable("HELM_CONTAINER_IMAGE")
             ?? GetSetting(artifact, "dockerImage")
             ?? DefaultHelmContainerImage;
-        Console.WriteLine($"  > helm not found on host, falling back to dockerized Helm runtime ({dockerImage})");
         return await RunHelmViaDockerAsync(args, workingDirectory, envOverrides, standardInput, dockerImage, cancellationToken);
     }
 

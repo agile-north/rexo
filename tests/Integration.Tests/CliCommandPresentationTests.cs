@@ -10,6 +10,8 @@ public sealed class CliCommandPresentationTests
     [
         ["config", "explain", "name"],
         ["explain", "version"],
+        ["init", "detect"],
+        ["run", "explain", "version"],
         ["check"],
         ["secrets", "doctor"],
         ["secrets", "preflight"],

@@ -27,7 +27,8 @@ public static class ToolRunner
         CancellationToken cancellationToken,
         string? standardInput = null,
         IReadOnlyDictionary<string, string?>? envOverrides = null,
-        string? dockerToolName = null)
+        string? dockerToolName = null,
+        string? echoMode = null)
     {
         var native = await TryRunNativeAsync(toolName, args, workingDirectory, cancellationToken, standardInput, envOverrides);
         if (native is not null)
@@ -41,7 +42,7 @@ public static class ToolRunner
                 $"{toolName} CLI is not installed and Docker fallback is disabled (settings.useDocker = false).");
         }
 
-        Console.WriteLine($"  > {toolName} not found on host, falling back to Dockerized runtime ({resolvedDockerImage})");
+        ArtifactOutput.WriteCommand(echoMode, $"  > {toolName} not found on host, falling back to Dockerized runtime ({resolvedDockerImage})");
         return await RunViaDockerAsync(
             dockerToolName ?? toolName,
             args,

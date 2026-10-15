@@ -329,6 +329,43 @@ public sealed class StepExecutorWhenConditionTests
     }
 
     [Fact]
+    public async Task BuiltinReceivesEffectiveStepEchoModeWithCliOverridePriority()
+    {
+        string? observedEchoMode = null;
+        var registry = new BuiltinRegistry();
+        registry.Register("capture-echo", (_, context, _) =>
+        {
+            observedEchoMode = context.CliEchoMode;
+            return Task.FromResult(new StepResult(
+                "capture",
+                true,
+                0,
+                TimeSpan.Zero,
+                new Dictionary<string, object?>()));
+        });
+
+        var executor = CreateExecutor(registry);
+        var step = new StepDefinition(
+            Id: "capture",
+            Run: null,
+            Uses: "capture-echo",
+            Command: null,
+            When: null)
+        {
+            Echo = "none",
+        };
+
+        await executor.ExecuteAsync(
+            step,
+            EmptyContext() with { CliEchoMode = "full" },
+            CancellationToken.None);
+        Assert.Equal("full", observedEchoMode);
+
+        await executor.ExecuteAsync(step, EmptyContext(), CancellationToken.None);
+        Assert.Equal("none", observedEchoMode);
+    }
+
+    [Fact]
     public async Task BuiltinStepWithoutExplicitIdUsesGeneratedIdSafely()
     {
         var registry = TrackingRegistry(out _);

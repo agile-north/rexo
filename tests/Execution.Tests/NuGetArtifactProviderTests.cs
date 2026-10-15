@@ -31,6 +31,44 @@ public sealed class NuGetArtifactProviderTests
     ];
 
     [Fact]
+    public async Task BuildAsyncEchoesCommandOnlyForFullModeAndKeepsToolOutputVisible()
+    {
+        var repositoryRoot = Path.Join(Path.GetTempPath(), $"rexo-nuget-echo-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(repositoryRoot);
+        var originalOut = Console.Out;
+
+        try
+        {
+            using var output = new StringWriter();
+            Console.SetOut(output);
+            var provider = new NuGetArtifactProvider(
+                runDotnetAsync: (_, _, _) => Task.FromResult((0, "tool output remains visible")));
+            var artifact = new ArtifactConfig(
+                "nuget",
+                "Rexo.Core",
+                JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                    """{"project":"src/Core/Core.csproj","output":"artifacts/packages"}""")!);
+            var context = ExecutionContext.Empty(repositoryRoot) with { CliEchoMode = "none" };
+
+            await provider.BuildAsync(artifact, context, CancellationToken.None);
+
+            Assert.DoesNotContain("> dotnet pack", output.ToString(), StringComparison.Ordinal);
+            Assert.Contains("tool output remains visible", output.ToString(), StringComparison.Ordinal);
+
+            output.GetStringBuilder().Clear();
+            await provider.BuildAsync(artifact, context with { CliEchoMode = "full" }, CancellationToken.None);
+
+            Assert.Contains("> dotnet pack", output.ToString(), StringComparison.Ordinal);
+            Assert.Contains("tool output remains visible", output.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+            Directory.Delete(repositoryRoot, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task PushAsyncUsesDefaultSourceFromEnvironment()
     {
         const string sourceEnvName = "NUGET_TARGET_SOURCE";

@@ -1710,6 +1710,7 @@ public static class Program
         command is "version" or "list" or "explain" or "doctor" or "graph" or "completion" or
             "capabilities" or "config resolved" or "config sources" or "config materialize" or
             "config explain" or "check" or "secrets doctor" or "secrets preflight" or
+            "init detect" or "explain version" or
             "policies list" or "policies show";
 
     private sealed record EchoOptionOccurrence(int Position, IReadOnlyList<string> Tokens, bool HasValue);

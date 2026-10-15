@@ -30,7 +30,7 @@ public sealed class DockerComposeArtifactProvider : IArtifactProvider
         var args = BuildComposeArgs(artifact, "build");
         args.AddRange(ToolRunner.ParseExtraArgs(GetSetting(artifact, "extra-build-args")));
 
-        Console.WriteLine($"  > docker {ToolRunner.FormatArgs(args)}");
+        ArtifactOutput.WriteCommand(context, $"  > docker {ToolRunner.FormatArgs(args)}");
         var result = await RunDockerAsync(args, workDir, cancellationToken);
 
         return new ArtifactBuildResult(artifact.Name, result.ExitCode == 0, result.ExitCode == 0 ? workDir : null);
@@ -78,7 +78,7 @@ public sealed class DockerComposeArtifactProvider : IArtifactProvider
             if (auth.HasCredentials)
             {
                 var loginArgs = new List<string> { "login", registry, "-u", auth.Username ?? string.Empty, "--password-stdin" };
-                Console.WriteLine($"  > docker login {registry}");
+                ArtifactOutput.WriteCommand(context, $"  > docker login {registry}");
                 await RunDockerWithStdinAsync(loginArgs, workDir, auth.Secret ?? string.Empty, cancellationToken);
             }
             else if (FeedAuthResolver.ShouldWarnOnMissingContainerRegistryCredentials(auth.Endpoint, fileEnv))
@@ -90,7 +90,7 @@ public sealed class DockerComposeArtifactProvider : IArtifactProvider
         var pushArgs = BuildComposeArgs(artifact, "push");
         pushArgs.AddRange(ToolRunner.ParseExtraArgs(GetSetting(artifact, "extra-push-args")));
 
-        Console.WriteLine($"  > docker {ToolRunner.FormatArgs(pushArgs)}");
+        ArtifactOutput.WriteCommand(context, $"  > docker {ToolRunner.FormatArgs(pushArgs)}");
         var result = await RunDockerAsync(pushArgs, workDir, cancellationToken);
 
         return new ArtifactPushResult(

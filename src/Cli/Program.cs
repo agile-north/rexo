@@ -31,7 +31,7 @@ public static class Program
         var workingDir = Environment.CurrentDirectory;
 
         // Parse global flags
-        var (cleanArgs, json, jsonFile, echoMode, echoOptionTokens, verbose, debug, quiet, dryRunFlag, nonInteractive, color, setOverrides) = ParseGlobalFlags(args);
+        var (cleanArgs, json, jsonFile, echoMode, echoOptionOccurrences, verbose, debug, quiet, dryRunFlag, nonInteractive, color, setOverrides) = ParseGlobalFlags(args);
         ConsoleRenderer.ConfigureColors(color);
 
         // No args (or only global flags) — show help
@@ -84,10 +84,18 @@ public static class Program
             return 9;
         }
 
-        if (echoOptionTokens.Count > 0 && ConfiguredCommandHasEchoOption(cleanArgs, config))
+        var commandOwnsEchoOption = echoOptionOccurrences.Count > 0 &&
+            ConfiguredCommandHasEchoOption(cleanArgs, config, echoOptionOccurrences);
+        if (commandOwnsEchoOption)
         {
-            cleanArgs = cleanArgs.Concat(echoOptionTokens).ToArray();
+            cleanArgs = RestoreEchoOptionOccurrences(cleanArgs, echoOptionOccurrences);
             echoMode = null;
+        }
+
+        if (!commandOwnsEchoOption && echoOptionOccurrences.Any(occurrence => !occurrence.HasValue))
+        {
+            ConsoleRenderer.RenderError("The --echo option requires a value: none, summary, or full.");
+            return 2;
         }
 
         if (echoMode is not null && !TryNormalizeEchoMode(echoMode, out echoMode))
@@ -750,9 +758,7 @@ public static class Program
             var (parsedArgs, parsedOptions) = ParseArgsAndOptions(remainingArgs);
 
             // Map positional args to declared arg names when config defines them
-            var cmdConfig = config?.Commands?.TryGetValue(candidateName, out var configuredCommand) == true
-                ? configuredCommand
-                : null;
+            var cmdConfig = FindConfiguredCommandConfig(candidateName, config);
             if (cmdConfig?.Args is { Count: > 0 })
             {
                 var argNames = cmdConfig.Args.Keys.ToArray();
@@ -769,7 +775,8 @@ public static class Program
                 }
             }
 
-            var invocation = CreateInvocation(parsedArgs, parsedOptions, outputSettings, workingDir, dryRun, debug);
+            var invocation = CreateInvocation(parsedArgs, parsedOptions, outputSettings, workingDir, dryRun, debug)
+                with { PresentationEchoMode = ResolvePresentationEchoMode(outputSettings.EchoMode, cmdConfig?.Echo, config?.Runtime?.Commands?.Echo) };
             var startedAt = DateTimeOffset.UtcNow;
             var result = await ExecuteCommandAsync(executor, candidateName, invocation, cancellationToken);
             var completedAt = DateTimeOffset.UtcNow;
@@ -888,9 +895,7 @@ public static class Program
             var (parsedArgs, parsedOptions) = ParseArgsAndOptions(remainingArgs);
 
             // If config defines arg names, map positional args to them
-            var cmdConfig = config?.Commands?.TryGetValue(candidateName, out var configuredCommand) == true
-                ? configuredCommand
-                : null;
+            var cmdConfig = FindConfiguredCommandConfig(candidateName, config);
             if (cmdConfig?.Args is { Count: > 0 })
             {
                 var argNames = cmdConfig.Args.Keys.ToArray();
@@ -950,7 +955,9 @@ public static class Program
             else
             {
                 var echoMode = invocation.PresentationEchoMode ?? invocation.EchoMode ?? "summary";
-                if (result.Success && string.Equals(echoMode, "none", StringComparison.OrdinalIgnoreCase))
+                if (result.Success &&
+                    string.Equals(echoMode, "none", StringComparison.OrdinalIgnoreCase) &&
+                    !IsInformationalResult(result.Command))
                 {
                     return result.ExitCode;
                 }
@@ -1281,13 +1288,13 @@ public static class Program
             .FirstOrDefault()?.InformationalVersion ?? "0.1.0-local";
     }
 
-    private static (IReadOnlyList<string> cleanArgs, bool json, string? jsonFile, string? echoMode, IReadOnlyList<string> echoOptionTokens, bool verbose, bool debug, bool quiet, bool? dryRun, bool nonInteractive, bool? color, IReadOnlyList<string> setOverrides) ParseGlobalFlags(string[] args)
+    private static (IReadOnlyList<string> cleanArgs, bool json, string? jsonFile, string? echoMode, IReadOnlyList<EchoOptionOccurrence> echoOptionOccurrences, bool verbose, bool debug, bool quiet, bool? dryRun, bool nonInteractive, bool? color, IReadOnlyList<string> setOverrides) ParseGlobalFlags(string[] args)
     {
         var clean = new List<string>();
         var json = false;
         string? jsonFile = null;
         string? echoMode = null;
-        var echoOptionTokens = new List<string>();
+        var echoOptionOccurrences = new List<EchoOptionOccurrence>();
         var verbose = false;
         var debug = false;
         var quiet = false;
@@ -1306,13 +1313,24 @@ public static class Program
                 case "--json-file" when i + 1 < args.Length:
                     jsonFile = args[++i];
                     break;
-                case "--echo" when i + 1 < args.Length:
-                    echoOptionTokens.Add(args[i]);
-                    echoMode = args[++i];
-                    echoOptionTokens.Add(echoMode);
+                case "--echo":
+                    var hasValue = i + 1 < args.Length &&
+                        !args[i + 1].StartsWith("--", StringComparison.Ordinal);
+                    var optionTokens = hasValue
+                        ? new[] { args[i], args[i + 1] }
+                        : [args[i]];
+                    echoOptionOccurrences.Add(new EchoOptionOccurrence(clean.Count, optionTokens, hasValue));
+                    if (hasValue)
+                    {
+                        echoMode = args[++i];
+                    }
+                    else
+                    {
+                        echoMode = null;
+                    }
                     break;
                 case var option when option.StartsWith("--echo=", StringComparison.Ordinal):
-                    echoOptionTokens.Add(option);
+                    echoOptionOccurrences.Add(new EchoOptionOccurrence(clean.Count, [option], true));
                     echoMode = option["--echo=".Length..];
                     break;
                 case "--verbose" or "-v":
@@ -1349,7 +1367,7 @@ public static class Program
             }
         }
 
-        return (clean, json, jsonFile, echoMode, echoOptionTokens, verbose, debug, quiet, dryRun, nonInteractive, color, setOverrides);
+        return (clean, json, jsonFile, echoMode, echoOptionOccurrences, verbose, debug, quiet, dryRun, nonInteractive, color, setOverrides);
     }
 
     private static (IReadOnlyDictionary<string, string> args, IReadOnlyDictionary<string, string?> options)
@@ -1526,9 +1544,23 @@ public static class Program
         return normalized is "none" or "summary" or "full";
     }
 
-    private static bool ConfiguredCommandHasEchoOption(IReadOnlyList<string> args, RepoConfig? config)
+    private static bool ConfiguredCommandHasEchoOption(
+        IReadOnlyList<string> args,
+        RepoConfig? config,
+        IReadOnlyList<EchoOptionOccurrence> occurrences) =>
+        TryFindSelectedConfiguredCommand(args, config, out var commandConfig, out var commandEndIndex) &&
+        occurrences.All(occurrence => occurrence.Position >= commandEndIndex) &&
+        commandConfig?.Options.Keys.Any(option => string.Equals(option, "echo", StringComparison.OrdinalIgnoreCase)) == true;
+
+    private static bool TryFindSelectedConfiguredCommand(
+        IReadOnlyList<string> args,
+        RepoConfig? config,
+        out RepoCommandConfig? commandConfig,
+        out int commandEndIndex)
     {
-        if (config?.Commands is not { Count: > 0 } commands)
+        commandConfig = null;
+        commandEndIndex = 0;
+        if (config is null)
         {
             return false;
         }
@@ -1536,37 +1568,88 @@ public static class Program
         var startIndex = args.Count > 1 && string.Equals(args[0], "run", StringComparison.OrdinalIgnoreCase)
             ? 1
             : 0;
-        if (startIndex >= args.Count)
+        var commandNames = (config.Commands?.Keys.AsEnumerable() ?? Enumerable.Empty<string>())
+            .Concat(config.Aliases?.Keys.AsEnumerable() ?? Enumerable.Empty<string>())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        for (var wordCount = args.Count - startIndex; wordCount >= 1; wordCount--)
         {
-            return false;
-        }
-
-        foreach (var (name, command) in commands.OrderByDescending(pair => pair.Key.Length))
-        {
-            var nameParts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            if (startIndex + nameParts.Length > args.Count)
+            var candidateName = string.Join(" ", args.Skip(startIndex).Take(wordCount));
+            if (commandNames.Any(name => string.Equals(name, candidateName, StringComparison.OrdinalIgnoreCase)))
             {
-                continue;
-            }
-
-            var matches = true;
-            for (var index = 0; index < nameParts.Length; index++)
-            {
-                if (!string.Equals(nameParts[index], args[startIndex + index], StringComparison.OrdinalIgnoreCase))
-                {
-                    matches = false;
-                    break;
-                }
-            }
-
-            if (matches && command.Options.Keys.Any(option => string.Equals(option, "echo", StringComparison.OrdinalIgnoreCase)))
-            {
+                commandConfig = FindConfiguredCommandConfig(candidateName, config);
+                commandEndIndex = startIndex + wordCount;
                 return true;
             }
         }
 
         return false;
     }
+
+    private static RepoCommandConfig? FindConfiguredCommandConfig(string commandName, RepoConfig? config)
+    {
+        if (config is null)
+        {
+            return null;
+        }
+
+        var resolvedName = commandName;
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        while (visited.Add(resolvedName))
+        {
+            string? aliasTarget = null;
+            foreach (var (alias, target) in config.Aliases ?? [])
+            {
+                if (string.Equals(alias, resolvedName, StringComparison.OrdinalIgnoreCase))
+                {
+                    aliasTarget = target;
+                    break;
+                }
+            }
+
+            if (aliasTarget is null)
+            {
+                break;
+            }
+
+            resolvedName = aliasTarget;
+        }
+
+        if (config.Commands is not null)
+        {
+            foreach (var (name, command) in config.Commands)
+            {
+                if (string.Equals(name, resolvedName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return command;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static IReadOnlyList<string> RestoreEchoOptionOccurrences(
+        IReadOnlyList<string> cleanArgs,
+        IReadOnlyList<EchoOptionOccurrence> occurrences)
+    {
+        var restored = cleanArgs.ToList();
+        var insertedCount = 0;
+        foreach (var occurrence in occurrences)
+        {
+            restored.InsertRange(Math.Min(occurrence.Position + insertedCount, restored.Count), occurrence.Tokens);
+            insertedCount += occurrence.Tokens.Count;
+        }
+
+        return restored;
+    }
+
+    private static bool IsInformationalResult(string command) =>
+        command is "version" or "list" or "explain" or "doctor" or "graph" or "completion" or
+            "capabilities" or "config resolved" or "config sources" or "config materialize" or
+            "policies list" or "policies show";
+
+    private sealed record EchoOptionOccurrence(int Position, IReadOnlyList<string> Tokens, bool HasValue);
 
     private sealed record CommandOutputSettings(
         bool Json,

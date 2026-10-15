@@ -148,6 +148,216 @@ public sealed class CliCommandPresentationTests
             Assert.Equal(0, exitCode);
             Assert.Contains("custom-option-output", stdout, StringComparison.Ordinal);
             Assert.DoesNotContain("echo custom-option-output", stdout, StringComparison.Ordinal);
+
+            (exitCode, stdout, _) = await ExecuteAsync(
+                directory,
+                ["--no-color", "--echo", "full", "hello"]);
+
+            Assert.Equal(0, exitCode);
+            Assert.Contains("echo custom-option-output", stdout, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CommandOwnedEchoTokensKeepTheirOriginalOptionOrder()
+    {
+        var directory = CreateTempDirectory();
+        await WriteConfigAsync(directory, """
+        {
+          "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+          "schemaVersion": "1.0",
+          "name": "sample",
+          "commands": {
+            "hello": {
+              "options": {
+                "flag": { "type": "bool" },
+                "echo": { "type": "string" }
+              },
+              "steps": [
+                { "run": "echo {{options.flag}}-{{options.echo}}-{{options.name}}" }
+              ]
+            }
+          }
+        }
+        """);
+
+        try
+        {
+            var (exitCode, stdout, stderr) = await ExecuteAsync(
+                directory,
+                ["--no-color", "hello", "--flag", "--echo", "custom", "--name", "tail"]);
+
+            Assert.True(exitCode == 0, stderr);
+            Assert.True(stdout.Contains("true-custom-tail", StringComparison.Ordinal), stdout);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task BooleanCommandEchoDoesNotConsumeFollowingOptionsOrGlobalFlags()
+    {
+        var directory = CreateTempDirectory();
+        await WriteConfigAsync(directory, """
+        {
+          "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+          "schemaVersion": "1.0",
+          "name": "sample",
+          "commands": {
+            "hello": {
+              "options": {
+                "echo": { "type": "bool" },
+                "name": { "type": "string" }
+              },
+              "steps": [
+                { "run": "echo {{options.echo}}-{{options.name}}" }
+              ]
+            }
+          }
+        }
+        """);
+
+        try
+        {
+            var (exitCode, stdout, _) = await ExecuteAsync(
+                directory,
+                ["--no-color", "hello", "--echo", "--name", "value"]);
+
+            Assert.Equal(0, exitCode);
+            Assert.Contains("true-value", stdout, StringComparison.Ordinal);
+
+            (exitCode, stdout, _) = await ExecuteAsync(
+                directory,
+                ["--no-color", "hello", "--echo", "--json"]);
+
+            Assert.Equal(0, exitCode);
+            Assert.Contains("\"Success\": true", stdout, StringComparison.Ordinal);
+            Assert.DoesNotContain("Command 'hello' completed successfully.", stdout, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RunRouteHonorsCommandEchoAndInformationalResultsRemainVisible()
+    {
+        var directory = CreateTempDirectory();
+        await WriteConfigAsync(directory, """
+        {
+          "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+          "schemaVersion": "1.0",
+          "name": "sample",
+          "commands": {
+            "hello": {
+              "echo": "none",
+              "steps": [{ "id": "greeting", "run": "echo run-route-output" }]
+            }
+          }
+        }
+        """);
+
+        try
+        {
+            var (exitCode, stdout, _) = await ExecuteAsync(
+                directory,
+                ["--no-color", "run", "hello", "--verbose"]);
+
+            Assert.Equal(0, exitCode);
+            Assert.Contains("run-route-output", stdout, StringComparison.Ordinal);
+            Assert.DoesNotContain("Command 'hello' completed successfully.", stdout, StringComparison.Ordinal);
+            Assert.DoesNotContain("StepId", stdout, StringComparison.Ordinal);
+
+            (exitCode, stdout, _) = await ExecuteAsync(directory, ["--no-color", "list", "--echo", "none"]);
+
+            Assert.Equal(0, exitCode);
+            Assert.Contains("hello", stdout, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task AliasUsesTargetEchoPolicyAndEchoOptionOwnership()
+    {
+        var directory = CreateTempDirectory();
+        await WriteConfigAsync(directory, """
+        {
+          "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+          "schemaVersion": "1.0",
+          "name": "sample",
+          "aliases": { "hi": "hello" },
+          "commands": {
+            "hello": {
+              "echo": "none",
+              "options": { "echo": { "type": "string" } },
+              "steps": [{ "id": "greeting", "run": "echo alias-output" }]
+            }
+          }
+        }
+        """);
+
+        try
+        {
+            foreach (var args in new[]
+            {
+                new[] { "--no-color", "hi", "--echo", "custom-value" },
+                new[] { "--no-color", "run", "hi", "--verbose", "--echo", "custom-value" },
+            })
+            {
+                var (exitCode, stdout, _) = await ExecuteAsync(directory, args);
+
+                Assert.Equal(0, exitCode);
+                Assert.Contains("alias-output", stdout, StringComparison.Ordinal);
+                Assert.DoesNotContain("Command 'hello' completed successfully.", stdout, StringComparison.Ordinal);
+                Assert.DoesNotContain("StepId", stdout, StringComparison.Ordinal);
+            }
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task EchoOwnershipUsesTheLongestMatchingCommand()
+    {
+        var directory = CreateTempDirectory();
+        await WriteConfigAsync(directory, """
+        {
+          "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+          "schemaVersion": "1.0",
+          "name": "sample",
+          "commands": {
+            "build": {
+              "options": { "echo": { "type": "string" } },
+              "steps": [{ "run": "echo shorter-command" }]
+            },
+            "build release": {
+              "steps": [{ "run": "echo longer-command" }]
+            }
+          }
+        }
+        """);
+
+        try
+        {
+            var (exitCode, stdout, _) = await ExecuteAsync(
+                directory,
+                ["--no-color", "build", "release", "--echo", "full"]);
+
+            Assert.Equal(0, exitCode);
+            Assert.Contains("echo longer-command", stdout, StringComparison.Ordinal);
+            Assert.DoesNotContain("shorter-command", stdout, StringComparison.Ordinal);
         }
         finally
         {

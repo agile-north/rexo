@@ -2330,9 +2330,14 @@
       "properties": {
         "emit": {
           "type": "boolean",
-          "description": "When false, Rexo does not collect or write any output files (manifests, step file outputs). Well-known overlay commands also skip passing output path arguments to toolchain CLIs.",
-          "markdownDescription": "When `false`, Rexo does not collect or write runtime files such as manifests or step outputs. Default: `true`.",
+          "description": "Master permission for automatic runtime output files. Explicit --json-file output and its run-manifest sidecar are unaffected.",
+          "markdownDescription": "When `false`, Rexo does not collect or write automatic runtime files such as manifests or step outputs. Explicit `--json-file` output and its run-manifest sidecar are unaffected. Default: `true`.",
           "default": true
+        },
+        "precreateDirectories": {
+          "type": "boolean",
+          "description": "When true and outputs.emit is enabled, prepare the full configured output directory tree before steps run. Newly created directories are cleaned up afterward if still empty.",
+          "default": false
         },
         "command": {
           "type": "object",
@@ -2571,12 +2576,12 @@
           "type": "object",
           "additionalProperties": false,
           "description": "Manifest output settings.",
-          "markdownDescription": "Manifest output settings. Automatic command-manifest persistence is disabled by default; set `emit: true` to enable it. Default path is `~/manifests`; `commandMode` defaults to `aggregate` (`single` is an alias); `commandDetail` defaults to `summary`.",
+          "markdownDescription": "Manifest output settings. Automatic command and artifact manifests are disabled by default; set `emit: true` with `outputs.emit` enabled to persist them. Command manifests use `path` (default `~/manifests`); artifact manifests remain at `outputs.root/manifest.json`. `commandMode` defaults to `aggregate` (`single` is an alias); `commandDetail` defaults to `summary`.",
           "properties": {
             "emit": {
               "type": "boolean",
-              "description": "When true, persist command manifests automatically after command execution.",
-              "markdownDescription": "When true, persist command manifests automatically. Default: `false`. This does not control explicit `--json-file` output, artifact manifests, or CI-native output.",
+              "description": "When true and outputs.emit is enabled, persist command and artifact manifests automatically.",
+              "markdownDescription": "When true and `outputs.emit` is enabled, persist command and artifact manifests automatically. Default: `false`. Explicit `--json-file` output, its run-manifest sidecar, and CI-native output are unaffected.",
               "default": false
             },
             "path": {

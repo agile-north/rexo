@@ -281,6 +281,7 @@ shows the effective values used by built-ins (not a requirement to persist every
 
   "outputs": {
     "emit": true,
+    "precreateDirectories": false,
     "root": "artifacts",
     "tests": {
       "results": "~/tests",

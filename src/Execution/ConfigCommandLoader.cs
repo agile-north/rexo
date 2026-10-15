@@ -144,7 +144,7 @@ public sealed class ConfigCommandLoader
         CancellationToken cancellationToken)
     {
         var emitRuntimeFiles = ShouldEmitRuntimeFiles(config);
-        var emitCommandManifest = emitRuntimeFiles && config.Outputs?.Manifests?.Emit == true;
+        var emitCommandManifest = ShouldEmitAutomaticManifests(config);
         var ciVariablePrefix = ResolveCiVariablePrefix(config);
         var normalizedCommandConfig = NormalizeCommandConfig(commandConfig);
         var globalMaxDepth = config.Runtime?.Commands?.MaxDepth ?? DefaultMaxCommandDepth;
@@ -220,8 +220,8 @@ public sealed class ConfigCommandLoader
             var resolvedOutputs = BuildOutputsContext(config, context);
             context = context with { ResolvedOutputs = resolvedOutputs };
             var outputRoot = ResolveOutputRoot(config, context);
-            createdOutputDirectories = emitRuntimeFiles
-                ? EnsureConfiguredOutputDirectories(repositoryRoot, resolvedOutputs, emitCommandManifest)
+            createdOutputDirectories = emitRuntimeFiles && config.Outputs?.PrecreateDirectories == true
+                ? EnsureConfiguredOutputDirectories(repositoryRoot, resolvedOutputs)
                 : [];
 
             var stepExecutor = new StepExecutor(commandExecutor, _templateRenderer, _builtinRegistry);
@@ -549,6 +549,7 @@ public sealed class ConfigCommandLoader
         var globalPolicy = ParsePushPolicyRules(config);
         var confirmRequested = ResolveConfirmRequested(ctx.Options);
         var dryRun = ctx.IsDryRun;
+        var emitArtifactManifest = emitRuntimeFiles && ShouldEmitAutomaticManifests(config);
 
         if (!confirmRequested && !dryRun)
         {
@@ -567,7 +568,7 @@ public sealed class ConfigCommandLoader
                     "Push skipped: use --confirm locally, or use release --push."));
             }
 
-            if (emitRuntimeFiles)
+            if (emitArtifactManifest)
             {
                 await WriteArtifactManifestAsync(repositoryRoot, outputRoot, manifestEntries, cancellationToken);
             }
@@ -651,7 +652,7 @@ public sealed class ConfigCommandLoader
 
             if (!pushResult.Success)
             {
-                if (emitRuntimeFiles)
+                if (emitArtifactManifest)
                 {
                     await WriteArtifactManifestAsync(repositoryRoot, outputRoot, manifestEntries, cancellationToken);
                 }
@@ -665,7 +666,7 @@ public sealed class ConfigCommandLoader
             }
         }
 
-        if (emitRuntimeFiles)
+        if (emitArtifactManifest)
         {
             await WriteArtifactManifestAsync(repositoryRoot, outputRoot, manifestEntries, cancellationToken);
         }
@@ -1706,6 +1707,9 @@ public sealed class ConfigCommandLoader
     internal static bool ShouldEmitRuntimeFiles(RepoConfig config) =>
         config.Outputs?.Emit ?? true;
 
+    private static bool ShouldEmitAutomaticManifests(RepoConfig config) =>
+        ShouldEmitRuntimeFiles(config) && config.Outputs?.Manifests?.Emit == true;
+
     private sealed record PlanPayload(
         PlanRepoSection Repo,
         PlanVersionSection? Version,
@@ -2219,10 +2223,10 @@ public sealed class ConfigCommandLoader
 
     private static IReadOnlyList<string> EnsureConfiguredOutputDirectories(
         string repositoryRoot,
-        IReadOnlyDictionary<string, object?> outputs,
-        bool emitCommandManifest)
+        IReadOnlyDictionary<string, object?> outputs)
     {
         var createdDirectories = new List<string>();
+        EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "root");
         EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "tests", "results");
         EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "tests", "coverage");
         EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "tests", "reports");
@@ -2232,10 +2236,7 @@ public sealed class ConfigCommandLoader
         EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "security", "reports");
         EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "security", "sarif");
         EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "packages");
-        if (emitCommandManifest)
-        {
-            EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "manifests");
-        }
+        EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "manifests");
         EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "logs");
         EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "temp");
 

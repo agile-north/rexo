@@ -3,6 +3,9 @@
   "schemaVersion": "1.0",
   "name": "node-policy",
   "description": "Node.js toolchain command contributions. Essential steps (install, build, test, lint) are on by default; format check, lint SARIF, and dependency audit are opt-in via vars.node.*. Usable standalone or overlaid with embedded:standard.",
+  "outputs": {
+    "precreateDirectories": true
+  },
   "vars": {
     "node": {
       "packageManager": "npm",

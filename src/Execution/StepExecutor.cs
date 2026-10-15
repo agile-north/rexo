@@ -96,11 +96,12 @@ public sealed class StepExecutor : IStepExecutor
         var executionMetadata = new RunExecutionMetadata("native", "native", null, null, false, null, false, null);
         var debugEnabled = IsDebugEnabled(context);
         var echoMode = ResolveEchoMode(stepDefinition.Echo, context);
+        var displayStepId = CreateDisplayStepId(stepDefinition, secrets);
 
         if (stepDefinition.Container is { Image.Length: > 0 } container)
         {
             var containerResult = await ExecuteContainerizedRunWithFallbackAsync(
-                stepId,
+                displayStepId,
                 command,
                 container,
                 context,
@@ -115,7 +116,7 @@ public sealed class StepExecutor : IStepExecutor
         {
             if (echoMode != "none")
             {
-                Console.WriteLine($"  Step: {SecretMasker.Mask(stepId, secrets)}");
+                Console.WriteLine($"  Step: {displayStepId}");
                 Console.WriteLine("  Execution: native");
             }
 
@@ -939,7 +940,7 @@ public sealed class StepExecutor : IStepExecutor
         {
             CallStack = context.CommandCallStack,
             MaxCommandDepth = context.MaxCommandDepth,
-            EchoMode = context.CliEchoMode,
+            EchoMode = context.CliEchoMode ?? stepDefinition.Echo,
         };
 
         var result = await _commandExecutor.ExecuteAsync(commandName, invocation, cancellationToken);
@@ -1061,6 +1062,31 @@ public sealed class StepExecutor : IStepExecutor
         if (!string.IsNullOrEmpty(step.Uses)) return $"uses-{Sanitize(step.Uses)}";
         if (!string.IsNullOrEmpty(step.Command)) return $"cmd-{Sanitize(step.Command)}";
         return Guid.NewGuid().ToString("N")[..8];
+    }
+
+    private static string CreateDisplayStepId(StepDefinition step, IReadOnlySet<string> secrets)
+    {
+        if (step.Id is not null)
+        {
+            return SecretMasker.Mask(step.Id, secrets);
+        }
+
+        if (!string.IsNullOrEmpty(step.Run))
+        {
+            return $"run-{Sanitize(SecretMasker.Mask(step.Run, secrets))}";
+        }
+
+        if (!string.IsNullOrEmpty(step.Uses))
+        {
+            return $"uses-{Sanitize(SecretMasker.Mask(step.Uses, secrets))}";
+        }
+
+        if (!string.IsNullOrEmpty(step.Command))
+        {
+            return $"cmd-{Sanitize(SecretMasker.Mask(step.Command, secrets))}";
+        }
+
+        return GenerateStepId(step);
     }
 
     private static string Sanitize(string value)

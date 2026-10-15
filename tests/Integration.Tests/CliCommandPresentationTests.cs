@@ -6,6 +6,15 @@ using Rexo.Cli;
 [Collection("IntegrationSequential")]
 public sealed class CliCommandPresentationTests
 {
+    private static readonly string[][] InformationalCommands =
+    [
+        ["config", "explain", "name"],
+        ["explain", "version"],
+        ["check"],
+        ["secrets", "doctor"],
+        ["secrets", "preflight"],
+    ];
+
     [Fact]
     public async Task DefaultSummaryHidesCommandBodyAndDoesNotCreateCommandManifest()
     {
@@ -84,6 +93,41 @@ public sealed class CliCommandPresentationTests
     }
 
     [Fact]
+    public async Task GeneratedStepLabelMasksSecretsBeforeSanitizingCommandText()
+    {
+        const string secret = "synthetic-sensitive-label-token";
+        var priorSecret = Environment.GetEnvironmentVariable("EXAMPLE_TOKEN");
+        var directory = CreateTempDirectory();
+        await WriteConfigAsync(directory, """
+        {
+          "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+          "schemaVersion": "1.0",
+          "name": "sample",
+          "commands": {
+            "hello": {
+              "steps": [{ "run": "echo synthetic-sensitive-label-token" }]
+            }
+          }
+        }
+        """);
+
+        try
+        {
+            Environment.SetEnvironmentVariable("EXAMPLE_TOKEN", secret);
+            var (exitCode, stdout, stderr) = await ExecuteAsync(directory, ["--no-color", "hello"]);
+
+            Assert.True(exitCode == 0, stderr);
+            Assert.Contains("Step: run-echo", stdout, StringComparison.Ordinal);
+            Assert.DoesNotContain(secret, stdout, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("EXAMPLE_TOKEN", priorSecret);
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task StepEchoOverridesCommandAndRuntimeSettings()
     {
         var directory = CreateTempDirectory();
@@ -114,6 +158,48 @@ public sealed class CliCommandPresentationTests
             Assert.DoesNotContain("echo second-command-body", stdout, StringComparison.Ordinal);
             Assert.Contains("first-command-body", stdout, StringComparison.Ordinal);
             Assert.Contains("second-command-body", stdout, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CommandStepEchoPolicyIsAppliedToDelegatedCommand()
+    {
+        var directory = CreateTempDirectory();
+        await WriteConfigAsync(directory, """
+        {
+          "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+          "schemaVersion": "1.0",
+          "name": "sample",
+          "commands": {
+            "parent": {
+              "steps": [{ "command": "child", "echo": "full" }]
+            },
+            "child": {
+              "steps": [{ "run": "echo delegated-command-body" }]
+            }
+          }
+        }
+        """);
+
+        try
+        {
+            var (exitCode, stdout, stderr) = await ExecuteAsync(
+                directory,
+                ["--no-color", "parent"]);
+
+            Assert.True(exitCode == 0, stderr);
+            Assert.Contains("echo delegated-command-body", stdout, StringComparison.Ordinal);
+
+            (exitCode, stdout, stderr) = await ExecuteAsync(
+                directory,
+                ["--no-color", "--echo", "none", "parent"]);
+
+            Assert.True(exitCode == 0, stderr);
+            Assert.DoesNotContain("echo delegated-command-body", stdout, StringComparison.Ordinal);
         }
         finally
         {
@@ -155,6 +241,76 @@ public sealed class CliCommandPresentationTests
 
             Assert.Equal(0, exitCode);
             Assert.Contains("echo custom-option-output", stdout, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task GlobalEchoAndCommandEchoAreClassifiedPerOccurrence()
+    {
+        var directory = CreateTempDirectory();
+        await WriteConfigAsync(directory, """
+        {
+          "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+          "schemaVersion": "1.0",
+          "name": "sample",
+          "commands": {
+            "hello": {
+              "options": { "echo": { "type": "string" } },
+              "steps": [{ "run": "echo {{options.echo}}" }]
+            }
+          }
+        }
+        """);
+
+        try
+        {
+            var (exitCode, stdout, stderr) = await ExecuteAsync(
+                directory,
+                ["--no-color", "--echo", "full", "hello", "--echo", "custom-value"]);
+
+            Assert.True(exitCode == 0, stderr);
+            Assert.Contains("echo custom-value", stdout, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CommandMatchingDoesNotJoinWordsAcrossCommandOwnedOptions()
+    {
+        var directory = CreateTempDirectory();
+        await WriteConfigAsync(directory, """
+        {
+          "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+          "schemaVersion": "1.0",
+          "name": "sample",
+          "commands": {
+            "build": {
+              "options": { "echo": { "type": "string" } },
+              "steps": [{ "run": "echo shorter-{{options.echo}}" }]
+            },
+            "build release": {
+              "steps": [{ "run": "echo longer-command" }]
+            }
+          }
+        }
+        """);
+
+        try
+        {
+            var (exitCode, stdout, stderr) = await ExecuteAsync(
+                directory,
+                ["--no-color", "build", "--echo", "custom", "release"]);
+
+            Assert.True(exitCode == 0, stderr);
+            Assert.Contains("shorter-custom", stdout, StringComparison.Ordinal);
+            Assert.DoesNotContain("longer-command", stdout, StringComparison.Ordinal);
         }
         finally
         {
@@ -225,7 +381,7 @@ public sealed class CliCommandPresentationTests
 
         try
         {
-            var (exitCode, stdout, _) = await ExecuteAsync(
+            var (exitCode, stdout, stderr) = await ExecuteAsync(
                 directory,
                 ["--no-color", "hello", "--echo", "--name", "value"]);
 
@@ -239,6 +395,19 @@ public sealed class CliCommandPresentationTests
             Assert.Equal(0, exitCode);
             Assert.Contains("\"Success\": true", stdout, StringComparison.Ordinal);
             Assert.DoesNotContain("Command 'hello' completed successfully.", stdout, StringComparison.Ordinal);
+
+            (exitCode, stdout, stderr) = await ExecuteAsync(
+                directory,
+                ["--no-color", "hello", "--echo", "-v", "--name", "value"]);
+
+            Assert.True(exitCode == 0, stderr);
+            Assert.Contains("true-value", stdout, StringComparison.Ordinal);
+
+            (exitCode, _, stderr) = await ExecuteAsync(
+                directory,
+                ["--no-color", "hello", "--echo", "-q", "--name", "value"]);
+
+            Assert.True(exitCode == 0, stderr);
         }
         finally
         {
@@ -279,6 +448,17 @@ public sealed class CliCommandPresentationTests
 
             Assert.Equal(0, exitCode);
             Assert.Contains("hello", stdout, StringComparison.Ordinal);
+
+            foreach (var commandArgs in InformationalCommands)
+            {
+                var commandInvocation = new List<string> { "--no-color" };
+                commandInvocation.AddRange(commandArgs);
+                commandInvocation.Add("--echo");
+                commandInvocation.Add("none");
+                (exitCode, stdout, _) = await ExecuteAsync(directory, commandInvocation.ToArray());
+
+                Assert.NotEmpty(stdout);
+            }
         }
         finally
         {

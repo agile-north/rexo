@@ -84,12 +84,29 @@ public static class Program
             return 9;
         }
 
-        var commandOwnsEchoOption = echoOptionOccurrences.Count > 0 &&
-            ConfiguredCommandHasEchoOption(cleanArgs, config, echoOptionOccurrences);
+        var commandOwnsEchoOption = ConfiguredCommandHasEchoOption(
+            cleanArgs,
+            config,
+            echoOptionOccurrences,
+            out var commandEndIndex);
         if (commandOwnsEchoOption)
         {
-            cleanArgs = RestoreEchoOptionOccurrences(cleanArgs, echoOptionOccurrences);
-            echoMode = null;
+            var commandOccurrences = echoOptionOccurrences
+                .Where(occurrence => occurrence.Position >= commandEndIndex)
+                .ToArray();
+            var globalOccurrences = echoOptionOccurrences
+                .Where(occurrence => occurrence.Position < commandEndIndex)
+                .ToArray();
+            cleanArgs = RestoreEchoOptionOccurrences(cleanArgs, commandOccurrences);
+            echoMode = globalOccurrences.LastOrDefault() is { } globalOccurrence
+                ? GetEchoOptionValue(globalOccurrence)
+                : null;
+
+            if (globalOccurrences.Any(occurrence => !occurrence.HasValue))
+            {
+                ConsoleRenderer.RenderError("The --echo option requires a value: none, summary, or full.");
+                return 2;
+            }
         }
 
         if (!commandOwnsEchoOption && echoOptionOccurrences.Any(occurrence => !occurrence.HasValue))
@@ -749,7 +766,7 @@ public static class Program
         // args[0] == "run" — resolve using same longest-match as direct invocation
         var candidateArgs = args.Skip(1).ToList();
 
-        for (var wordCount = candidateArgs.Count; wordCount >= 1; wordCount--)
+        for (var wordCount = GetCommandNameWordCount(candidateArgs, 0); wordCount >= 1; wordCount--)
         {
             var candidateName = string.Join(" ", candidateArgs.Take(wordCount));
             if (!executor.Registry.TryResolve(candidateName, out _)) continue;
@@ -886,7 +903,7 @@ public static class Program
     {
         // Try multi-word command resolution: "branch feature" from ["branch", "feature", "name"]
         // Try progressively shorter command names
-        for (var wordCount = args.Count; wordCount >= 1; wordCount--)
+        for (var wordCount = GetCommandNameWordCount(args, 0); wordCount >= 1; wordCount--)
         {
             var candidateName = string.Join(" ", args.Take(wordCount));
             if (!executor.Registry.TryResolve(candidateName, out _)) continue;
@@ -1315,7 +1332,7 @@ public static class Program
                     break;
                 case "--echo":
                     var hasValue = i + 1 < args.Length &&
-                        !args[i + 1].StartsWith("--", StringComparison.Ordinal);
+                        !args[i + 1].StartsWith('-');
                     var optionTokens = hasValue
                         ? new[] { args[i], args[i + 1] }
                         : [args[i]];
@@ -1383,6 +1400,13 @@ public static class Program
             if (a.StartsWith("--", StringComparison.Ordinal))
             {
                 var key = a[2..];
+                var equalsIndex = key.IndexOf('=', StringComparison.Ordinal);
+                if (equalsIndex >= 0)
+                {
+                    parsedOptions[key[..equalsIndex]] = key[(equalsIndex + 1)..];
+                    continue;
+                }
+
                 // Check for --key value vs --key (bool flag)
                 if (i + 1 < argList.Count && !argList[i + 1].StartsWith("--", StringComparison.Ordinal))
                 {
@@ -1518,12 +1542,11 @@ public static class Program
         var stdout = !quiet && (commandOutputs?.Stdout ?? true);
 
         var normalizedEchoMode = echoMode ?? config?.Runtime?.Commands?.Echo;
-        if (normalizedEchoMode is not null && !TryNormalizeEchoMode(normalizedEchoMode, out normalizedEchoMode))
-        {
-            normalizedEchoMode = "summary";
-        }
+        normalizedEchoMode = normalizedEchoMode is not null &&
+            TryNormalizeEchoMode(normalizedEchoMode, out var normalized)
+                ? normalized
+                : "summary";
 
-        normalizedEchoMode ??= "summary";
         return new CommandOutputSettings(
             json,
             string.IsNullOrWhiteSpace(jsonFile) ? null : jsonFile,
@@ -1547,14 +1570,24 @@ public static class Program
     private static bool ConfiguredCommandHasEchoOption(
         IReadOnlyList<string> args,
         RepoConfig? config,
-        IReadOnlyList<EchoOptionOccurrence> occurrences) =>
-        TryFindSelectedConfiguredCommand(args, config, out var commandConfig, out var commandEndIndex) &&
-        occurrences.All(occurrence => occurrence.Position >= commandEndIndex) &&
-        commandConfig?.Options.Keys.Any(option => string.Equals(option, "echo", StringComparison.OrdinalIgnoreCase)) == true;
+        IReadOnlyList<EchoOptionOccurrence> occurrences,
+        out int commandEndIndex)
+    {
+        commandEndIndex = 0;
+        if (!TryFindSelectedConfiguredCommand(args, config, occurrences, out var commandConfig, out commandEndIndex))
+        {
+            return false;
+        }
+
+        var selectedCommandEndIndex = commandEndIndex;
+        return occurrences.Any(occurrence => occurrence.Position >= selectedCommandEndIndex) &&
+            commandConfig?.Options.Keys.Any(option => string.Equals(option, "echo", StringComparison.OrdinalIgnoreCase)) == true;
+    }
 
     private static bool TryFindSelectedConfiguredCommand(
         IReadOnlyList<string> args,
         RepoConfig? config,
+        IReadOnlyList<EchoOptionOccurrence> occurrences,
         out RepoCommandConfig? commandConfig,
         out int commandEndIndex)
     {
@@ -1572,18 +1605,47 @@ public static class Program
             .Concat(config.Aliases?.Keys.AsEnumerable() ?? Enumerable.Empty<string>())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        for (var wordCount = args.Count - startIndex; wordCount >= 1; wordCount--)
+        for (var wordCount = GetCommandNameWordCount(args, startIndex); wordCount >= 1; wordCount--)
         {
             var candidateName = string.Join(" ", args.Skip(startIndex).Take(wordCount));
+            var candidateEndIndex = startIndex + wordCount;
+            if (occurrences.Any(occurrence =>
+                    occurrence.Position > startIndex && occurrence.Position < candidateEndIndex))
+            {
+                continue;
+            }
+
             if (commandNames.Any(name => string.Equals(name, candidateName, StringComparison.OrdinalIgnoreCase)))
             {
                 commandConfig = FindConfiguredCommandConfig(candidateName, config);
-                commandEndIndex = startIndex + wordCount;
+                commandEndIndex = candidateEndIndex;
                 return true;
             }
         }
 
         return false;
+    }
+
+    private static int GetCommandNameWordCount(IReadOnlyList<string> args, int startIndex)
+    {
+        var wordCount = 0;
+        for (var i = startIndex; i < args.Count && !args[i].StartsWith('-'); i++)
+        {
+            wordCount++;
+        }
+
+        return wordCount;
+    }
+
+    private static string? GetEchoOptionValue(EchoOptionOccurrence occurrence)
+    {
+        var option = occurrence.Tokens[0];
+        if (option.StartsWith("--echo=", StringComparison.Ordinal))
+        {
+            return option["--echo=".Length..];
+        }
+
+        return occurrence.HasValue ? occurrence.Tokens[1] : null;
     }
 
     private static RepoCommandConfig? FindConfiguredCommandConfig(string commandName, RepoConfig? config)
@@ -1647,6 +1709,7 @@ public static class Program
     private static bool IsInformationalResult(string command) =>
         command is "version" or "list" or "explain" or "doctor" or "graph" or "completion" or
             "capabilities" or "config resolved" or "config sources" or "config materialize" or
+            "config explain" or "check" or "secrets doctor" or "secrets preflight" or
             "policies list" or "policies show";
 
     private sealed record EchoOptionOccurrence(int Position, IReadOnlyList<string> Tokens, bool HasValue);

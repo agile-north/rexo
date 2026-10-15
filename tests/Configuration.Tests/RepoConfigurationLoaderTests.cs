@@ -2,6 +2,7 @@ namespace Rexo.Configuration.Tests;
 
 using System.Text.Json;
 using Rexo.Configuration;
+using Rexo.Configuration.Models;
 using Rexo.Policies;
 
 [Collection("EnvironmentVariableSensitive")]
@@ -1499,6 +1500,217 @@ public sealed class RepoConfigurationLoaderTests
   }
 
   [Fact]
+  public async Task LoadAsyncParsesEchoPoliciesAndDockerfileSourceForms()
+  {
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-echo-dockerfile-json-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(dir);
+
+    try
+    {
+      var configPath = Path.Join(dir, "rexo.json");
+      await File.WriteAllTextAsync(configPath, """
+      {
+        "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+        "schemaVersion": "1.0",
+        "name": "sample",
+        "runtime": { "commands": { "echo": "summary" } },
+        "outputs": { "manifests": { "emit": false } },
+        "commands": {
+          "path": {
+            "echo": "full",
+            "steps": [{ "id": "path", "echo": "none", "run": "echo path", "container": { "image": "test", "dockerfile": "Dockerfile" } }]
+          },
+          "multiline": {
+            "steps": [{ "run": "echo multiline", "container": { "image": "test", "dockerfile": "FROM scratch\nRUN echo ok\n" } }]
+          },
+          "explicitPath": {
+            "steps": [{ "run": "echo path", "container": { "image": "test", "dockerfile": { "path": "Dockerfile" } } }]
+          },
+          "explicitContent": {
+            "steps": [{ "run": "echo content", "container": { "image": "test", "dockerfile": { "content": "FROM scratch" } } }]
+          }
+        }
+      }
+      """);
+
+      var config = await RepoConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
+
+      Assert.Equal("summary", config.Runtime?.Commands?.Echo);
+      Assert.Equal("full", config.Commands?["path"].Echo);
+      Assert.Equal("none", config.Commands?["path"].Steps[0].Echo);
+      Assert.False(config.Outputs?.Manifests?.Emit);
+      Assert.Equal("Dockerfile", config.Commands?["path"].Steps[0].Container?.Dockerfile);
+      Assert.Equal("FROM scratch\nRUN echo ok\n", config.Commands?["multiline"].Steps[0].Container?.InlineDockerfile);
+      Assert.Equal("Dockerfile", config.Commands?["explicitPath"].Steps[0].Container?.Dockerfile);
+      Assert.Equal("FROM scratch", config.Commands?["explicitContent"].Steps[0].Container?.InlineDockerfile);
+    }
+    finally
+    {
+      Directory.Delete(dir, recursive: true);
+    }
+  }
+
+  [Fact]
+  public async Task LoadAsyncParsesYamlBlockDockerfileAsInlineContent()
+  {
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-inline-dockerfile-yaml-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(dir);
+
+    try
+    {
+      var configPath = Path.Join(dir, "rexo.yaml");
+      await File.WriteAllTextAsync(configPath, """
+      $schema: https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json
+      schemaVersion: "1.0"
+      name: sample
+      commands:
+        build:
+          steps:
+            - id: run-container
+              run: echo hello
+              container:
+                image: test
+                dockerfile: |
+                  FROM alpine:3.21
+                  RUN echo hello
+      """);
+
+      var config = await RepoConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
+
+      Assert.Equal("FROM alpine:3.21\nRUN echo hello", config.Commands?["build"].Steps[0].Container?.InlineDockerfile);
+    }
+    finally
+    {
+      Directory.Delete(dir, recursive: true);
+    }
+  }
+
+  [Fact]
+  public void ContainerDockerfilePathWithNewlineRoundTripsAsPath()
+  {
+    const string dockerfilePath = "Dockerfile\n.production";
+    var container = new RepoStepContainerConfig(Image: "test", Dockerfile: dockerfilePath);
+
+    var json = JsonSerializer.Serialize(container);
+    var reloaded = JsonSerializer.Deserialize<RepoStepContainerConfig>(json);
+
+    Assert.Contains("\"path\"", json, StringComparison.Ordinal);
+    Assert.Equal(dockerfilePath, reloaded?.Dockerfile);
+    Assert.Null(reloaded?.InlineDockerfile);
+  }
+
+  [Fact]
+  public async Task LoadAsyncMergesRuntimeEchoAcrossExtendsLayers()
+  {
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-runtime-echo-merge-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(dir);
+
+    try
+    {
+      await File.WriteAllTextAsync(Path.Join(dir, "base.json"), """
+      {
+        "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+        "schemaVersion": "1.0",
+        "name": "sample",
+        "runtime": {
+          "commands": {
+            "maxDepth": 7,
+            "defaultMergeMode": "append",
+            "echo": "full"
+          }
+        },
+        "commands": {}
+      }
+      """);
+      var childPath = Path.Join(dir, "rexo.json");
+      await File.WriteAllTextAsync(childPath, """
+      {
+        "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+        "schemaVersion": "1.0",
+        "name": "sample",
+        "extends": ["./base.json"],
+        "runtime": { "commands": { "echo": "none" } },
+        "commands": {}
+      }
+      """);
+
+      var config = await RepoConfigurationLoader.LoadAsync(childPath, CancellationToken.None);
+
+      Assert.Equal(7, config.Runtime?.Commands?.MaxDepth);
+      Assert.Equal("append", config.Runtime?.Commands?.DefaultMergeMode);
+      Assert.Equal("none", config.Runtime?.Commands?.Echo);
+    }
+    finally
+    {
+      Directory.Delete(dir, recursive: true);
+    }
+  }
+
+  [Fact]
+  public async Task LoadAsyncRejectsInvalidEchoAndDockerfileSourceObjects()
+  {
+    var dir = Path.Join(Path.GetTempPath(), $"rexo-invalid-output-controls-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(dir);
+
+    try
+    {
+      var invalidDocuments = new[]
+      {
+        """
+        {
+          "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+          "schemaVersion": "1.0",
+          "name": "sample",
+          "runtime": { "commands": { "echo": "verbose" } },
+          "commands": {}
+        }
+        """,
+        """
+        {
+          "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+          "schemaVersion": "1.0",
+          "name": "sample",
+          "commands": {
+            "build": {
+              "steps": [{
+                "run": "echo hello",
+                "container": { "image": "sample", "dockerfile": { "path": "Dockerfile", "content": "FROM scratch" } }
+              }]
+            }
+          }
+        }
+        """,
+        """
+        {
+          "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+          "schemaVersion": "1.0",
+          "name": "sample",
+          "commands": {
+            "build": {
+              "steps": [{
+                "run": "echo hello",
+                "container": { "image": "sample", "dockerfile": {} }
+              }]
+            }
+          }
+        }
+        """,
+      };
+      var configPath = Path.Join(dir, "rexo.json");
+      foreach (var invalidDocument in invalidDocuments)
+      {
+        await File.WriteAllTextAsync(configPath, invalidDocument);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+          RepoConfigurationLoader.LoadAsync(configPath, CancellationToken.None));
+      }
+    }
+    finally
+    {
+      Directory.Delete(dir, recursive: true);
+    }
+  }
+
+  [Fact]
   public async Task LoadAsyncRejectsContainerOnUsesStep()
   {
     var dir = Path.Join(Path.GetTempPath(), $"rexo-step-container-invalid-{Guid.NewGuid():N}");
@@ -2330,5 +2542,3 @@ public sealed class RepoConfigurationLoaderTests
     }
     """;
 }
-
-

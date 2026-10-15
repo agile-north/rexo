@@ -79,7 +79,7 @@ public sealed class NuGetArtifactProvider : IArtifactProvider, IPreparedArtifact
             args += $" /p:Version={version}";
         }
 
-        Console.WriteLine($"  > dotnet {args}");
+        ArtifactOutput.WriteCommand(context, $"  > dotnet {args}");
 
         var result = await _runDotnetAsync(args, context.RepositoryRoot, cancellationToken);
         WriteToolOutput(result.Output);
@@ -136,7 +136,7 @@ public sealed class NuGetArtifactProvider : IArtifactProvider, IPreparedArtifact
                 args += $" --api-key {auth.Secret}";
             }
 
-            Console.WriteLine($"  > dotnet {MaskSecret(args, auth.Secret)}");
+            ArtifactOutput.WriteCommand(context, $"  > dotnet {MaskSecret(args, auth.Secret)}");
 
             var result = await _runDotnetAsync(args, context.RepositoryRoot, cancellationToken);
             WriteToolOutput(result.Output, auth.Secret);
@@ -171,7 +171,7 @@ public sealed class NuGetArtifactProvider : IArtifactProvider, IPreparedArtifact
                 symbolArgs += $" --api-key {symbolAuth.Secret}";
             }
 
-            Console.WriteLine($"  > dotnet {MaskSecret(symbolArgs, symbolAuth.Secret)}");
+            ArtifactOutput.WriteCommand(context, $"  > dotnet {MaskSecret(symbolArgs, symbolAuth.Secret)}");
 
             var symbolResult = await _runDotnetAsync(symbolArgs, context.RepositoryRoot, cancellationToken);
             WriteToolOutput(symbolResult.Output, auth.Secret, symbolAuth.Secret);

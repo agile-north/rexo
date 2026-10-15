@@ -144,6 +144,7 @@ public sealed class ConfigCommandLoader
         CancellationToken cancellationToken)
     {
         var emitRuntimeFiles = ShouldEmitRuntimeFiles(config);
+        var emitCommandManifest = emitRuntimeFiles && config.Outputs?.Manifests?.Emit == true;
         var ciVariablePrefix = ResolveCiVariablePrefix(config);
         var normalizedCommandConfig = NormalizeCommandConfig(commandConfig);
         var globalMaxDepth = config.Runtime?.Commands?.MaxDepth ?? DefaultMaxCommandDepth;
@@ -206,6 +207,9 @@ public sealed class ConfigCommandLoader
                 MappedSecretEnvironment = secretPreflight.MappedEnvironment,
                 CiVariablePrefix = ciVariablePrefix,
                 IsDryRun = TryGetOptionBoolean(invocation.Options, "dry-run") == true,
+                CliEchoMode = invocation.EchoMode,
+                CommandEchoMode = normalizedCommandConfig.Echo,
+                RuntimeEchoMode = config.Runtime?.Commands?.Echo,
                 CommandCallStack = [.. invocation.CallStack, commandName],
                 ResolvedOutputs = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase),
                 ResolvedSettings = BuildSettingsContext(config),
@@ -217,7 +221,7 @@ public sealed class ConfigCommandLoader
             context = context with { ResolvedOutputs = resolvedOutputs };
             var outputRoot = ResolveOutputRoot(config, context);
             createdOutputDirectories = emitRuntimeFiles
-                ? EnsureConfiguredOutputDirectories(repositoryRoot, resolvedOutputs)
+                ? EnsureConfiguredOutputDirectories(repositoryRoot, resolvedOutputs, emitCommandManifest)
                 : [];
 
             var stepExecutor = new StepExecutor(commandExecutor, _templateRenderer, _builtinRegistry);
@@ -362,7 +366,7 @@ public sealed class ConfigCommandLoader
                     PushDecisions = pushDecisionEntries,
                 };
 
-            if (emitRuntimeFiles)
+            if (emitCommandManifest)
             {
                 var manifestDirectory = ResolveOutputPath(resolvedOutputs, "manifests")
                     ?? Path.Join(outputRoot, "manifests");
@@ -1397,6 +1401,7 @@ public sealed class ConfigCommandLoader
             BuildCommandSteps(commandConfig))
         {
             Hidden = commandConfig.Hidden,
+            Echo = commandConfig.Echo,
             Args = commandConfig.Args ?? [],
             Merge = commandConfig.Merge,
             MaxParallel = commandConfig.MaxParallel,
@@ -2070,6 +2075,7 @@ public sealed class ConfigCommandLoader
             AlwaysRun = stepConfig.AlwaysRun ?? false,
             OutputPattern = stepConfig.OutputPattern,
             OutputFile = stepConfig.OutputFile,
+            Echo = stepConfig.Echo,
             StepOutputs = BuildStepOutputs(stepConfig.Outputs),
             Container = stepConfig.Container is null
                 ? null
@@ -2092,7 +2098,8 @@ public sealed class ConfigCommandLoader
                 : new Core.Models.StepContainerBuildDefinition(
                     container.Build.Target is null ? null : templateRenderer.Render(container.Build.Target, context),
                     RenderStringDictionary(container.Build.Args, context, templateRenderer)),
-            container.Fallback is null ? "error" : templateRenderer.Render(container.Fallback, context));
+            container.Fallback is null ? "error" : templateRenderer.Render(container.Fallback, context),
+            container.InlineDockerfile is null ? null : templateRenderer.Render(container.InlineDockerfile, context));
 
     private static IReadOnlyDictionary<string, string>? RenderStringDictionary(
         IReadOnlyDictionary<string, string>? source,
@@ -2212,7 +2219,8 @@ public sealed class ConfigCommandLoader
 
     private static IReadOnlyList<string> EnsureConfiguredOutputDirectories(
         string repositoryRoot,
-        IReadOnlyDictionary<string, object?> outputs)
+        IReadOnlyDictionary<string, object?> outputs,
+        bool emitCommandManifest)
     {
         var createdDirectories = new List<string>();
         EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "tests", "results");
@@ -2224,7 +2232,10 @@ public sealed class ConfigCommandLoader
         EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "security", "reports");
         EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "security", "sarif");
         EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "packages");
-        EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "manifests");
+        if (emitCommandManifest)
+        {
+            EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "manifests");
+        }
         EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "logs");
         EnsureOutputDirectory(repositoryRoot, outputs, createdDirectories, treatAsFile: false, "temp");
 

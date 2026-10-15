@@ -309,7 +309,7 @@ public sealed class CliJsonOutputTests
   }
 
   [Fact]
-  public async Task CommandManifestDefaultsToAggregateSummaryFile()
+  public async Task CommandManifestDefaultModeIsAggregateSummaryWhenEnabled()
   {
     var tempDir = Path.Join(Path.GetTempPath(), $"rexo-cli-command-manifest-default-{Guid.NewGuid():N}");
     Directory.CreateDirectory(tempDir);
@@ -325,6 +325,11 @@ public sealed class CliJsonOutputTests
             "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
             "schemaVersion": "1.0",
             "name": "sample",
+            "outputs": {
+              "manifests": {
+                "emit": true
+              }
+            },
             "commands": {
               "hello": {
                 "description": "Test command",
@@ -383,6 +388,7 @@ public sealed class CliJsonOutputTests
             "name": "sample",
             "outputs": {
               "manifests": {
+                "emit": true,
                 "commandMode": "single"
               }
             },
@@ -440,6 +446,7 @@ public sealed class CliJsonOutputTests
             "name": "sample",
             "outputs": {
               "manifests": {
+                "emit": true,
                 "commandMode": "perCommand",
                 "commandDetail": "verbose"
               }
@@ -505,6 +512,7 @@ public sealed class CliJsonOutputTests
             "name": "sample",
             "outputs": {
               "manifests": {
+                "emit": true,
                 "commandMode": "aggregate"
               }
             },

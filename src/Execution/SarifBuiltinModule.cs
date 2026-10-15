@@ -40,7 +40,7 @@ internal sealed class SarifBuiltinModule : IConfigBuiltinModule
 
             Directory.CreateDirectory(Path.GetDirectoryName(targetsPath)!);
             await File.WriteAllTextAsync(targetsPath, SarifTargetsContent, ct);
-            Console.WriteLine($"  Wrote MSBuild SARIF targets: {targetsPath}");
+            BuiltinProgress.Write(ctx, $"  Wrote MSBuild SARIF targets: {targetsPath}");
 
             var outputs = new Dictionary<string, object?> { ["path"] = targetsPath };
 
@@ -89,7 +89,7 @@ internal sealed class SarifBuiltinModule : IConfigBuiltinModule
             var message = result.Written
                 ? $"Merged {result.InputFiles} SARIF file(s) into {output} ({result.Runs} run(s), {result.Results} result(s))."
                 : $"No SARIF 2.1.0 input found in {input}; nothing written.";
-            Console.WriteLine($"  {message}");
+            BuiltinProgress.Write(ctx, $"  {message}");
 
             return new StepResult(
                 stepId,

@@ -36,7 +36,7 @@ internal sealed class ConfigBuiltinModule : IConfigBuiltinModule
                         """;
                     await File.WriteAllTextAsync(gvPath, gvContent, ct);
                     materialized.Add(gvPath);
-                    Console.WriteLine($"  Materialized: {gvPath}");
+                    BuiltinProgress.Write(ctx, $"  Materialized: {gvPath}");
                 }
             }
 

@@ -34,19 +34,24 @@ external or persistent writes; read-only checks and planning continue normally.
 
 ## `runtime.commands`
 
-Controls command delegation depth and the fallback merge behavior for same-name command collisions.
+Controls command delegation depth, fallback merge behavior for same-name command collisions,
+and the default execution detail level.
 
 ```jsonc
 "runtime": {
   "commands": {
     "defaultMergeMode": "append",
-    "maxDepth": 5
+    "maxDepth": 5,
+    "echo": "summary"
   }
 }
 ```
 
 - `defaultMergeMode` (optional): fallback merge mode used when a child command does not specify `merge.mode` or legacy `merge`. Accepts the same values as command-level merge modes: `layer`, `replace`, `append`, `prepend`, `wrap`.
 - `maxDepth` (default: `5`): maximum delegated command call depth.
+- `echo` (default: `summary`): controls Rexo-generated execution descriptions. `none` hides step metadata and command lines, `summary` shows step metadata without command bodies, and `full` also shows the rendered command body. Known secret values are masked in displayed commands and process output.
+- `--echo none|summary|full` overrides configuration for one invocation. Precedence is CLI flag, step `echo`, command `echo`, `runtime.commands.echo`, then `summary`. If a configured command declares its own `echo` option, the corresponding `--echo <value>` is preserved as that command option rather than consumed as the global flag.
+- Echo controls descriptions, not process output: stdout, stderr, and failures remain visible.
 - The runtime default is useful for multi-stack repositories that want same-name commands to fan out without repeating merge metadata on every child command.
 - Keep replace-style behavior when you want explicit collisions to stay single-owner, especially for side-effect-heavy commands.
 
@@ -72,6 +77,7 @@ This is a top-level config section, separate from `runtime`.
   },
   "packages": "~/packages",
   "manifests": {
+    "emit": false,
     "path": "~/manifests",
     "commandMode": "aggregate",
     "commandDetail": "summary"
@@ -87,6 +93,7 @@ This is a top-level config section, separate from `runtime`.
 - `analysis` — overrides where analysis reports and SARIF files are written. The policy overlay reads these paths when constructing analysis commands.
 - `packages` (default: `~/packages` under `outputs.root`): NuGet and other package output directory.
 - `manifests.path` (default: `~/manifests`): manifest directory. `~/...` resolves under `outputs.root`.
+- `manifests.emit` (default: `false`): opt in to automatic command-manifest persistence. This is independent of `outputs.emit`, which is the broader switch for runtime output files.
 - `manifests.commandMode` (default: `aggregate`): command-manifest file strategy.
   - `single`: alias for aggregate; write one aggregated manifest file (`commands.json`) containing every command run.
   - `perCommand`: write one manifest file per command (`<command>.json`).

@@ -30,8 +30,8 @@ public sealed class RubyGemsArtifactProvider : IArtifactProvider
         var args = new List<string> { "build", gemspec };
         args.AddRange(ToolRunner.ParseExtraArgs(GetSetting(artifact, "extra-build-args")));
 
-        Console.WriteLine($"  > gem {ToolRunner.FormatArgs(args)}");
-        var result = await ToolRunner.RunAsync("gem", args, workDir, artifact, dockerImage, cancellationToken);
+        ArtifactOutput.WriteCommand(context, $"  > gem {ToolRunner.FormatArgs(args)}");
+        var result = await ToolRunner.RunAsync("gem", args, workDir, artifact, dockerImage, cancellationToken, echoMode: ArtifactOutput.GetEchoMode(context));
 
         return new ArtifactBuildResult(artifact.Name, result.ExitCode == 0, result.ExitCode == 0 ? workDir : null);
     }
@@ -70,8 +70,8 @@ public sealed class RubyGemsArtifactProvider : IArtifactProvider
 
         args.AddRange(ToolRunner.ParseExtraArgs(GetSetting(artifact, "extra-push-args")));
 
-        Console.WriteLine($"  > gem {ToolRunner.FormatArgs(args)}");
-        var result = await ToolRunner.RunAsync("gem", args, workDir, artifact, dockerImage, cancellationToken, envOverrides: envOverrides);
+        ArtifactOutput.WriteCommand(context, $"  > gem {ToolRunner.FormatArgs(args)}");
+        var result = await ToolRunner.RunAsync("gem", args, workDir, artifact, dockerImage, cancellationToken, envOverrides: envOverrides, echoMode: ArtifactOutput.GetEchoMode(context));
 
         var tag = context.Version?.SemVer ?? "latest";
         return new ArtifactPushResult(

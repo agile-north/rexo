@@ -34,8 +34,8 @@ public sealed class PyPiArtifactProvider : IArtifactProvider
         var args = new List<string> { "-m", "build" };
         args.AddRange(ToolRunner.ParseExtraArgs(GetSetting(artifact, "extra-build-args")));
 
-        Console.WriteLine($"  > python {ToolRunner.FormatArgs(args)}");
-        var result = await RunPythonAsync(args, workDir, artifact, dockerImage, cancellationToken);
+        ArtifactOutput.WriteCommand(context, $"  > python {ToolRunner.FormatArgs(args)}");
+        var result = await RunPythonAsync(args, workDir, artifact, dockerImage, context, cancellationToken);
 
         return new ArtifactBuildResult(
             artifact.Name,
@@ -81,8 +81,8 @@ public sealed class PyPiArtifactProvider : IArtifactProvider
 
         args.AddRange(ToolRunner.ParseExtraArgs(GetSetting(artifact, "extra-push-args")));
 
-        Console.WriteLine($"  > python {ToolRunner.FormatArgs(args)}");
-        var result = await RunPythonAsync(args, workDir, artifact, dockerImage, cancellationToken, envOverrides);
+        ArtifactOutput.WriteCommand(context, $"  > python {ToolRunner.FormatArgs(args)}");
+        var result = await RunPythonAsync(args, workDir, artifact, dockerImage, context, cancellationToken, envOverrides);
 
         var tag = context.Version?.SemVer ?? "latest";
         return new ArtifactPushResult(
@@ -99,6 +99,7 @@ public sealed class PyPiArtifactProvider : IArtifactProvider
         string workDir,
         ArtifactConfig artifact,
         string dockerImage,
+        ExecutionContext context,
         CancellationToken cancellationToken,
         IReadOnlyDictionary<string, string?>? envOverrides = null)
     {
@@ -117,8 +118,14 @@ public sealed class PyPiArtifactProvider : IArtifactProvider
                 "python/python3 is not installed and Docker fallback is disabled (settings.useDocker = false).");
         }
 
-        Console.WriteLine($"  > python not found on host, falling back to Dockerized runtime ({dockerImage})");
-        return await ToolRunner.RunViaDockerAsync("python", args, workDir, dockerImage, cancellationToken, envOverrides: envOverrides);
+        ArtifactOutput.WriteCommand(context, $"  > python not found on host, falling back to Dockerized runtime ({dockerImage})");
+        return await ToolRunner.RunViaDockerAsync(
+            "python",
+            args,
+            workDir,
+            dockerImage,
+            cancellationToken,
+            envOverrides: envOverrides);
     }
 
     private static string ResolveDockerImage(ArtifactConfig artifact) =>

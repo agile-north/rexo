@@ -417,6 +417,16 @@
             "$ref": "#/$defs/step"
           }
         },
+        "echo": {
+          "type": "string",
+          "description": "Execution detail level for this command. A CLI --echo override takes precedence; otherwise step-level settings may override this value.",
+          "markdownDescription": "Execution detail level for this command: `none`, `summary`, or `full`. Default: `runtime.commands.echo` (`summary`). The CLI `--echo` override takes precedence.",
+          "enum": [
+            "none",
+            "summary",
+            "full"
+          ]
+        },
         "hidden": {
           "type": "boolean",
           "description": "When true, omit this command from default discovery surfaces like list/help while keeping it callable by name."
@@ -644,6 +654,16 @@
           "examples": [
             "dotnet test -c Release --no-build",
             "docker build -f Dockerfile -t my-app:local ."
+          ]
+        },
+        "echo": {
+          "type": "string",
+          "description": "Overrides the command execution detail level for this step.",
+          "markdownDescription": "Overrides the command execution detail level for this step: `none`, `summary`, or `full`. The CLI `--echo` override takes precedence.",
+          "enum": [
+            "none",
+            "summary",
+            "full"
           ]
         },
         "container": {
@@ -2551,8 +2571,14 @@
           "type": "object",
           "additionalProperties": false,
           "description": "Manifest output settings.",
-          "markdownDescription": "Manifest output settings. Default path is `~/manifests`; `commandMode` defaults to `aggregate` (`single` is an alias); `commandDetail` defaults to `summary`.",
+          "markdownDescription": "Manifest output settings. Automatic command-manifest persistence is disabled by default; set `emit: true` to enable it. Default path is `~/manifests`; `commandMode` defaults to `aggregate` (`single` is an alias); `commandDetail` defaults to `summary`.",
           "properties": {
+            "emit": {
+              "type": "boolean",
+              "description": "When true, persist command manifests automatically after command execution.",
+              "markdownDescription": "When true, persist command manifests automatically. Default: `false`. This does not control explicit `--json-file` output, artifact manifests, or CI-native output.",
+              "default": false
+            },
             "path": {
               "type": "string",
               "description": "Directory for command/runtime manifest files. Use ~/... to resolve relative to outputs.root; plain relative paths are repo-relative.",
@@ -2627,9 +2653,20 @@
         "commands": {
           "type": "object",
           "description": "Global command execution policy settings.",
-          "markdownDescription": "Global command execution policy settings. `defaultMergeMode` is the fallback when a child command does not specify merge mode; `maxDepth` defaults to `5`.",
+          "markdownDescription": "Global command execution policy settings. `echo` defaults to `summary`; `defaultMergeMode` is the fallback when a child command does not specify merge mode; `maxDepth` defaults to `5`.",
           "additionalProperties": false,
           "properties": {
+            "echo": {
+              "type": "string",
+              "description": "Default execution detail level: none, summary, or full.",
+              "markdownDescription": "Default command echo policy: `none` suppresses Rexo-generated execution descriptions, `summary` shows concise step metadata without command bodies, and `full` includes rendered command bodies with known secrets masked. Default: `summary`.",
+              "enum": [
+                "none",
+                "summary",
+                "full"
+              ],
+              "default": "summary"
+            },
             "defaultMergeMode": {
               "$ref": "#/$defs/commandMergeMode",
               "description": "Fallback command collision behavior when a child command omits merge.mode. Applied before the built-in replace fallback.",
@@ -2756,8 +2793,40 @@
           "description": "Optional container entrypoint override passed to docker run --entrypoint."
         },
         "dockerfile": {
-          "type": "string",
-          "description": "Optional Dockerfile path used to build container.image when missing or stale. Relative paths are resolved from repository root."
+          "description": "Dockerfile source used to build container.image when missing or stale. A single-line string is a path, a multiline string is inline content, or use {path: ...}/{content: ...} to select explicitly.",
+          "markdownDescription": "Dockerfile source used to build the image. A single-line string is a repository-relative or absolute path; a multiline string is inline Dockerfile content. Use `{ path: Dockerfile }` or `{ content: 'FROM alpine' }` to disambiguate explicitly.",
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "content": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "oneOf": [
+                {
+                  "required": [
+                    "path"
+                  ]
+                },
+                {
+                  "required": [
+                    "content"
+                  ]
+                }
+              ]
+            }
+          ]
         },
         "context": {
           "type": "string",

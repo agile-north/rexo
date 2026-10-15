@@ -68,7 +68,7 @@ When step.container is set, Rexo executes the rendered run command through Docke
 Optional container fields:
 
 - `container.entrypoint`: passed to `docker run --entrypoint`.
-- `container.dockerfile`: Dockerfile path used to materialize `container.image` before run.
+- `container.dockerfile`: Dockerfile source used to materialize `container.image` before run.
 - `container.context`: docker build context directory (default: repository root).
 - `container.build.target`: optional docker build stage passed as `--target`.
 - `container.build.args`: optional docker build args map passed as repeated `--build-arg key=value`.
@@ -79,6 +79,37 @@ When `container.dockerfile` is set, Rexo performs an image preflight:
 2. Compute current source hash from Dockerfile content, `.dockerignore` (if present), and resolved paths.
 3. Build image when missing or when hash differs.
 4. Reuse image when hash matches.
+
+`dockerfile` accepts a path string, inline content, or an explicit source object:
+
+```yaml
+container:
+  image: local/example
+  dockerfile: Dockerfile             # single-line strings remain paths
+```
+
+```yaml
+container:
+  image: local/example
+  dockerfile: |
+    FROM alpine:3.21
+    RUN echo hello
+```
+
+```yaml
+container:
+  image: local/example
+  dockerfile:
+    content: |
+      FROM alpine:3.21
+      RUN echo hello
+```
+
+Use `{ path: Dockerfile }` to explicitly select a path, including when a path value needs
+disambiguation. The object form must contain exactly one non-empty string property: `path` or
+`content`. Multiline strings are treated as content; single-line strings are treated as paths.
+Both path and content are template-rendered. Inline content is materialized in a temporary file
+for Docker builds, included in the image source hash, and removed after preflight/build.
 
 ---
 

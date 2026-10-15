@@ -67,6 +67,9 @@ public sealed record RepoCommandConfig(
     Dictionary<string, RepoOptionConfig> Options,
     List<RepoStepConfig> Steps)
 {
+    /// <summary>Command execution detail level: <c>none</c>, <c>summary</c>, or <c>full</c>.</summary>
+    public string? Echo { get; init; }
+
     /// <summary>When true, omit this command from default discovery surfaces like list/help.</summary>
     public bool? Hidden { get; init; }
 
@@ -134,7 +137,11 @@ public sealed record RepoStepConfig(
     string? OutputPattern = null,
     string? OutputFile = null,
     Dictionary<string, string[]>? Outputs = null,
-    RepoStepContainerConfig? Container = null);
+    RepoStepContainerConfig? Container = null)
+{
+    /// <summary>Overrides command-level execution echo behavior for this step.</summary>
+    public string? Echo { get; init; }
+}
 
 /// <summary>
 /// Container definition used by run steps, command-level defaults, and the named <c>containers</c> registry.
@@ -159,6 +166,10 @@ public sealed record RepoStepContainerConfig(
     /// <c>none</c> or an empty rendered value means "run on the host".
     /// </summary>
     public string? Use { get; init; }
+
+    /// <summary>Inline Dockerfile source, parsed from multiline strings or a dockerfile.content object.</summary>
+    [JsonIgnore]
+    public string? InlineDockerfile { get; init; }
 
     /// <summary>Registry entries only: name of another registry container to inherit from.</summary>
     public string? Extends { get; init; }
@@ -241,6 +252,9 @@ public sealed record RepoOutputsConfig
 
 public sealed record RepoManifestOutputsConfig
 {
+    /// <summary>When true, persist command manifests automatically. Default: <c>false</c>.</summary>
+    public bool? Emit { get; init; }
+
     /// <summary>Manifest output directory. Default: <c>~/manifests</c> (relative to <c>outputs.root</c>).</summary>
     public string? Path { get; init; }
 
@@ -468,7 +482,8 @@ public sealed record RepoSecretCacheConfig
 /// <summary>Per-command execution policy defaults. Controls delegation depth and collision fallback behavior.</summary>
 public sealed record RepoRuntimeCommandsConfig(
     int? MaxDepth = null,
-    string? DefaultMergeMode = null);
+    string? DefaultMergeMode = null,
+    string? Echo = null);
 
 public sealed record RepoPushConfig(
     bool? DryRun = null,

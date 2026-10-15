@@ -47,19 +47,19 @@ public sealed class HelmArtifactProvider : IArtifactProvider
 
         args.AddRange(ToolRunner.ParseExtraArgs(GetSetting(artifact, "extra-build-args")));
 
-        Console.WriteLine($"  > helm {ToolRunner.FormatArgs(args)}");
+        ArtifactOutput.WriteCommand(context, $"  > helm {ToolRunner.FormatArgs(args)}");
         var result = await _runHelmAsync(artifact, args, workDir, dockerImage, cancellationToken);
         if (result.ExitCode != 0 && ShouldRetryWithDependencyUpdate(result.Output))
         {
             var dependencyArgs = new List<string> { "dependency", "update", chartDir };
-            Console.WriteLine($"  > helm {ToolRunner.FormatArgs(dependencyArgs)}");
+            ArtifactOutput.WriteCommand(context, $"  > helm {ToolRunner.FormatArgs(dependencyArgs)}");
             var dependencyResult = await _runHelmAsync(artifact, dependencyArgs, workDir, dockerImage, cancellationToken);
             if (dependencyResult.ExitCode != 0)
             {
                 return new ArtifactBuildResult(artifact.Name, false, null);
             }
 
-            Console.WriteLine($"  > helm {ToolRunner.FormatArgs(args)}");
+            ArtifactOutput.WriteCommand(context, $"  > helm {ToolRunner.FormatArgs(args)}");
             result = await _runHelmAsync(artifact, args, workDir, dockerImage, cancellationToken);
         }
 
@@ -100,7 +100,7 @@ public sealed class HelmArtifactProvider : IArtifactProvider
                 .Select(tgz => (Source: tgz, Destination: Path.Join(repo, Path.GetFileName(tgz)))))
             {
                 File.Copy(tgz, dest, overwrite: true);
-                Console.WriteLine($"  > copied {Path.GetFileName(tgz)} -> {repo}");
+                ArtifactOutput.WriteCommand(context, $"  > copied {Path.GetFileName(tgz)} -> {repo}");
             }
 
             return new ArtifactPushResult(artifact.Name, true, [repo]);
@@ -119,8 +119,8 @@ public sealed class HelmArtifactProvider : IArtifactProvider
 
         args.AddRange(ToolRunner.ParseExtraArgs(GetSetting(artifact, "extra-push-args")));
 
-        Console.WriteLine($"  > helm {ToolRunner.FormatArgs(args)}");
-        var result = await ToolRunner.RunAsync("helm", args, workDir, artifact, dockerImage, cancellationToken);
+        ArtifactOutput.WriteCommand(context, $"  > helm {ToolRunner.FormatArgs(args)}");
+        var result = await ToolRunner.RunAsync("helm", args, workDir, artifact, dockerImage, cancellationToken, echoMode: ArtifactOutput.GetEchoMode(context));
 
         return new ArtifactPushResult(
             artifact.Name,

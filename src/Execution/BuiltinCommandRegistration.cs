@@ -908,7 +908,7 @@ public static class BuiltinCommandRegistration
             var containerName = container is null ||
                 string.Equals(container.Use, RepoStepContainerConfig.NoneReference, StringComparison.OrdinalIgnoreCase)
                     ? null
-                    : container.Use ?? container.Image ?? (container.Dockerfile is not null ? "built" : "container");
+                    : container.Use ?? container.Image ?? (container.Dockerfile is not null || container.InlineDockerfile is not null ? "built" : "container");
 
             nodes.Add(new GraphStep(
                 step.Id ?? $"{phase}-{(index + 1).ToString(System.Globalization.CultureInfo.InvariantCulture)}",

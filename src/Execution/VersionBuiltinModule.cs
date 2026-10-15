@@ -13,7 +13,7 @@ internal sealed class VersionBuiltinModule : IConfigBuiltinModule
             {
                 if (cached.Outputs.TryGetValue("semver", out var cachedSemver))
                 {
-                    Console.WriteLine($"  Using cached version: {cachedSemver}.");
+                    BuiltinProgress.Write(ctx, $"  Using cached version: {cachedSemver}.");
                 }
 
                 return cached;
@@ -29,7 +29,7 @@ internal sealed class VersionBuiltinModule : IConfigBuiltinModule
             var provider = context.Loader.VersionProviders.Resolve(versioningConfig.Provider);
             var versionResult = await provider.ResolveAsync(versioningConfig, ctx, ct);
 
-            Console.WriteLine($"  Resolved version: {versionResult.SemVer}");
+            BuiltinProgress.Write(ctx, $"  Resolved version: {versionResult.SemVer}");
 
             var result = new StepResult(
                 step.Id ?? "resolve-version",
@@ -61,4 +61,5 @@ internal sealed class VersionBuiltinModule : IConfigBuiltinModule
             return result;
         });
     }
+
 }

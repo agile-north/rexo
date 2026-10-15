@@ -350,7 +350,7 @@ public sealed partial class RepoConfigurationLoader
             Versioning = child.Versioning ?? @base.Versioning,
             Artifacts = MergeLists(@base.Artifacts, child.Artifacts, child.MergeStrategy),
             Environments = MergeDictionaries(@base.Environments, child.Environments),
-            Runtime = child.Runtime ?? @base.Runtime,
+            Runtime = MergeRuntimeConfig(@base.Runtime, child.Runtime),
             Outputs = MergeOutputsConfig(@base.Outputs, child.Outputs),
             Settings = DeepMergeJsonMaps(@base.Settings, child.Settings),
             Vars = DeepMergeJsonMaps(@base.Vars, child.Vars),
@@ -536,10 +536,48 @@ public sealed partial class RepoConfigurationLoader
 
         return new RepoManifestOutputsConfig
         {
+            Emit = child.Emit ?? @base.Emit,
             Path = child.Path ?? @base.Path,
             CommandMode = child.CommandMode ?? @base.CommandMode,
             CommandDetail = child.CommandDetail ?? @base.CommandDetail,
         };
+    }
+
+    private static RepoRuntimeConfig? MergeRuntimeConfig(RepoRuntimeConfig? @base, RepoRuntimeConfig? child)
+    {
+        if (@base is null) return child;
+        if (child is null) return @base;
+
+        return new RepoRuntimeConfig(
+            DryRun: child.DryRun ?? @base.DryRun,
+            Push: MergePushConfig(@base.Push, child.Push),
+            Commands: MergeRuntimeCommandsConfig(@base.Commands, child.Commands));
+    }
+
+    private static RepoPushConfig? MergePushConfig(RepoPushConfig? @base, RepoPushConfig? child)
+    {
+        if (@base is null) return child;
+        if (child is null) return @base;
+
+        return new RepoPushConfig(
+            DryRun: child.DryRun ?? @base.DryRun,
+            Enabled: child.Enabled ?? @base.Enabled,
+            NoPushInPullRequest: child.NoPushInPullRequest ?? @base.NoPushInPullRequest,
+            RequireCleanWorkingTree: child.RequireCleanWorkingTree ?? @base.RequireCleanWorkingTree,
+            Branches: child.Branches ?? @base.Branches);
+    }
+
+    private static RepoRuntimeCommandsConfig? MergeRuntimeCommandsConfig(
+        RepoRuntimeCommandsConfig? @base,
+        RepoRuntimeCommandsConfig? child)
+    {
+        if (@base is null) return child;
+        if (child is null) return @base;
+
+        return new RepoRuntimeCommandsConfig(
+            MaxDepth: child.MaxDepth ?? @base.MaxDepth,
+            DefaultMergeMode: child.DefaultMergeMode ?? @base.DefaultMergeMode,
+            Echo: child.Echo ?? @base.Echo);
     }
 
     private static RepoCommandOutputConfig? MergeCommandOutputsConfig(
@@ -749,6 +787,7 @@ public sealed partial class RepoConfigurationLoader
             Options: MergeDictionaries(baseCmd.Options, childCmd.Options) ?? [],
             Steps: PushDownCommandContainer([.. baseCmd.Steps ?? []], baseCmd.Container))
         {
+            Echo = childCmd.Echo ?? baseCmd.Echo,
             Hidden = childCmd.Hidden ?? baseCmd.Hidden,
             Args = MergeDictionaries(baseCmd.Args, childCmd.Args),
             MergeConfig = childCmd.MergeConfig,
@@ -1017,6 +1056,7 @@ public sealed partial class RepoConfigurationLoader
             Options: MergeDictionaries(primary.Options, secondary.Options) ?? [],
             Steps: steps)
         {
+            Echo = preferFirstMetadata ? primary.Echo ?? secondary.Echo : secondary.Echo ?? primary.Echo,
             Hidden = preferFirstMetadata ? primary.Hidden ?? secondary.Hidden : secondary.Hidden ?? primary.Hidden,
             Args = MergeDictionaries(primary.Args, secondary.Args),
             MaxParallel = preferFirstMetadata ? primary.MaxParallel ?? secondary.MaxParallel : secondary.MaxParallel ?? primary.MaxParallel,

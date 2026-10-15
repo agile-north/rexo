@@ -59,7 +59,11 @@ public sealed class StepExecutor : IStepExecutor
         }
         else if (!string.IsNullOrEmpty(stepDefinition.Uses))
         {
-            result = await ExecuteUsesAsync(stepId, stepDefinition.Uses, stepDefinition, stepContext, sw, cancellationToken);
+            var builtinContext = stepContext with
+            {
+                CliEchoMode = ResolveEchoMode(stepDefinition.Echo, stepContext),
+            };
+            result = await ExecuteUsesAsync(stepId, stepDefinition.Uses, stepDefinition, builtinContext, sw, cancellationToken);
         }
         else if (!string.IsNullOrEmpty(stepDefinition.Command))
         {
@@ -95,23 +99,35 @@ public sealed class StepExecutor : IStepExecutor
         ShellRunResult shellResult;
         var executionMetadata = new RunExecutionMetadata("native", "native", null, null, false, null, false, null);
         var debugEnabled = IsDebugEnabled(context);
+        var echoMode = ResolveEchoMode(stepDefinition.Echo, context);
+        var displayStepId = CreateDisplayStepId(stepDefinition, secrets);
 
         if (stepDefinition.Container is { Image.Length: > 0 } container)
         {
             var containerResult = await ExecuteContainerizedRunWithFallbackAsync(
-                stepId,
+                displayStepId,
                 command,
                 container,
                 context,
                 secrets,
                 debugEnabled,
+                echoMode,
                 cancellationToken);
             shellResult = containerResult.Result;
             executionMetadata = containerResult.Metadata;
         }
         else
         {
-            Console.WriteLine($"  > [native] {SecretMasker.Mask(command, secrets)}");
+            if (echoMode != "none")
+            {
+                Console.WriteLine($"  Step: {displayStepId}");
+                Console.WriteLine("  Execution: native");
+            }
+
+            if (echoMode == "full")
+            {
+                Console.WriteLine($"  > [native] {SecretMasker.Mask(command, secrets)}");
+            }
 
             shellResult = await ShellRunner.RunAsync(
                 command,
@@ -196,14 +212,23 @@ public sealed class StepExecutor : IStepExecutor
         ExecutionContext context,
         IReadOnlySet<string> secrets,
         bool debugEnabled,
+        string echoMode,
         CancellationToken cancellationToken)
     {
         var containerWorkingDirectory = string.IsNullOrWhiteSpace(container.WorkingDirectory)
             ? "/work"
             : container.WorkingDirectory;
 
-        Console.WriteLine($"  > [container] image={container.Image} workdir={containerWorkingDirectory} mount=/work");
-        Console.WriteLine($"  > [container:{container.Image}] {SecretMasker.Mask(command, secrets)}");
+        if (echoMode != "none")
+        {
+            Console.WriteLine($"  Step: {SecretMasker.Mask(stepId, secrets)}");
+            Console.WriteLine($"  Container: {SecretMasker.Mask(container.Image, secrets)}");
+        }
+
+        if (echoMode == "full")
+        {
+            Console.WriteLine($"  > [container:{SecretMasker.Mask(container.Image, secrets)}] {SecretMasker.Mask(command, secrets)}");
+        }
 
         try
         {
@@ -212,6 +237,7 @@ public sealed class StepExecutor : IStepExecutor
                 context,
                 secrets,
                 debugEnabled,
+                echoMode,
                 cancellationToken);
 
             if (prepareResult is not null)
@@ -227,6 +253,7 @@ public sealed class StepExecutor : IStepExecutor
                         containerWorkingDirectory,
                         "docker-daemon-unavailable",
                         prepareResult.Stderr,
+                        echoMode,
                         cancellationToken);
                 }
 
@@ -269,6 +296,7 @@ public sealed class StepExecutor : IStepExecutor
                     containerWorkingDirectory,
                     "docker-daemon-unavailable",
                     result.Stderr,
+                    echoMode,
                     cancellationToken);
             }
 
@@ -295,6 +323,7 @@ public sealed class StepExecutor : IStepExecutor
                 containerWorkingDirectory,
                 "docker-not-found",
                 "Docker executable was not found.",
+                echoMode,
                 cancellationToken);
         }
     }
@@ -308,6 +337,7 @@ public sealed class StepExecutor : IStepExecutor
         string containerWorkingDirectory,
         string reason,
         string runtimeError,
+        string echoMode,
         CancellationToken cancellationToken)
     {
         Console.Error.WriteLine("[container] Docker runtime unavailable.");
@@ -332,7 +362,10 @@ public sealed class StepExecutor : IStepExecutor
                     reason));
         }
 
-        Console.WriteLine($"  > [native:fallback] {SecretMasker.Mask(command, secrets)}");
+        if (echoMode == "full")
+        {
+            Console.WriteLine($"  > [native:fallback] {SecretMasker.Mask(command, secrets)}");
+        }
         var env = BuildNativeRunEnvironment(context);
         var fallbackResult = await ShellRunner.RunAsync(
             command,
@@ -418,13 +451,80 @@ public sealed class StepExecutor : IStepExecutor
         ExecutionContext context,
         IReadOnlySet<string> secrets,
         bool debugEnabled,
+        string echoMode,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(container.Dockerfile))
+        if (container.InlineDockerfile is null)
         {
-            return null;
+            if (string.IsNullOrWhiteSpace(container.Dockerfile))
+            {
+                return null;
+            }
+
+            return await EnsureContainerImageFromPathAsync(
+                container,
+                context,
+                secrets,
+                debugEnabled,
+                echoMode,
+                inlineSource: false,
+                cancellationToken);
         }
 
+        var temporaryDockerfilePath = Path.Join(
+            Path.GetTempPath(),
+            $"rexo-{Guid.NewGuid():N}.Dockerfile");
+        try
+        {
+            var fileOptions = new FileStreamOptions
+            {
+                Mode = FileMode.CreateNew,
+                Access = FileAccess.Write,
+                Share = FileShare.None,
+            };
+            if (!OperatingSystem.IsWindows())
+            {
+                fileOptions.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+            }
+
+            await using (var file = new FileStream(temporaryDockerfilePath, fileOptions))
+            {
+                var contents = System.Text.Encoding.UTF8.GetBytes(container.InlineDockerfile);
+                await file.WriteAsync(contents, cancellationToken);
+            }
+
+            return await EnsureContainerImageFromPathAsync(
+                container with { Dockerfile = temporaryDockerfilePath, InlineDockerfile = null },
+                context,
+                secrets,
+                debugEnabled,
+                echoMode,
+                inlineSource: true,
+                cancellationToken);
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(temporaryDockerfilePath);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Console.Error.WriteLine(
+                    $"[warn] Could not remove temporary Dockerfile '{temporaryDockerfilePath}': {SecretMasker.Mask(ex.Message, secrets)}");
+            }
+        }
+    }
+
+    private static async Task<ShellRunResult?> EnsureContainerImageFromPathAsync(
+        StepContainerDefinition container,
+        ExecutionContext context,
+        IReadOnlySet<string> secrets,
+        bool debugEnabled,
+        string echoMode,
+        bool inlineSource,
+        CancellationToken cancellationToken)
+    {
         var dockerfilePath = Path.IsPathRooted(container.Dockerfile)
             ? container.Dockerfile
             : Path.GetFullPath(Path.Join(context.RepositoryRoot, container.Dockerfile));
@@ -454,6 +554,7 @@ public sealed class StepExecutor : IStepExecutor
             dockerfilePath,
             buildContextPath,
             container.Build,
+            inlineSource,
             cancellationToken);
         var inspectArgs = new List<string>
         {
@@ -493,7 +594,10 @@ public sealed class StepExecutor : IStepExecutor
         var reason = inspectResult.ExitCode == 0
             ? "source hash changed"
             : "image missing or not inspectable";
-        Console.WriteLine($"  > [container:build] Building image '{container.Image}' ({reason}).");
+        if (echoMode != "none")
+        {
+            Console.WriteLine($"  > [container:build] Building image '{SecretMasker.Mask(container.Image, secrets)}' ({reason}).");
+        }
 
         var buildArgs = new List<string>
         {
@@ -542,11 +646,12 @@ public sealed class StepExecutor : IStepExecutor
         string dockerfilePath,
         string buildContextPath,
         StepContainerBuildDefinition? build,
+        bool inlineSource,
         CancellationToken cancellationToken)
     {
         var buffer = new StringBuilder();
         buffer.Append("dockerfile=");
-        buffer.AppendLine(NormalizePath(dockerfilePath));
+        buffer.AppendLine(inlineSource ? "inline" : NormalizePath(dockerfilePath));
         buffer.Append("context=");
         buffer.AppendLine(NormalizePath(buildContextPath));
         buffer.Append("buildTarget=");
@@ -860,6 +965,7 @@ public sealed class StepExecutor : IStepExecutor
         {
             CallStack = context.CommandCallStack,
             MaxCommandDepth = context.MaxCommandDepth,
+            EchoMode = context.CliEchoMode ?? stepDefinition.Echo,
         };
 
         var result = await _commandExecutor.ExecuteAsync(commandName, invocation, cancellationToken);
@@ -983,6 +1089,31 @@ public sealed class StepExecutor : IStepExecutor
         return Guid.NewGuid().ToString("N")[..8];
     }
 
+    private static string CreateDisplayStepId(StepDefinition step, IReadOnlySet<string> secrets)
+    {
+        if (step.Id is not null)
+        {
+            return SecretMasker.Mask(step.Id, secrets);
+        }
+
+        if (!string.IsNullOrEmpty(step.Run))
+        {
+            return $"run-{Sanitize(SecretMasker.Mask(step.Run, secrets))}";
+        }
+
+        if (!string.IsNullOrEmpty(step.Uses))
+        {
+            return $"uses-{Sanitize(SecretMasker.Mask(step.Uses, secrets))}";
+        }
+
+        if (!string.IsNullOrEmpty(step.Command))
+        {
+            return $"cmd-{Sanitize(SecretMasker.Mask(step.Command, secrets))}";
+        }
+
+        return GenerateStepId(step);
+    }
+
     private static string Sanitize(string value)
     {
         var sanitized = System.Text.RegularExpressions.Regex.Replace(
@@ -1002,6 +1133,11 @@ public sealed class StepExecutor : IStepExecutor
     private static bool IsDebugEnabled(ExecutionContext context) =>
         context.Options.TryGetValue("debug", out var debugValue) &&
         string.Equals(debugValue, "true", StringComparison.OrdinalIgnoreCase);
+
+    private static string ResolveEchoMode(string? stepEcho, ExecutionContext context) =>
+        (context.CliEchoMode ?? stepEcho ?? context.CommandEchoMode ?? context.RuntimeEchoMode ?? "summary")
+            .Trim()
+            .ToLowerInvariant();
 
     private static string QuoteForDebug(string value)
     {

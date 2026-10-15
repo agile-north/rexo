@@ -52,7 +52,7 @@ public sealed class DockerArtifactProvider : IArtifactProvider
             try
             {
                 var ciInferenceEnabled = FeedAuthResolver.IsArtifactCiInferenceEnabled(artifact.Settings);
-                var auth = await PrepareDockerAuthAsync(settings, context.RepositoryRoot, dotEnv, ciInferenceEnabled, cancellationToken);
+                var auth = await PrepareDockerAuthAsync(settings, context, dotEnv, ciInferenceEnabled, cancellationToken);
                 if (!auth.Success)
                 {
                     return new ArtifactBuildResult(artifact.Name, false, null);
@@ -75,7 +75,7 @@ public sealed class DockerArtifactProvider : IArtifactProvider
                 {
                     if (!ShouldPush(settings, context, out _))
                     {
-                        await CleanupLocalImagesAsync(tags, context.RepositoryRoot, envOverrides, cancellationToken);
+                        await CleanupLocalImagesAsync(tags, context, envOverrides, cancellationToken);
                     }
                 }
 
@@ -118,7 +118,7 @@ public sealed class DockerArtifactProvider : IArtifactProvider
         {
             if (tag == sourceTag) continue;
             var tagArgs = new[] { "tag", sourceTag, tag };
-            Console.WriteLine($"  > docker {FormatArguments(tagArgs)}");
+            ArtifactOutput.WriteCommand(context, $"  > docker {FormatArguments(tagArgs)}");
             var result = await _runDockerAsync(tagArgs, context.RepositoryRoot, null, null, cancellationToken);
             if (result.ExitCode == 0) appliedTags.Add(tag);
         }
@@ -153,7 +153,7 @@ public sealed class DockerArtifactProvider : IArtifactProvider
                 Console.WriteLine($"  Skipping docker push for '{artifact.Name}': {skipReason}");
                 if (settings.CleanupLocal && tags.Count > 0)
                 {
-                    await CleanupLocalImagesAsync(tags, context.RepositoryRoot, envOverrides, cancellationToken);
+                    await CleanupLocalImagesAsync(tags, context, envOverrides, cancellationToken);
                 }
                 return new ArtifactPushResult(artifact.Name, true, Array.Empty<string>());
             }
@@ -161,12 +161,12 @@ public sealed class DockerArtifactProvider : IArtifactProvider
             try
             {
                 var ciInferenceEnabled = FeedAuthResolver.IsArtifactCiInferenceEnabled(artifact.Settings);
-                var auth = await PrepareDockerAuthAsync(settings, context.RepositoryRoot, dotEnv, ciInferenceEnabled, cancellationToken);
+                var auth = await PrepareDockerAuthAsync(settings, context, dotEnv, ciInferenceEnabled, cancellationToken);
                 if (!auth.Success)
                 {
                     if (settings.CleanupLocal && tags.Count > 0)
                     {
-                        await CleanupLocalImagesAsync(tags, context.RepositoryRoot, envOverrides, cancellationToken);
+                        await CleanupLocalImagesAsync(tags, context, envOverrides, cancellationToken);
                     }
 
                     return new ArtifactPushResult(artifact.Name, false, Array.Empty<string>());
@@ -178,7 +178,7 @@ public sealed class DockerArtifactProvider : IArtifactProvider
                 foreach (var tag in tags)
                 {
                     var pushArgs = new[] { "push", tag };
-                    Console.WriteLine($"  > docker {FormatArguments(pushArgs)}");
+                    ArtifactOutput.WriteCommand(context, $"  > docker {FormatArguments(pushArgs)}");
                     var result = await _runDockerAsync(pushArgs, context.RepositoryRoot, envOverrides, null, cancellationToken);
                     if (result.ExitCode == 0) pushed.Add(tag);
                 }
@@ -188,7 +188,7 @@ public sealed class DockerArtifactProvider : IArtifactProvider
                 CleanupDockerConfigDirectory(tempDockerConfig);
                 if (settings.CleanupLocal && tags.Count > 0)
                 {
-                    await CleanupLocalImagesAsync(tags, context.RepositoryRoot, envOverrides, cancellationToken);
+                    await CleanupLocalImagesAsync(tags, context, envOverrides, cancellationToken);
                 }
             }
 
@@ -274,11 +274,12 @@ public sealed class DockerArtifactProvider : IArtifactProvider
 
     private async Task<(bool Success, IReadOnlyDictionary<string, string?>? Environment, string? TempDockerConfigDirectory)> PrepareDockerAuthAsync(
         DockerBuildSettings settings,
-        string workingDirectory,
+        ExecutionContext context,
         IReadOnlyDictionary<string, string> dotEnv,
         bool ciInferenceEnabled,
         CancellationToken cancellationToken)
     {
+        var workingDirectory = context.RepositoryRoot;
         var envOverrides = BuildEnvironmentOverrides(dotEnv);
         var auth = FeedAuthResolver.ResolveDocker(
             configuredRegistry: settings.LoginRegistry,
@@ -315,7 +316,7 @@ public sealed class DockerArtifactProvider : IArtifactProvider
         envOverrides["DOCKER_CONFIG"] = tempDockerConfig;
 
         var loginArgs = new[] { "login", registry, "--username", auth.Username!, "--password-stdin" };
-        Console.WriteLine($"  > docker {FormatArguments(loginArgs)}");
+        ArtifactOutput.WriteCommand(context, $"  > docker {FormatArguments(loginArgs)}");
         var loginResult = await _runDockerAsync(
             loginArgs,
             workingDirectory,
@@ -538,20 +539,21 @@ public sealed class DockerArtifactProvider : IArtifactProvider
 
         args.Add(request.BuildContext);
 
-        Console.WriteLine($"  > docker {FormatArguments(args)}");
+        ArtifactOutput.WriteCommand(context, $"  > docker {FormatArguments(args)}");
         return await _runDockerAsync(args, context.RepositoryRoot, envOverrides, null, cancellationToken);
     }
 
     private async Task CleanupLocalImagesAsync(
         IReadOnlyList<string> tags,
-        string repositoryRoot,
+        ExecutionContext context,
         IReadOnlyDictionary<string, string?>? envOverrides,
         CancellationToken cancellationToken)
     {
+        var repositoryRoot = context.RepositoryRoot;
         foreach (var tag in tags)
         {
             var rmArgs = new[] { "image", "rm", tag };
-            Console.WriteLine($"  > docker {FormatArguments(rmArgs)}");
+            ArtifactOutput.WriteCommand(context, $"  > docker {FormatArguments(rmArgs)}");
             _ = await _runDockerAsync(rmArgs, repositoryRoot, envOverrides, null, cancellationToken);
         }
     }

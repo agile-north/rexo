@@ -24,6 +24,8 @@ vars:
     container: none
 outputs:
   root: artifacts
+  manifests:
+    emit: true
   tests:
     results: ~/test-results
     coverage: ~/test-results

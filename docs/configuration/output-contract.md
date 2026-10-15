@@ -128,10 +128,14 @@ Template linkage:
 
 Written only when `--json-file` is provided.
 
-## Command Manifest Files (`outputs.manifests`)
+## Automatic Command Manifests (`outputs.manifests`)
 
-When `outputs.emit` is true (default), Rexo writes command manifests under
+Automatic command manifests are opt-in with `outputs.manifests.emit: true` (default: `false`).
+When enabled, and `outputs.emit` is also true (default), Rexo writes them under
 `outputs.manifests.path` (default `~/manifests`, which resolves under `outputs.root`).
+Setting `outputs.emit: false` disables automatic command manifests along with other runtime
+output files. This switch does not disable an explicitly requested `--json-file` result or its
+run-manifest sidecar.
 
 Paths that begin with `~/` are rooted under `outputs.root`. Plain relative paths are
 repo-relative.
@@ -153,12 +157,17 @@ Example:
 "outputs": {
   "root": "artifacts",
   "manifests": {
+    "emit": true,
     "path": "~/manifests",
     "commandMode": "perCommand",
     "commandDetail": "verbose"
   }
 }
 ```
+
+Repositories upgrading from releases that wrote command manifests automatically should set
+`outputs.manifests.emit: true` to retain that behavior. Direct `--json-file` output and its
+sidecar remain available regardless of this setting.
 
 Example shape:
 

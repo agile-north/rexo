@@ -12,6 +12,7 @@ Each key is a command name (spaces allowed for multi-word commands).
 "commands": {
   "build": {
     "description": "Build the project",
+    "echo": "summary",            // optional: none | summary | full
     "hidden": false,              // optional: omit from default discovery when true
     "before": "gh",                // optional hook: string command alias
     "options": {
@@ -207,6 +208,7 @@ Each step has one of `run`, `uses`, or `command`:
 {
   "id": "my-step",             // optional; enables output referencing
   "run": "echo {{args.name}}", // shell command (template-expanded)
+  "echo": "full",              // optional: override the command's echo setting
   "when": "{{options.flag}}",  // skip step if value is falsey after rendering
   "with": {                     // optional; per-step option overrides
     "push": "{{options.push}}"
@@ -221,6 +223,14 @@ Each step has one of `run`, `uses`, or `command`:
 
 `outputFile` is rendered as a template before stdout is written, so it can use step,
 version, args, options, and outputs values.
+
+Echo levels are `none`, `summary`, and `full`. The effective setting is resolved in this order:
+CLI `--echo`, step `echo`, command `echo`, `runtime.commands.echo`, then `summary`.
+`summary` prints step/execution metadata without the command body; `full` includes the rendered
+body; `none` suppresses those Rexo-generated descriptions but does not suppress process stdout,
+stderr, or errors. Known secret values are masked in displayed command bodies and process output.
+If a configured command declares an `echo` option, `--echo <value>` is passed through to that
+command instead of being treated as the global setting.
 
 Use `alwaysRun` for post steps that must run even if an earlier step failed hard. It only
 changes scheduling; `when` still decides whether the step is eligible to run at all.

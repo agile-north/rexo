@@ -38,7 +38,7 @@ public sealed class GradleArtifactProvider : IArtifactProvider
         var args = new List<string>(ToolRunner.ParseExtraArgs(tasks));
         args.AddRange(ToolRunner.ParseExtraArgs(GetSetting(artifact, "extra-build-args")));
 
-        Console.WriteLine($"  > {nativeExe} {ToolRunner.FormatArgs(args)}");
+        ArtifactOutput.WriteCommand(context, $"  > {nativeExe} {ToolRunner.FormatArgs(args)}");
         var result = await ToolRunner.RunAsync(
             nativeExe,
             args,
@@ -46,7 +46,8 @@ public sealed class GradleArtifactProvider : IArtifactProvider
             artifact,
             dockerImage,
             cancellationToken,
-            dockerToolName: "gradle");
+            dockerToolName: "gradle",
+            echoMode: ArtifactOutput.GetEchoMode(context));
 
         return new ArtifactBuildResult(
             artifact.Name,
@@ -86,7 +87,7 @@ public sealed class GradleArtifactProvider : IArtifactProvider
         var args = new List<string> { "publish" };
         args.AddRange(ToolRunner.ParseExtraArgs(GetSetting(artifact, "extra-push-args")));
 
-        Console.WriteLine($"  > {nativeExe} {ToolRunner.FormatArgs(args)}");
+        ArtifactOutput.WriteCommand(context, $"  > {nativeExe} {ToolRunner.FormatArgs(args)}");
         var result = await ToolRunner.RunAsync(
             nativeExe,
             args,
@@ -95,7 +96,8 @@ public sealed class GradleArtifactProvider : IArtifactProvider
             dockerImage,
             cancellationToken,
             envOverrides: envOverrides,
-            dockerToolName: "gradle");
+            dockerToolName: "gradle",
+            echoMode: ArtifactOutput.GetEchoMode(context));
 
         return new ArtifactPushResult(
             artifact.Name,

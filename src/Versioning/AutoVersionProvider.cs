@@ -26,7 +26,10 @@ public sealed class AutoVersionProvider : IVersionProvider
         var root = context.RepositoryRoot;
 
         var detected = DetectProvider(root);
-        Console.WriteLine($"  [auto] Detected version provider: {detected}");
+        if (!string.Equals(context.CliEchoMode, "none", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine($"  [auto] Detected version provider: {detected}");
+        }
 
         IVersionProvider provider = detected switch
         {

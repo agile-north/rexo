@@ -26,8 +26,8 @@ public sealed class NpmArtifactProvider : IArtifactProvider
         var args = new List<string> { "pack" };
         args.AddRange(ToolRunner.ParseExtraArgs(GetSetting(artifact, "extra-build-args")));
 
-        Console.WriteLine($"  > npm {ToolRunner.FormatArgs(args)}");
-        var result = await ToolRunner.RunAsync("npm", args, workDir, artifact, dockerImage, cancellationToken);
+        ArtifactOutput.WriteCommand(context, $"  > npm {ToolRunner.FormatArgs(args)}");
+        var result = await ToolRunner.RunAsync("npm", args, workDir, artifact, dockerImage, cancellationToken, echoMode: ArtifactOutput.GetEchoMode(context));
 
         return new ArtifactBuildResult(artifact.Name, result.ExitCode == 0, result.ExitCode == 0 ? workDir : null);
     }
@@ -73,8 +73,8 @@ public sealed class NpmArtifactProvider : IArtifactProvider
 
         args.AddRange(ToolRunner.ParseExtraArgs(GetSetting(artifact, "extra-push-args")));
 
-        Console.WriteLine($"  > npm {ToolRunner.FormatArgs(args)}");
-        var result = await ToolRunner.RunAsync("npm", args, workDir, artifact, dockerImage, cancellationToken, envOverrides: envOverrides);
+        ArtifactOutput.WriteCommand(context, $"  > npm {ToolRunner.FormatArgs(args)}");
+        var result = await ToolRunner.RunAsync("npm", args, workDir, artifact, dockerImage, cancellationToken, envOverrides: envOverrides, echoMode: ArtifactOutput.GetEchoMode(context));
 
         return new ArtifactPushResult(
             artifact.Name,

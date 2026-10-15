@@ -38,8 +38,8 @@ public sealed class TerraformArtifactProvider : IArtifactProvider
 
         // terraform init
         var initArgs = new List<string> { "init" };
-        Console.WriteLine($"  > terraform {ToolRunner.FormatArgs(initArgs)}");
-        var initResult = await ToolRunner.RunAsync("terraform", initArgs, workDir, artifact, dockerImage, cancellationToken);
+        ArtifactOutput.WriteCommand(context, $"  > terraform {ToolRunner.FormatArgs(initArgs)}");
+        var initResult = await ToolRunner.RunAsync("terraform", initArgs, workDir, artifact, dockerImage, cancellationToken, echoMode: ArtifactOutput.GetEchoMode(context));
         if (initResult.ExitCode != 0)
         {
             return new ArtifactBuildResult(artifact.Name, false, null);
@@ -54,8 +54,8 @@ public sealed class TerraformArtifactProvider : IArtifactProvider
 
         planArgs.AddRange(ToolRunner.ParseExtraArgs(GetSetting(artifact, "extra-build-args")));
 
-        Console.WriteLine($"  > terraform {ToolRunner.FormatArgs(planArgs)}");
-        var planResult = await ToolRunner.RunAsync("terraform", planArgs, workDir, artifact, dockerImage, cancellationToken);
+        ArtifactOutput.WriteCommand(context, $"  > terraform {ToolRunner.FormatArgs(planArgs)}");
+        var planResult = await ToolRunner.RunAsync("terraform", planArgs, workDir, artifact, dockerImage, cancellationToken, echoMode: ArtifactOutput.GetEchoMode(context));
 
         return new ArtifactBuildResult(artifact.Name, planResult.ExitCode == 0, planResult.ExitCode == 0 ? workDir : null);
     }
@@ -89,8 +89,8 @@ public sealed class TerraformArtifactProvider : IArtifactProvider
         if (!string.IsNullOrWhiteSpace(workspace))
         {
             var wsArgs = new List<string> { "workspace", "select", workspace };
-            Console.WriteLine($"  > terraform {ToolRunner.FormatArgs(wsArgs)}");
-            var wsResult = await ToolRunner.RunAsync("terraform", wsArgs, workDir, artifact, dockerImage, cancellationToken);
+            ArtifactOutput.WriteCommand(context, $"  > terraform {ToolRunner.FormatArgs(wsArgs)}");
+            var wsResult = await ToolRunner.RunAsync("terraform", wsArgs, workDir, artifact, dockerImage, cancellationToken, echoMode: ArtifactOutput.GetEchoMode(context));
             if (wsResult.ExitCode != 0)
             {
                 return new ArtifactPushResult(artifact.Name, false, []);
@@ -100,8 +100,8 @@ public sealed class TerraformArtifactProvider : IArtifactProvider
         var applyArgs = new List<string> { "apply", "plan.tfplan" };
         applyArgs.AddRange(ToolRunner.ParseExtraArgs(GetSetting(artifact, "extra-push-args")));
 
-        Console.WriteLine($"  > terraform {ToolRunner.FormatArgs(applyArgs)}");
-        var result = await ToolRunner.RunAsync("terraform", applyArgs, workDir, artifact, dockerImage, cancellationToken);
+        ArtifactOutput.WriteCommand(context, $"  > terraform {ToolRunner.FormatArgs(applyArgs)}");
+        var result = await ToolRunner.RunAsync("terraform", applyArgs, workDir, artifact, dockerImage, cancellationToken, echoMode: ArtifactOutput.GetEchoMode(context));
 
         return new ArtifactPushResult(
             artifact.Name,

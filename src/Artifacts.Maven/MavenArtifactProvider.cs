@@ -33,8 +33,8 @@ public sealed class MavenArtifactProvider : IArtifactProvider
 
         var args = BuildMvnArgs(artifact, "package", context);
 
-        Console.WriteLine($"  > mvn {ToolRunner.FormatArgs(args)}");
-        var result = await ToolRunner.RunAsync("mvn", args, workDir, artifact, dockerImage, cancellationToken);
+        ArtifactOutput.WriteCommand(context, $"  > mvn {ToolRunner.FormatArgs(args)}");
+        var result = await ToolRunner.RunAsync("mvn", args, workDir, artifact, dockerImage, cancellationToken, echoMode: ArtifactOutput.GetEchoMode(context));
 
         return new ArtifactBuildResult(
             artifact.Name,
@@ -71,8 +71,8 @@ public sealed class MavenArtifactProvider : IArtifactProvider
 
         var args = BuildMvnArgs(artifact, "deploy", context, extraArgsSetting: "extra-push-args");
 
-        Console.WriteLine($"  > mvn {ToolRunner.FormatArgs(args)}");
-        var result = await ToolRunner.RunAsync("mvn", args, workDir, artifact, dockerImage, cancellationToken, envOverrides: envOverrides);
+        ArtifactOutput.WriteCommand(context, $"  > mvn {ToolRunner.FormatArgs(args)}");
+        var result = await ToolRunner.RunAsync("mvn", args, workDir, artifact, dockerImage, cancellationToken, envOverrides: envOverrides, echoMode: ArtifactOutput.GetEchoMode(context));
 
         return new ArtifactPushResult(
             artifact.Name,

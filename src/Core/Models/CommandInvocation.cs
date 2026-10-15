@@ -8,6 +8,8 @@ public sealed record CommandInvocation(
     string WorkingDirectory)
 {
     public bool Stdout { get; init; } = true;
+    public string? EchoMode { get; init; }
+    public string? PresentationEchoMode { get; init; }
 
     /// <summary>Command names currently on the call stack, used for cross-command cycle detection.</summary>
     public IReadOnlyList<string> CallStack { get; init; } = [];

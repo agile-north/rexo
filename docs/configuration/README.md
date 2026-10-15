@@ -298,6 +298,7 @@ shows the effective values used by built-ins (not a requirement to persist every
     },
     "packages": "~/packages",
     "manifests": {
+      "emit": false,
       "path": "~/manifests",
       "commandMode": "aggregate",
       "commandDetail": "summary"
@@ -315,7 +316,8 @@ shows the effective values used by built-ins (not a requirement to persist every
       "branches": []
     },
     "commands": {
-      "maxDepth": 5
+      "maxDepth": 5,
+      "echo": "summary"
     }
   }
 }

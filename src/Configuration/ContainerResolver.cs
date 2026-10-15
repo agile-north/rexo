@@ -91,15 +91,22 @@ public static class ContainerResolver
         ArgumentNullException.ThrowIfNull(@base);
         ArgumentNullException.ThrowIfNull(@override);
 
+        var dockerfilePath = @override.InlineDockerfile is not null
+            ? null
+            : @override.Dockerfile ?? @base.Dockerfile;
+        var inlineDockerfile = @override.Dockerfile is not null
+            ? null
+            : @override.InlineDockerfile ?? @base.InlineDockerfile;
         return new RepoStepContainerConfig(
             Image: @override.Image ?? @base.Image,
             Env: MergeStrings(@base.Env, @override.Env),
             WorkingDirectory: @override.WorkingDirectory ?? @base.WorkingDirectory,
             Entrypoint: @override.Entrypoint ?? @base.Entrypoint,
-            Dockerfile: @override.Dockerfile ?? @base.Dockerfile,
+            Dockerfile: dockerfilePath,
             Context: @override.Context ?? @base.Context,
             Build: MergeBuild(@base.Build, @override.Build))
         {
+            InlineDockerfile = inlineDockerfile,
             Use = @override.Use ?? @base.Use,
             Extends = @override.Extends ?? @base.Extends,
             Fallback = @override.Fallback ?? @base.Fallback,

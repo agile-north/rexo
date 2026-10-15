@@ -31,19 +31,21 @@ internal sealed class RepoStepContainerConfigJsonConverter : JsonConverter<RepoS
 
         var dto = JsonSerializer.Deserialize<ContainerDto>(ref reader, options)
             ?? throw new JsonException("Container definition is empty.");
+        var (dockerfile, inlineDockerfile) = ParseDockerfile(dto.Dockerfile);
 
         return new RepoStepContainerConfig(
             dto.Image,
             dto.Env,
             dto.WorkingDirectory,
             dto.Entrypoint,
-            dto.Dockerfile,
+            dockerfile,
             dto.Context,
             dto.Build)
         {
             Use = dto.Use,
             Extends = dto.Extends,
             Fallback = dto.Fallback,
+            InlineDockerfile = inlineDockerfile,
         };
     }
 
@@ -57,13 +59,66 @@ internal sealed class RepoStepContainerConfigJsonConverter : JsonConverter<RepoS
             Env = value.Env,
             WorkingDirectory = value.WorkingDirectory,
             Entrypoint = value.Entrypoint,
-            Dockerfile = value.Dockerfile,
+            Dockerfile = value.InlineDockerfile is not null
+                ? JsonSerializer.SerializeToElement(new DockerfileObject { Content = value.InlineDockerfile }, options)
+                : value.Dockerfile is not null
+                    ? JsonSerializer.SerializeToElement(value.Dockerfile, options)
+                    : null,
             Context = value.Context,
             Build = value.Build,
             Fallback = value.Fallback,
         };
 
         JsonSerializer.Serialize(writer, dto, options);
+    }
+
+    private static (string? Path, string? Content) ParseDockerfile(JsonElement? value)
+    {
+        if (value is null || value.Value.ValueKind == JsonValueKind.Null)
+        {
+            return (null, null);
+        }
+
+        if (value.Value.ValueKind == JsonValueKind.String)
+        {
+            var text = value.Value.GetString();
+            return string.IsNullOrEmpty(text) || !text.Contains('\n', StringComparison.Ordinal) &&
+                !text.Contains('\r', StringComparison.Ordinal)
+                ? (text, null)
+                : (null, text);
+        }
+
+        if (value.Value.ValueKind != JsonValueKind.Object)
+        {
+            throw new JsonException("'dockerfile' must be a path/content string or an object with 'path' or 'content'.");
+        }
+
+        string? path = null;
+        string? content = null;
+        var hasPath = false;
+        var hasContent = false;
+        foreach (var property in value.Value.EnumerateObject())
+        {
+            if (property.NameEquals("path"))
+            {
+                hasPath = true;
+                path = property.Value.ValueKind == JsonValueKind.String ? property.Value.GetString() : null;
+            }
+            else if (property.NameEquals("content"))
+            {
+                hasContent = true;
+                content = property.Value.ValueKind == JsonValueKind.String ? property.Value.GetString() : null;
+            }
+        }
+
+        if (hasPath == hasContent ||
+            hasPath && string.IsNullOrWhiteSpace(path) ||
+            hasContent && string.IsNullOrWhiteSpace(content))
+        {
+            throw new JsonException("'dockerfile' object must contain exactly one non-empty string property: 'path' or 'content'.");
+        }
+
+        return (path, content);
     }
 
     private sealed class ContainerDto
@@ -94,7 +149,7 @@ internal sealed class RepoStepContainerConfigJsonConverter : JsonConverter<RepoS
 
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         [JsonPropertyName("dockerfile")]
-        public string? Dockerfile { get; set; }
+        public JsonElement? Dockerfile { get; set; }
 
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         [JsonPropertyName("context")]
@@ -107,5 +162,11 @@ internal sealed class RepoStepContainerConfigJsonConverter : JsonConverter<RepoS
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         [JsonPropertyName("fallback")]
         public string? Fallback { get; set; }
+    }
+
+    private sealed class DockerfileObject
+    {
+        [JsonPropertyName("content")]
+        public required string Content { get; init; }
     }
 }

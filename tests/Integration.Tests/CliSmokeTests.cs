@@ -883,7 +883,7 @@ public sealed class CliSmokeTests
 
             Assert.False(Directory.Exists(Path.Join(tempDir, "artifacts", "analysis")));
             Assert.False(Directory.Exists(Path.Join(tempDir, "artifacts", "analysis", "sarif")));
-            Assert.True(File.Exists(Path.Join(tempDir, "artifacts", "manifests", "commands.json")));
+            Assert.False(Directory.Exists(Path.Join(tempDir, "artifacts", "manifests")));
         }
         finally
         {

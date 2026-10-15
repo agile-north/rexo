@@ -14,6 +14,7 @@ public sealed record StepDefinition(
     public bool AlwaysRun { get; init; }
     public string? OutputPattern { get; init; }
     public string? OutputFile { get; init; }
+    public string? Echo { get; init; }
     public StepContainerDefinition? Container { get; init; }
 
     /// <summary>
@@ -33,7 +34,8 @@ public sealed record StepContainerDefinition(
     string? Dockerfile = null,
     string? Context = null,
     StepContainerBuildDefinition? Build = null,
-    string Fallback = "error");
+    string Fallback = "error",
+    string? InlineDockerfile = null);
 
 public sealed record StepContainerBuildDefinition(
     string? Target = null,

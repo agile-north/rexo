@@ -156,6 +156,15 @@
             "$ref": "#/$defs/step"
           }
         },
+        "echo": {
+          "type": "string",
+          "description": "Command execution detail level: none, summary, or full.",
+          "enum": [
+            "none",
+            "summary",
+            "full"
+          ]
+        },
         "hidden": {
           "type": "boolean",
           "description": "When true, omit this command from default discovery surfaces like list/help while keeping it callable by name."
@@ -377,6 +386,15 @@
             "npm test"
           ]
         },
+        "echo": {
+          "type": "string",
+          "description": "Overrides the command execution detail level for this step.",
+          "enum": [
+            "none",
+            "summary",
+            "full"
+          ]
+        },
         "container": {
           "$ref": "#/$defs/containerRef",
           "description": "Optional run-step container. A registry name, false/'none' for host execution, or an inline/override object. Overrides the command-level container."
@@ -534,8 +552,39 @@
           "description": "Optional container entrypoint override passed to docker run --entrypoint."
         },
         "dockerfile": {
-          "type": "string",
-          "description": "Optional Dockerfile path used to build container.image when missing or stale. Relative paths are resolved from repository root."
+          "description": "Dockerfile source used to build the image. Single-line strings are paths, multiline strings are content, or use an object with exactly one of path/content.",
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "content": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "oneOf": [
+                {
+                  "required": [
+                    "path"
+                  ]
+                },
+                {
+                  "required": [
+                    "content"
+                  ]
+                }
+              ]
+            }
+          ]
         },
         "context": {
           "type": "string",
@@ -2590,8 +2639,14 @@
           "type": "object",
           "additionalProperties": false,
           "description": "Manifest output settings.",
-          "markdownDescription": "Manifest output settings. Default path is `~/manifests`; `commandMode` defaults to `aggregate` (`single` is an alias); `commandDetail` defaults to `summary`.",
+          "markdownDescription": "Manifest output settings. Automatic command-manifest persistence is disabled by default; set `emit: true` to enable it. Default path is `~/manifests`; `commandMode` defaults to `aggregate` (`single` is an alias); `commandDetail` defaults to `summary`.",
           "properties": {
+            "emit": {
+              "type": "boolean",
+              "description": "When true, persist command manifests automatically after command execution.",
+              "markdownDescription": "When true, persist command manifests automatically. Default: `false`. This does not control explicit `--json-file` output, artifact manifests, or CI-native output.",
+              "default": false
+            },
             "path": {
               "type": "string",
               "description": "Directory for command/runtime manifest files. Use ~/... to resolve relative to outputs.root; plain relative paths are repo-relative.",
@@ -2666,9 +2721,20 @@
         "commands": {
           "type": "object",
           "description": "Global command execution policy settings.",
-          "markdownDescription": "Global command execution policy settings. `defaultMergeMode` is the fallback when a child command does not specify merge mode; `maxDepth` defaults to `5`.",
+          "markdownDescription": "Global command execution policy settings. `echo` defaults to `summary`; `defaultMergeMode` is the fallback when a child command does not specify merge mode; `maxDepth` defaults to `5`.",
           "additionalProperties": false,
           "properties": {
+            "echo": {
+              "type": "string",
+              "description": "Default execution detail level: none, summary, or full.",
+              "markdownDescription": "Default command echo policy: `none` suppresses Rexo-generated descriptions, `summary` shows concise metadata without command bodies, and `full` includes rendered command bodies with known secrets masked. Default: `summary`.",
+              "enum": [
+                "none",
+                "summary",
+                "full"
+              ],
+              "default": "summary"
+            },
             "defaultMergeMode": {
               "$ref": "#/$defs/commandMergeMode",
               "description": "Fallback command collision behavior when a child command omits merge.mode. Applied before the built-in replace fallback.",

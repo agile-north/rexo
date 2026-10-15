@@ -31,7 +31,7 @@ public static class Program
         var workingDir = Environment.CurrentDirectory;
 
         // Parse global flags
-        var (cleanArgs, json, jsonFile, verbose, debug, quiet, dryRunFlag, nonInteractive, color, setOverrides) = ParseGlobalFlags(args);
+        var (cleanArgs, json, jsonFile, echoMode, echoOptionTokens, verbose, debug, quiet, dryRunFlag, nonInteractive, color, setOverrides) = ParseGlobalFlags(args);
         ConsoleRenderer.ConfigureColors(color);
 
         // No args (or only global flags) — show help
@@ -84,7 +84,19 @@ public static class Program
             return 9;
         }
 
-        var outputSettings = ResolveCommandOutputSettings(config, json, jsonFile, quiet);
+        if (echoOptionTokens.Count > 0 && ConfiguredCommandHasEchoOption(cleanArgs, config))
+        {
+            cleanArgs = cleanArgs.Concat(echoOptionTokens).ToArray();
+            echoMode = null;
+        }
+
+        if (echoMode is not null && !TryNormalizeEchoMode(echoMode, out echoMode))
+        {
+            ConsoleRenderer.RenderError("Invalid --echo value. Supported values are: none, summary, full.");
+            return 2;
+        }
+
+        var outputSettings = ResolveCommandOutputSettings(config, json, jsonFile, echoMode, quiet);
         var dryRun = ResolveDryRun(config, dryRunFlag);
 
         return command switch
@@ -738,8 +750,10 @@ public static class Program
             var (parsedArgs, parsedOptions) = ParseArgsAndOptions(remainingArgs);
 
             // Map positional args to declared arg names when config defines them
-            if (config?.Commands?.TryGetValue(candidateName, out var cmdConfig) == true &&
-                cmdConfig.Args is { Count: > 0 })
+            var cmdConfig = config?.Commands?.TryGetValue(candidateName, out var configuredCommand) == true
+                ? configuredCommand
+                : null;
+            if (cmdConfig?.Args is { Count: > 0 })
             {
                 var argNames = cmdConfig.Args.Keys.ToArray();
                 var positionalArgs = remainingArgs
@@ -874,8 +888,10 @@ public static class Program
             var (parsedArgs, parsedOptions) = ParseArgsAndOptions(remainingArgs);
 
             // If config defines arg names, map positional args to them
-            if (config?.Commands?.TryGetValue(candidateName, out var cmdConfig) == true &&
-                cmdConfig.Args is { Count: > 0 })
+            var cmdConfig = config?.Commands?.TryGetValue(candidateName, out var configuredCommand) == true
+                ? configuredCommand
+                : null;
+            if (cmdConfig?.Args is { Count: > 0 })
             {
                 var argNames = cmdConfig.Args.Keys.ToArray();
                 var positionalArgs = remainingArgs
@@ -891,7 +907,8 @@ public static class Program
                 }
             }
 
-            var invocation = CreateInvocation(parsedArgs, parsedOptions, outputSettings, workingDir, dryRun, debug);
+            var invocation = CreateInvocation(parsedArgs, parsedOptions, outputSettings, workingDir, dryRun, debug)
+                with { PresentationEchoMode = ResolvePresentationEchoMode(outputSettings.EchoMode, cmdConfig?.Echo, config?.Runtime?.Commands?.Echo) };
 
             var startedAt = DateTimeOffset.UtcNow;
             var result = await ExecuteCommandAsync(executor, candidateName, invocation, cancellationToken);
@@ -932,6 +949,12 @@ public static class Program
             }
             else
             {
+                var echoMode = invocation.PresentationEchoMode ?? invocation.EchoMode ?? "summary";
+                if (result.Success && string.Equals(echoMode, "none", StringComparison.OrdinalIgnoreCase))
+                {
+                    return result.ExitCode;
+                }
+
                 switch (result.Command)
                 {
                     case "version":
@@ -951,7 +974,7 @@ public static class Program
                         break;
                 }
 
-                if (verbose && result.Steps.Count > 0)
+                if (verbose && !string.Equals(echoMode, "none", StringComparison.OrdinalIgnoreCase) && result.Steps.Count > 0)
                 {
                     ConsoleRenderer.RenderStepResults(result.Steps);
                 }
@@ -1258,11 +1281,13 @@ public static class Program
             .FirstOrDefault()?.InformationalVersion ?? "0.1.0-local";
     }
 
-    private static (IReadOnlyList<string> cleanArgs, bool json, string? jsonFile, bool verbose, bool debug, bool quiet, bool? dryRun, bool nonInteractive, bool? color, IReadOnlyList<string> setOverrides) ParseGlobalFlags(string[] args)
+    private static (IReadOnlyList<string> cleanArgs, bool json, string? jsonFile, string? echoMode, IReadOnlyList<string> echoOptionTokens, bool verbose, bool debug, bool quiet, bool? dryRun, bool nonInteractive, bool? color, IReadOnlyList<string> setOverrides) ParseGlobalFlags(string[] args)
     {
         var clean = new List<string>();
         var json = false;
         string? jsonFile = null;
+        string? echoMode = null;
+        var echoOptionTokens = new List<string>();
         var verbose = false;
         var debug = false;
         var quiet = false;
@@ -1280,6 +1305,15 @@ public static class Program
                     break;
                 case "--json-file" when i + 1 < args.Length:
                     jsonFile = args[++i];
+                    break;
+                case "--echo" when i + 1 < args.Length:
+                    echoOptionTokens.Add(args[i]);
+                    echoMode = args[++i];
+                    echoOptionTokens.Add(echoMode);
+                    break;
+                case var option when option.StartsWith("--echo=", StringComparison.Ordinal):
+                    echoOptionTokens.Add(option);
+                    echoMode = option["--echo=".Length..];
                     break;
                 case "--verbose" or "-v":
                     verbose = true;
@@ -1315,7 +1349,7 @@ public static class Program
             }
         }
 
-        return (clean, json, jsonFile, verbose, debug, quiet, dryRun, nonInteractive, color, setOverrides);
+        return (clean, json, jsonFile, echoMode, echoOptionTokens, verbose, debug, quiet, dryRun, nonInteractive, color, setOverrides);
     }
 
     private static (IReadOnlyDictionary<string, string> args, IReadOnlyDictionary<string, string?> options)
@@ -1399,6 +1433,7 @@ public static class Program
         Console.WriteLine("Global options:");
         Console.WriteLine("  --json                      Output as JSON");
         Console.WriteLine("  --json-file <path>          Write JSON output to file");
+        Console.WriteLine("  --echo <mode>               Command execution detail: none, summary, or full");
         Console.WriteLine("  --verbose                   Show detailed step output");
         Console.WriteLine("  --quiet                     Suppress non-essential output");
         Console.WriteLine("  --debug                     Show debug/diagnostic output");
@@ -1435,6 +1470,8 @@ public static class Program
         return new CommandInvocation(args, mergedOptions, outputSettings.Json, outputSettings.JsonFile, workingDir)
         {
             Stdout = outputSettings.Stdout,
+            EchoMode = outputSettings.EchoMode,
+            PresentationEchoMode = outputSettings.PresentationEchoMode,
         };
     }
 
@@ -1448,7 +1485,12 @@ public static class Program
         return config?.Runtime?.DryRun == true || config?.Runtime?.Push?.DryRun == true;
     }
 
-    private static CommandOutputSettings ResolveCommandOutputSettings(RepoConfig? config, bool jsonFlag, string? jsonFileFlag, bool quiet)
+    private static CommandOutputSettings ResolveCommandOutputSettings(
+        RepoConfig? config,
+        bool jsonFlag,
+        string? jsonFileFlag,
+        string? echoMode,
+        bool quiet)
     {
         var commandOutputs = config?.Outputs?.Command;
         var json = jsonFlag || commandOutputs?.Json == true;
@@ -1457,10 +1499,81 @@ public static class Program
             : commandOutputs?.JsonFile;
         var stdout = !quiet && (commandOutputs?.Stdout ?? true);
 
-        return new CommandOutputSettings(json, string.IsNullOrWhiteSpace(jsonFile) ? null : jsonFile, stdout);
+        var normalizedEchoMode = echoMode ?? config?.Runtime?.Commands?.Echo;
+        if (normalizedEchoMode is not null && !TryNormalizeEchoMode(normalizedEchoMode, out normalizedEchoMode))
+        {
+            normalizedEchoMode = "summary";
+        }
+
+        normalizedEchoMode ??= "summary";
+        return new CommandOutputSettings(
+            json,
+            string.IsNullOrWhiteSpace(jsonFile) ? null : jsonFile,
+            stdout,
+            echoMode,
+            normalizedEchoMode);
     }
 
-    private sealed record CommandOutputSettings(bool Json, string? JsonFile, bool Stdout);
+    private static string ResolvePresentationEchoMode(string? cliEcho, string? commandEcho, string? runtimeEcho)
+    {
+        var value = cliEcho ?? commandEcho ?? runtimeEcho ?? "summary";
+        return TryNormalizeEchoMode(value, out var normalized) ? normalized : "summary";
+    }
+
+    private static bool TryNormalizeEchoMode(string value, out string normalized)
+    {
+        normalized = value.Trim().ToLowerInvariant();
+        return normalized is "none" or "summary" or "full";
+    }
+
+    private static bool ConfiguredCommandHasEchoOption(IReadOnlyList<string> args, RepoConfig? config)
+    {
+        if (config?.Commands is not { Count: > 0 } commands)
+        {
+            return false;
+        }
+
+        var startIndex = args.Count > 1 && string.Equals(args[0], "run", StringComparison.OrdinalIgnoreCase)
+            ? 1
+            : 0;
+        if (startIndex >= args.Count)
+        {
+            return false;
+        }
+
+        foreach (var (name, command) in commands.OrderByDescending(pair => pair.Key.Length))
+        {
+            var nameParts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (startIndex + nameParts.Length > args.Count)
+            {
+                continue;
+            }
+
+            var matches = true;
+            for (var index = 0; index < nameParts.Length; index++)
+            {
+                if (!string.Equals(nameParts[index], args[startIndex + index], StringComparison.OrdinalIgnoreCase))
+                {
+                    matches = false;
+                    break;
+                }
+            }
+
+            if (matches && command.Options.Keys.Any(option => string.Equals(option, "echo", StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private sealed record CommandOutputSettings(
+        bool Json,
+        string? JsonFile,
+        bool Stdout,
+        string? EchoMode,
+        string PresentationEchoMode);
 
     private static IReadOnlyList<string> DiscoverUiProjectRoots(string currentWorkingDir)
     {

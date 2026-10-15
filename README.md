@@ -78,6 +78,11 @@ Generated YAML starts with a `# yaml-language-server: $schema=...` modeline, so 
 - Keep local and CI behavior identical
 - Produce inspectable run and release artifacts
 
+Command execution descriptions default to concise summaries; use `--echo full` to include
+rendered command bodies or configure `commands.<name>.echo` / `runtime.commands.echo`.
+Automatic command manifests are opt-in with `outputs.manifests.emit: true`; explicit
+`--json-file` output and its sidecar remain available independently.
+
 ## Documentation
 
 **Configuration & Behavior:**

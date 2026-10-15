@@ -16,6 +16,7 @@ internal sealed class RepoCommandConfigJsonConverter : JsonConverter<RepoCommand
 
         var command = new RepoCommandConfig(description, optionsValue, steps)
         {
+            Echo = ReadOptionalString(root, "echo"),
             Hidden = ReadOptionalBool(root, "hidden"),
             Args = ReadOptionalObject<Dictionary<string, RepoArgConfig>>(root, "args", options),
             StepOps = ReadOptionalObject<RepoCommandStepOpsConfig>(root, "stepOps", options),
@@ -55,6 +56,11 @@ internal sealed class RepoCommandConfigJsonConverter : JsonConverter<RepoCommand
         if (value.Hidden.HasValue)
         {
             writer.WriteBoolean("hidden", value.Hidden.Value);
+        }
+
+        if (value.Echo is not null)
+        {
+            writer.WriteString("echo", value.Echo);
         }
 
         writer.WritePropertyName("options");

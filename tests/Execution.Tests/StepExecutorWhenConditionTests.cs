@@ -55,6 +55,11 @@ public sealed class StepExecutorWhenConditionTests
 
                         if /I "%~1"=="build" (
                             echo build %*>>"%LOG%"
+                            echo dockerfile-path=%~3>>"%LOG%"
+                            if exist "%~3" (
+                                echo dockerfile-exists>>"%LOG%"
+                                type "%~3">>"%LOG%"
+                            )
                             exit /b 0
                         )
 
@@ -725,6 +730,69 @@ public sealed class StepExecutorWhenConditionTests
             Assert.Contains("--build-arg APP_VERSION=1.2.3", log, StringComparison.Ordinal);
             Assert.Contains("run ", log, StringComparison.Ordinal);
             Assert.Contains("--entrypoint custom-entry", log, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", originalPath);
+            Environment.SetEnvironmentVariable("REXO_DOCKER_COMMAND", originalDockerCommand);
+            Environment.SetEnvironmentVariable("REXO_FAKE_IMAGE_HASH", originalFakeImageHash);
+            if (Directory.Exists(repoDir)) Directory.Delete(repoDir, true);
+            if (Directory.Exists(toolsDir)) Directory.Delete(toolsDir, true);
+            ContainerEnvMutationGate.Release();
+        }
+    }
+
+    [Fact]
+    public async Task ContainerRunMaterializesInlineDockerfileAndCleansItUp()
+    {
+        if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return;
+        }
+
+        await ContainerEnvMutationGate.WaitAsync();
+
+        var executor = CreateExecutor();
+        var (toolsDir, logPath) = await CreateFakeDockerAsync();
+        var dockerCommandPath = Path.Join(toolsDir, "docker.cmd");
+        var repoDir = Path.Join(Path.GetTempPath(), $"rexo-inline-container-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(repoDir);
+
+        var originalPath = Environment.GetEnvironmentVariable("PATH");
+        var originalDockerCommand = Environment.GetEnvironmentVariable("REXO_DOCKER_COMMAND");
+        var originalFakeImageHash = Environment.GetEnvironmentVariable("REXO_FAKE_IMAGE_HASH");
+        Environment.SetEnvironmentVariable("PATH", toolsDir + Path.PathSeparator + originalPath);
+        Environment.SetEnvironmentVariable("REXO_DOCKER_COMMAND", dockerCommandPath);
+        Environment.SetEnvironmentVariable("REXO_FAKE_IMAGE_HASH", null);
+
+        try
+        {
+            var step = new StepDefinition(
+                Id: "inline-container",
+                Run: "echo hello-from-container",
+                Uses: null,
+                Command: null,
+                When: null)
+            {
+                Container = new StepContainerDefinition(
+                    Image: "rexo/inline-image:local",
+                    Context: ".",
+                    InlineDockerfile: "FROM scratch\nRUN echo inline-dockerfile"),
+            };
+
+            var result = await executor.ExecuteAsync(step, ExecutionContext.Empty(repoDir), CancellationToken.None);
+
+            Assert.True(result.Success);
+            var log = await File.ReadAllTextAsync(logPath);
+            Assert.Contains("dockerfile-exists", log, StringComparison.Ordinal);
+            Assert.Contains("FROM scratch", log, StringComparison.Ordinal);
+            Assert.Contains("RUN echo inline-dockerfile", log, StringComparison.Ordinal);
+
+            var dockerfilePath = log
+                .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+                .Single(line => line.StartsWith("dockerfile-path=", StringComparison.Ordinal))
+                ["dockerfile-path=".Length..];
+            Assert.False(File.Exists(dockerfilePath));
         }
         finally
         {

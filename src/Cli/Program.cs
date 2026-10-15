@@ -1337,14 +1337,7 @@ public static class Program
                         ? new[] { args[i], args[i + 1] }
                         : [args[i]];
                     echoOptionOccurrences.Add(new EchoOptionOccurrence(clean.Count, optionTokens, hasValue));
-                    if (hasValue)
-                    {
-                        echoMode = args[++i];
-                    }
-                    else
-                    {
-                        echoMode = null;
-                    }
+                    echoMode = hasValue ? args[++i] : null;
                     break;
                 case var option when option.StartsWith("--echo=", StringComparison.Ordinal):
                     echoOptionOccurrences.Add(new EchoOptionOccurrence(clean.Count, [option], true));

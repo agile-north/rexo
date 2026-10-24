@@ -83,12 +83,9 @@ internal static class GitHubReportCheckPublisher
                 $"{api}repos/{repository}/commits/{sha}/check-runs?filter=all&per_page=100&page={page.ToString(CultureInfo.InvariantCulture)}",
                 token, null, cancellationToken);
             var checks = list.GetProperty("check_runs");
-            foreach (var check in checks.EnumerateArray())
+            foreach (var check in checks.EnumerateArray().Where(IsScopedCheck))
             {
-                if (!check.TryGetProperty("external_id", out var id) || id.GetString() is not { } value ||
-                    !value.StartsWith(identityPrefix, StringComparison.Ordinal) ||
-                    check.GetProperty("name").GetString() != name) continue;
-                if (value == externalId)
+                if (check.GetProperty("external_id").GetString() == externalId)
                 {
                     existingId = check.GetProperty("id").GetInt64();
                 }
@@ -128,6 +125,11 @@ internal static class GitHubReportCheckPublisher
                 }, cancellationToken);
         }
         return new("published", url);
+
+        bool IsScopedCheck(JsonElement check) =>
+            check.TryGetProperty("external_id", out var id) &&
+            id.GetString() is { } value && value.StartsWith(identityPrefix, StringComparison.Ordinal) &&
+            check.GetProperty("name").GetString() == name;
     }
 
     private static async Task<bool> IsKnownReadOnlyAsync(

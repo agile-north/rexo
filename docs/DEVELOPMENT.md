@@ -19,16 +19,18 @@ dotnet test solution.slnx -c Release
 
 The single `release` workflow (`release.yml`) has one job (`release`).
 It bootstraps the current source and calls the normal
-`rx release` lifecycle once, with identical arguments on every event.
-The configured release command gates pushing on `REXO_PUBLISH`, PR context and
-`runtime.push` branch policy; post-push tagging requires an actual successful push.
-Actions selects/authenticates the publisher; PRs and default manual runs do not select one.
-Rexo owns verification, building, tagging and pushing;
+`rx release` lifecycle once. Actions passes `--push=true` only for push events or
+explicitly opted-in manual runs with a configured publisher; otherwise it passes
+`--push=false`. Rexo's `runtime.push` owns branch and PR restrictions.
+Actions selects/authenticates the publisher.
+Rexo owns verification, building, pushing, GitHub reports, release tags and releases;
 there is no second build, separate publishing job, package transfer between jobs, or
 lifecycle wrapper. The workflow uploads a single evidence artifact from this job.
 The job has release permissions, including on same-repository PRs; it no longer provides
 the previous read-only job boundary. Publisher login and release mutations remain
-event/branch-gated. Non-publishing runs do not verify real publisher authentication.
+event-gated; release mutations additionally require Rexo's branch and publication gates.
+An opted-in manual run on a blocked branch can authenticate but cannot publish.
+Non-publishing runs do not verify real publisher authentication.
 
 `workflow-validation` runs pinned actionlint over all workflows, including shell checks.
 Require `workflow-validation` and `release` in the `main` branch rules,
@@ -37,12 +39,28 @@ in GitHub settings, not by the workflow itself.
 
 There is no separate build workflow: PRs, branch pushes and manual rehearsals share
 the same job, with one isolated source bootstrap.
-Rexo's embedded policies and `.rexo/rexo.yaml` own restore/build/test/analyze/package
-orchestration. `rx ci coverage` restores the pinned local report tool and generates
-coverage summaries using the config's output paths; Actions appends the summary to GitHub
-and uploads the lifecycle evidence. When publication is enabled, Actions also performs
-NuGet.org OIDC login when that feed is selected, publishes the schema branch, and creates
-the GitHub Release. The local report-tool version lives in `.config/dotnet-tools.json`.
+The config imports `standard`, `dotnet`, [github-tests](embedded/github-tests.md),
+[github-coverage](embedded/github-coverage.md) and [github-release](embedded/github-release.md).
+Test and coverage reporters run even after test failure, create GitHub Checks and append
+Actions summaries. Coverage conversion uses the policy's pinned container tooling; there
+is no local ReportGenerator tool manifest or separate coverage command.
+The reporters use explicit TRX/Cobertura inputs and separate output directories because
+this repository intentionally puts raw tests and coverage in the same directory.
+Internal report uploads are disabled: the single always-run `actions/upload-artifact`
+step uploads their local outputs together with the other lifecycle evidence.
+Actions retains checkout, SDK/GitVersion setup, NuGet.org OIDC login when selected,
+source bootstrap, lifecycle invocation and evidence upload. It grants `checks: write`
+for reporting; fork/read-only contexts use the policies' documented publishing skips.
+
+`github-release` replaces `git-tag` and creates the exact-commit tag and GitHub release
+only after successful package publication. The only repository-specific release contribution
+is one appended `publish-schema` step: after the GitHub release succeeds, it force-updates
+`vars.schemaBranch` to the exact checked-out commit, only when all selected artifacts were
+pushed, `--push` is enabled, and the run is neither a PR nor a dry-run.
+This preserves the existing mutable schema-branch behavior, not a merge or deployment.
+The destination is explicit (`schema/v1.0`); update it when the schema version changes.
+An integration assertion keeps it aligned with `rexo.schema.json`, and a local bare-Git test
+checks the real branch update without touching GitHub.
 Prepared-artifact and evidence-validation primitives remain available for consumers that
 need a multi-stage pipeline, but this repository does not use them in its normal lifecycle.
 
@@ -59,6 +77,9 @@ readiness or deployment roadmap; see [ROADMAP.md](ROADMAP.md).
 The repository config uses `~/` output paths relative to `outputs.root` (`artifacts`).
 TRX and XPlat coverage attachments share `artifacts/test-results`; merged analyzer output
 lives in `artifacts/sarif`. CI uploads the lifecycle output in one evidence artifact.
+Local reruns discover existing raw reports too: remove only `artifacts/test-results`
+before a fresh rehearsal to avoid including older failures or coverage. Do not clean the
+entire `artifacts` directory while running its bootstrap CLI.
 
 The repository release workflow publishes a temporary bootstrap CLI from the checked-out source tree
 to an isolated output directory, then runs the repository's `.rexo/rexo.yaml` release command. The
@@ -71,12 +92,16 @@ Configure at most one publishing mode:
 - Otherwise, set the `PUBLISH_TO_GITHUB_PACKAGES` Actions variable to `true` to publish through
   GitHub Packages using `GITHUB_TOKEN`.
 - If neither is configured, Rexo still builds, tests, and packs the CLI, but the workflow skips
-  package publishing, post-push Git version-tag creation, schema-branch publication, and
+  package publishing, Git version-tag creation, schema-branch publication, and
   GitHub Release creation.
   If both modes are configured, NuGet.org takes precedence.
 
 The self-hosted version comes from GitVersion and is passed to the local CLI as
-`GITVERSION_SEMVER`. Never add publishing credentials to repository configuration. NuGet push
+`GITVERSION_SEMVER`. Keep its fail-fast Actions computation for now: Rexo's native
+GitVersion provider can fall back on tool failure, which is unsuitable for selecting a
+published version. Do not replace it until native resolution can fail closed.
+Local runs can use the configured fallback without publishing.
+Never add publishing credentials to repository configuration. NuGet push
 output masks API keys, but `dotnet nuget push` receives them as process arguments; use a dedicated
 CI identity and avoid sharing the runner with untrusted processes.
 

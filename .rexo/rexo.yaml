@@ -6,7 +6,9 @@ description: Rexo self-hosted build and release configuration
 extends:
   - embedded:standard
   - embedded:dotnet
-  - embedded:git-tag
+  - embedded:github-tests
+  - embedded:github-coverage
+  - embedded:github-release
 versioning:
   provider: env
   fallback: 0.1.0-local
@@ -19,9 +21,18 @@ vars:
     analyze:
       sarif:
         enabled: true
-  gitTag:
-    prefix: v
-    container: none
+  githubTests:
+    paths: "{{outputs.tests.results}}/**/*.trx"
+    format: trx
+    missingReports: fail
+    uploadArtifact: false
+  githubCoverage:
+    paths: "{{outputs.tests.coverage}}/**/coverage.cobertura.xml"
+    format: cobertura
+    outputDirectory: "{{outputs.tests.coverage}}/github-coverage"
+    missingReports: fail
+    uploadArtifact: false
+  schemaBranch: schema/v1.0
 outputs:
   root: artifacts
   manifests:
@@ -37,33 +48,11 @@ runtime:
     branches: [main, alpha, alpha-*, beta, beta-*, edge, edge-*]
 commands:
   release:
-    description: Verify and build once; publish only when CI selects a publisher and push policy permits it.
-    options:
-      push:
-        type: bool
-        default: true
+    merge: append
     steps:
-      - id: verify
-        command: verify
-      - id: build
-        command: build
-      - id: push
-        uses: builtin:push-artifacts
-        when: "{{options.push && env.REXO_PUBLISH == 'true' && !ci.isPullRequest}}"
-      - id: post-push
-        command: post-push
-        when: "{{push.anyPushed && !options.dry-run}}"
-  ci coverage:
-    description: Generate coverage reports locally and in CI from the release test evidence.
-    steps:
-      - id: restore-report-tools
-        run: dotnet tool restore
-      - id: coverage-summary
-        run: >-
-          dotnet tool run reportgenerator
-          "-reports:{{outputs.tests.results}}/**/coverage.cobertura.xml"
-          "-targetdir:{{outputs.root}}/coverage-report"
-          "-reporttypes:Cobertura;MarkdownSummaryGithub"
+      - id: publish-schema
+        when: "{{options.push && push.allPushed && !ci.isPullRequest && !options.dry-run}}"
+        run: git push origin "{{repo.commitSha}}:refs/heads/{{vars.schemaBranch}}" --force
 artifacts:
   - type: nuget
     name: Rexo.Cli

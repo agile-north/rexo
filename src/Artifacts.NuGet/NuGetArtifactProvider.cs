@@ -1,6 +1,7 @@
 namespace Rexo.Artifacts.NuGet;
 
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
 using Rexo.Artifacts;
 using Rexo.Core.Abstractions;
@@ -56,8 +57,12 @@ public sealed class NuGetArtifactProvider : IArtifactProvider, IPreparedArtifact
         ArtifactConfig artifact, PreparedArtifact prepared, ExecutionContext context, CancellationToken cancellationToken)
     {
         await ValidatePreparedAsync(artifact, prepared, context, cancellationToken);
-        var package = prepared.Outputs.Single(output => output.Reference.EndsWith(".nupkg", StringComparison.Ordinal));
-        var symbols = prepared.Outputs.SingleOrDefault(output => output.Reference.EndsWith(".snupkg", StringComparison.Ordinal));
+        var output = GetSetting(artifact, "output") ?? "artifacts/packages";
+        var version = context.Version?.NuGetVersion ?? context.Version?.SemVer;
+        var reference = Path.GetRelativePath(context.RepositoryRoot,
+            ResolveRepositoryPath(context.RepositoryRoot, $"{output}/{artifact.Name}.{version}.nupkg")).Replace('\\', '/');
+        var package = prepared.Outputs.Single(entry => entry.Reference == reference);
+        var symbols = prepared.Outputs.SingleOrDefault(entry => entry.Reference != reference);
         return await PushPackagesAsync(artifact, context, [package.Reference], symbols?.Reference, cancellationToken);
     }
 
@@ -71,18 +76,50 @@ public sealed class NuGetArtifactProvider : IArtifactProvider, IPreparedArtifact
         var version = context.Version?.SemVer;
 
         var outputPath = ResolveRepositoryPath(context.RepositoryRoot, output);
+        if (artifact.SourceProject is not null)
+        {
+            var relativeOutput = Path.GetRelativePath(context.RepositoryRoot, outputPath).Replace('\\', '/');
+            _ = PreparedArtifactFiles.ResolvePath(context.RepositoryRoot, $"{relativeOutput}/.rexo-output-check");
+            var symbols = GetSetting(artifact.Settings, "symbols.pattern");
+            if (IsTrue(GetSetting(artifact.Settings, "symbols.enabled")) &&
+                symbols is not null && (symbols.Contains('*', StringComparison.Ordinal) || symbols.Contains('?', StringComparison.Ordinal)))
+            {
+                throw new InvalidOperationException("Discovered NuGet artifacts require an exact symbols.pattern, not a glob.");
+            }
+        }
+        if (artifact.SourceProject is not null && context.IsDryRun)
+        {
+            return new ArtifactBuildResult(artifact.Name, true, null);
+        }
+        if (artifact.SourceProject is not null && context.Version is null)
+        {
+            throw new InvalidOperationException("Discovered NuGet artifacts require a resolved version before packing.");
+        }
         Directory.CreateDirectory(outputPath);
 
-        var args = $"pack {project} --configuration Release --output {output}";
+        var projectArgument = string.IsNullOrEmpty(project) ? string.Empty : QuoteArgument(project);
+        var args = $"pack {projectArgument} --configuration Release --output {QuoteArgument(output)}";
         if (!string.IsNullOrEmpty(version))
         {
             args += $" /p:Version={version}";
+        }
+        if (artifact.SourceProject is not null)
+        {
+            args += $" /p:PackageVersion={context.Version?.NuGetVersion ?? version}";
         }
 
         ArtifactOutput.WriteCommand(context, $"  > dotnet {args}");
 
         var result = await _runDotnetAsync(args, context.RepositoryRoot, cancellationToken);
         WriteToolOutput(result.Output);
+
+        if (result.ExitCode == 0 && artifact.SourceProject is not null)
+        {
+            var prepared = await PrepareAsync(artifact, context, cancellationToken);
+            var package = prepared.Outputs[0];
+            return new ArtifactBuildResult(artifact.Name, true,
+                PreparedArtifactFiles.ResolvePath(context.RepositoryRoot, package.Reference));
+        }
 
         return new ArtifactBuildResult(
             Name: artifact.Name,
@@ -108,6 +145,11 @@ public sealed class NuGetArtifactProvider : IArtifactProvider, IPreparedArtifact
         ExecutionContext context,
         CancellationToken cancellationToken)
     {
+        if (artifact.SourceProject is not null)
+        {
+            var prepared = await PrepareAsync(artifact, context, cancellationToken);
+            return await PushPreparedAsync(artifact, prepared, context, cancellationToken);
+        }
         var output = GetSetting(artifact, "output") ?? "artifacts/packages";
         var packageVersion = context.Version?.NuGetVersion ?? context.Version?.SemVer;
         var packageTargets = ResolvePackageTargets(context.RepositoryRoot, output, artifact.Name, packageVersion);
@@ -130,7 +172,7 @@ public sealed class NuGetArtifactProvider : IArtifactProvider, IPreparedArtifact
 
         foreach (var packageTarget in packageTargets)
         {
-            var args = $"nuget push \"{packageTarget}\" --source {source} --skip-duplicate";
+            var args = $"nuget push {QuoteArgument(packageTarget, alwaysQuote: true)} --source {QuoteArgument(source)} --skip-duplicate";
             if (!string.IsNullOrEmpty(auth.Secret))
             {
                 args += $" --api-key {auth.Secret}";
@@ -165,7 +207,7 @@ public sealed class NuGetArtifactProvider : IArtifactProvider, IPreparedArtifact
                 return new ArtifactPushResult(artifact.Name, false, Array.Empty<string>());
             }
 
-            var symbolArgs = $"nuget push \"{symbolPattern}\" --source {symbolSource} --skip-duplicate";
+            var symbolArgs = $"nuget push {QuoteArgument(symbolPattern, alwaysQuote: true)} --source {QuoteArgument(symbolSource)} --skip-duplicate";
             if (!string.IsNullOrEmpty(symbolAuth.Secret))
             {
                 symbolArgs += $" --api-key {symbolAuth.Secret}";
@@ -367,6 +409,24 @@ public sealed class NuGetArtifactProvider : IArtifactProvider, IPreparedArtifact
 
     private static bool IsTrue(string? value) =>
         bool.TryParse(value, out var parsed) && parsed;
+
+    private static string QuoteArgument(string value, bool alwaysQuote = false)
+    {
+        if (!alwaysQuote && value.Length > 0 && !value.Any(character => char.IsWhiteSpace(character) || character == '"'))
+        {
+            return value;
+        }
+        var result = new StringBuilder("\"");
+        var slashes = 0;
+        foreach (var character in value)
+        {
+            if (character == '\\') { slashes++; continue; }
+            result.Append('\\', character == '"' ? (slashes * 2) + 1 : slashes);
+            result.Append(character);
+            slashes = 0;
+        }
+        return result.Append('\\', slashes * 2).Append('"').ToString();
+    }
 
     private static async Task<(int ExitCode, string Output)> RunDotnetAsync(
         string arguments,

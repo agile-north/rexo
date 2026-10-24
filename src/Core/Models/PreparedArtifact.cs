@@ -4,7 +4,10 @@ namespace Rexo.Core.Models;
 public sealed record PreparedArtifact(
     string Type,
     string Name,
-    IReadOnlyList<PreparedArtifactOutput> Outputs);
+    IReadOnlyList<PreparedArtifactOutput> Outputs)
+{
+    public string? SourceProject { get; init; }
+}
 
 /// <summary>A file or provider-specific immutable reference and its integrity identity.</summary>
 public sealed record PreparedArtifactOutput(string Kind, string Reference, string Identity);

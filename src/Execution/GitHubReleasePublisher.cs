@@ -43,7 +43,7 @@ internal static class GitHubReleasePublisher
             return Skip(reason);
         }
 
-        var selected = ConfigCommandLoader.SelectArtifacts(config, context, static _ => true).ToArray();
+        var selected = (await NuGetProjectDiscovery.ResolveAsync(config, context, static _ => true, cancellationToken)).ToArray();
         var gate = GitHubReleaseOptions.Read(context, "artifactGate", "all");
         if (gate is not ("all" or "any" or "none"))
         {

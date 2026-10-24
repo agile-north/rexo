@@ -43,6 +43,12 @@ for selection and empty-group failure behavior.
 
 ## Shared behavior across many providers
 
+NuGet also supports [project discovery with include/exclude globs](nuget.md#discover-projects-with-globs),
+such as `**/*Contracts.csproj`. Each packable match becomes an independent artifact
+using its evaluated `PackageId`, inheriting shared settings and the lifecycle group.
+This is input-project discovery, not wildcard collection of prebuilt packages;
+other providers do not yet support `discover`.
+
 The following settings are intentionally consistent across the tool-based providers (`npm`, `pypi`, `maven`, `gradle`, `rubygems`, `terraform`, `helm`):
 
 - `settings.useDocker`: enable/disable Docker fallback when host CLI is unavailable (default `true`)

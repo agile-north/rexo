@@ -9,7 +9,7 @@ internal sealed class DockerBuiltinModule : IConfigBuiltinModule
     public void Register(BuiltinRegistry registry, ConfigBuiltinModuleContext context)
     {
         registry.Register("builtin:docker-plan", (step, ctx, ct) =>
-            Task.FromResult(ConfigCommandLoader.PlanArtifacts(
+            ConfigCommandLoader.PlanArtifactsAsync(
                 step.Id ?? "docker-plan",
                 context.Config,
                 ctx,
@@ -17,7 +17,8 @@ internal sealed class DockerBuiltinModule : IConfigBuiltinModule
                 pushRequested: ConfigCommandLoader.TryGetOptionBoolean(ctx.Options, "push") == true,
                 includePredicate: static a => string.Equals(a.Type, "docker", StringComparison.OrdinalIgnoreCase),
                 successMessage: "Planned docker artifacts.",
-                emptyMessage: "No docker artifacts configured.")));
+                emptyMessage: "No docker artifacts configured.",
+                cancellationToken: ct));
 
         registry.Register("builtin:docker-ship", async (step, ctx, ct) =>
         {

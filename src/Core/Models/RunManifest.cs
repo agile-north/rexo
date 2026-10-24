@@ -94,6 +94,9 @@ public sealed record ArtifactManifestEntry(
     bool Pushed,
     IReadOnlyList<string> Tags)
 {
+    /// <summary>Repository-relative project input for a discovered artifact.</summary>
+    public string? SourceProject { get; init; }
+
     /// <summary>SHA-256 of a locally produced file when its bytes are available.</summary>
     public string? ContentSha256 { get; init; }
 

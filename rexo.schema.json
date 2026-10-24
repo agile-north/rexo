@@ -997,6 +997,7 @@
       "properties": {
         "type": {
           "const": "nuget",
+          "enum": ["nuget"],
           "description": "Selects the nuget artifact provider."
         },
         "name": {
@@ -1012,6 +1013,37 @@
         "settings": {
           "description": "Provider-specific nuget pack/push settings.",
           "$ref": "#/$defs/nugetArtifactSettings"
+        },
+        "discover": {
+          "$ref": "#/$defs/nugetArtifactDiscovery"
+        }
+      },
+      "anyOf": [
+        {
+          "not": { "required": ["discover"] }
+        },
+        {
+          "not": { "required": ["name"] },
+          "properties": {
+            "settings": { "not": { "required": ["project"] } }
+          }
+        }
+      ]
+    },
+    "nugetArtifactDiscovery": {
+      "type": "object",
+      "description": "Discover NuGet projects relative to the repository root. Each packable project becomes an artifact named by its evaluated PackageId.",
+      "additionalProperties": false,
+      "required": ["include"],
+      "properties": {
+        "include": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "exclude": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
         }
       }
     },

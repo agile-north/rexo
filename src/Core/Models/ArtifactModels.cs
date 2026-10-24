@@ -5,7 +5,10 @@ using System.Text.Json;
 public sealed record ArtifactConfig(
     string Type,
     string Name,
-    IReadOnlyDictionary<string, JsonElement> Settings);
+    IReadOnlyDictionary<string, JsonElement> Settings)
+{
+    public string? SourceProject { get; init; }
+}
 
 public sealed record ArtifactBuildResult(string Name, bool Success, string? Location);
 

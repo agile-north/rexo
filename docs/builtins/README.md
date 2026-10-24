@@ -16,6 +16,8 @@ For embedded policy command flows, see [Embedded Policies Reference](../embedded
 - [Convenience](convenience.md) — Ship, all (composite wrappers)
 - [Docker](docker.md) — Docker-scoped builtins
 - [Configuration](config.md) — Config-resolved, config-materialize
+- [GitHub release](../embedded/github-release.md) — `builtin:github-release` guards, vars, outputs, and side effects
+- [GitHub reports](../embedded/github-reports.md) — `builtin:github-tests` / `builtin:github-coverage`, report processing, Checks, summaries and uploads
 - [Patterns & Examples](patterns.md) — Input patterns, shell equivalents, concrete examples
 
 ## Execution Model

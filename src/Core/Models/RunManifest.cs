@@ -29,6 +29,9 @@ public sealed record RunManifest
     public IReadOnlyList<StepManifestEntry> Steps { get; init; } = Array.Empty<StepManifestEntry>();
     public IReadOnlyList<ArtifactManifestEntry> Artifacts { get; init; } = Array.Empty<ArtifactManifestEntry>();
     public IReadOnlyList<PushDecision> PushDecisions { get; init; } = Array.Empty<PushDecision>();
+    public bool ArtifactsAnyPushed => ArtifactPublicationSummary.From(Artifacts, PushDecisions).AnyPushed;
+    public int ArtifactsPushedCount => ArtifactPublicationSummary.From(Artifacts, PushDecisions).PushedCount;
+    public bool ArtifactsAllPushed => ArtifactPublicationSummary.From(Artifacts, PushDecisions).AllPushed;
     public IReadOnlyList<string> Warnings { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string> Errors { get; init; } = Array.Empty<string>();
 

@@ -21,6 +21,8 @@ single config file and run identically locally and in CI.
 - **Rexo schema** (all valid config fields with types): https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json
 - **Policy schema** (all valid policy fields with types): https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/policy.schema.json
 - **Architecture overview**: https://github.com/agile-north/rexo/blob/release/next/docs/ARCHITECTURE.md
+- **CI/CD emission reference** (complete safe/full variables and gates): https://github.com/agile-north/rexo/blob/release/next/docs/configuration/ci-output-emission.md
+- **GitHub release policy** (vars, guards, local/container use, Actions example): https://github.com/agile-north/rexo/blob/release/next/docs/embedded/github-release.md
 
 ## Quick reference
 
@@ -119,6 +121,59 @@ Policy files have the same schema as `rexo.json`. They provide org-level default
 rx init --with-policy --policy dotnet
 ```
 
+### GitHub test and coverage reports
+
+For GitHub test/coverage display, import `embedded:github-tests` and
+`embedded:github-coverage` **after** the test toolchain (`embedded:dotnet` or another producer).
+They append `alwaysRun` steps to `test`, so normal test failures still get reported.
+Inputs are stack-neutral: TRX/JUnit/NUnit/xUnit for tests, and
+Cobertura/OpenCover/LCOV/JaCoCo/Clover for coverage. Configure `vars.githubTests` and
+`vars.githubCoverage`, not custom workflow report scripts. Coverage uses pinned
+containerized ReportGenerator (Docker required); test Checks use built-in parsing/API calls.
+
+Publishing defaults to automatic in Actions, explicit opt-in (`--publish-reports` or
+`publish: always`) locally. `rx reports tests` / `rx reports coverage` process existing
+reports. Checks require an explicit GitHub App/GITHUB_TOKEN with `checks: write`;
+fork/Dependabot contexts may skip. Set unique scopes for matrix jobs. Artifact uploads
+require Actions runtime credentials, not merely GITHUB_TOKEN; never claim local workflow
+artifact uploads work. See the complete configuration, output and permission contract:
+https://github.com/agile-north/rexo/blob/release/next/docs/embedded/github-reports.md
+
+For ordinary `run: rx verify` workflows needing downloadable reports, set
+`vars.githubTests.uploadArtifact: false` and `vars.githubCoverage.uploadArtifact: false`,
+then add one `actions/upload-artifact@v4` step with `if: always()`,
+`path: artifacts/tests/`, `if-no-files-found: warn`, and `retention-days: 14`.
+This uploads local outputs only; keep parsing, Checks, summaries and thresholds in Rexo.
+Adjust paths for configured output locations and use unique artifact names for matrix
+axes/shards and run attempts. See the shared reporting reference's shell-workflow example.
+
+### GitHub releases without workflow scripts
+
+When the user wants GitHub releases, include the shipped policy alongside standard/toolchain policies:
+
+```yaml
+extends:
+  - embedded:standard
+  - embedded:github-release
+vars:
+  githubRelease:
+    draft: false
+```
+
+`rx release --push` runs the lifecycle and then creates an exact-commit tag/GitHub release.
+The policy defaults to a pinned `gh` container (Docker required; no host `gh`) with an explicit
+`GH_TOKEN`/`GITHUB_TOKEN`. GitHub Actions needs `contents: write` and token mapping.
+All selected artifacts must have published; source-only repositories are allowed. Dry runs,
+failed lifecycle work, and global push restrictions prevent publication. Group releases use
+`<group>/v<version>` tags; default/all-group releases use `v<version>`. Do not also add
+`embedded:git-tag`: this policy owns its tags. Configure behavior through `vars.githubRelease`;
+read the policy reference above rather than inventing options or copying shell gates.
+
+For external downstream CI steps, use `REXO_SUCCESS` plus `REXO_ARTIFACTS_ALL_PUSHED`;
+`REXO_ARTIFACTS_ANY_PUSHED` / `REXO_ARTIFACTS_PUSHED_COUNT` describe partial publication.
+For GitHub step outputs set `outputs.ci.github-actions.scope: output` (default is `env`).
+The embedded GitHub release policy uses internal context and does not depend on CI emission.
+
 ## Useful CLI commands
 
 ```bash
@@ -131,6 +186,8 @@ rx config resolved           # show the final merged config as JSON
 rx doctor                    # check tool and provider availability
 rx check [--strict]          # inspect config/tool readiness; warnings fail only with --strict
 rx secrets doctor            # validate configured secret resolution safely
+rx policies list             # list importable embedded policies
+rx policies show github-release # inspect the shipped GitHub release policy
 ```
 
 `rx check` does not build, publish, deploy, or resolve secret values. Use `rx secrets preflight`

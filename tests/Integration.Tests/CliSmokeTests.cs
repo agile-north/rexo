@@ -1228,7 +1228,7 @@ public sealed class CliSmokeTests
             Assert.DoesNotContain("github-status", output, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("github-sarif", output, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("gitlab-status", output, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("github-release", output, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("github-release", output, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {

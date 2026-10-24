@@ -23,6 +23,9 @@ Current embedded policies:
 - [dotnet](dotnet.md) — .NET toolchain overlay: `restore`, `build`, `test`, `analyze`, `format`, `security`
 - [node](node.md) — Node.js toolchain overlay: `restore`, `build`, `test`, `analyze`, `format`, `security`
 - [git-tag](git-tag.md) — Generic git tag creation for versioned repositories
+- [github-release](github-release.md) — Exact-commit tags and GitHub releases after successful `release --push`, with containerized `gh`
+- [github-tests](github-tests.md) — TRX/JUnit/NUnit/xUnit summaries, GitHub Checks and Actions artifacts
+- [github-coverage](github-coverage.md) — Containerized ReportGenerator, coverage Checks, Markdown/HTML and optional thresholds
 
 ## Essential-by-default, opt-in extras
 
@@ -34,6 +37,7 @@ through documented `vars`, without overriding the policy's commands:
 | dotnet | restore, build, test + coverage, analyzer build | `analyze.format.enabled`, `analyze.sarif.enabled`, `security.enabled`, `container` |
 | node | lockfile install, build, test, lint | `format.check.enabled`, `sarif.enabled`, `audit.enabled`, `container` |
 | git-tag | create/push missing tag (containerized git) | `prefix`, `remote`, `container: none` for host git |
+| github-release | source-only or completely published selected-artifact releases, generated notes, automatic prerelease | `vars.githubRelease.*`: artifact gate, tag/title, draft, notes, repository/host, container image or native execution |
 
 Policies declare their defaults in their own `vars` (and `containers`) sections. These are
 deep-merged **underneath** your repository config, so you only set the keys you want to change and
@@ -77,6 +81,8 @@ Design intent:
 - Embedded policy says how this repo behaves (lifecycle command shape).
 - `embedded:standard` is the recommended lifecycle baseline when you want policy-provided commands.
 - `embedded:standard`'s `build` command includes a continuation point so toolchain overlays can slot their build step between version resolution and artifact packaging.
+- For GitHub tags/releases, add `embedded:github-release` after standard/toolchain policies;
+  it owns tag verification/creation, so `embedded:git-tag` is not needed as well.
 
 ## Policy Selection Guidance
 
@@ -92,12 +98,21 @@ Choose `embedded:dotnet` when:
 - You want additive dotnet-specific commands on top of the standard lifecycle baseline.
 - You want the dotnet `test` command to emit TRX results and collect XPlat coverage into the configured `outputs.tests.*` locations.
 
+Choose `embedded:github-release` when the user wants GitHub releases locally or in GitHub Actions.
+It removes release shell scripting from the workflow and works independently of CI variable
+emission. Read its [complete vars, gating, authentication, and Actions reference](github-release.md).
+
+Choose `embedded:github-tests` and/or `embedded:github-coverage` after the test toolchain to
+publish reports without per-report workflow steps. Read the [shared report publishing
+contract](github-reports.md), especially permissions, matrix scope, and Actions upload credentials.
+
 ## Policy Details
 
 - [standard](standard.md) — lifecycle commands, plan/verify/build/release/push
 - [dotnet](dotnet.md) — .NET overlay with opt-in format check, SARIF and vulnerability scan
 - [node](node.md) — Node.js overlay with opt-in format check, SARIF lint and audit
 - [git-tag](git-tag.md) — generic git tag creation for versioned repositories
+- [github-release](github-release.md) — GitHub CLI release publication with guarded exact-commit tags
 
 ## Builtins Used By Embedded Templates
 

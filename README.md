@@ -93,12 +93,15 @@ Automatic command manifests are opt-in with `outputs.manifests.emit: true`; expl
 - [Versioning](docs/configuration/versioning.md) — Version providers, auto-detection
 - [Runtime Settings](docs/configuration/runtime.md) — Output, push policy, tests, analysis
 - [Output Contract](docs/configuration/output-contract.md) — `--json`, `--json-file`, sidecar manifest fields
+- [CI/CD Emission Reference](docs/configuration/ci-output-emission.md) — Complete safe/full variable catalogs, provider destinations, and release gates
 - [Template Variables](docs/configuration/templates.md) — Variables, filters, expressions
 
 **Lifecycle & Execution:**
 
 - [Builtins Reference](docs/builtins/README.md) — Overview and index of all builtins
 - [Embedded Policies](docs/embedded/README.md) — standard and dotnet lifecycle policies
+- [GitHub Release Policy](docs/embedded/github-release.md) — GitHub tags/releases via containerized `gh`, without workflow shell scripts
+- [GitHub Test and Coverage Reporting](docs/embedded/github-reports.md) — Importable policies for Checks, job summaries, report downloads and coverage thresholds
   - [standard policy](docs/embedded/standard.md)
   - [dotnet policy](docs/embedded/dotnet.md)
 

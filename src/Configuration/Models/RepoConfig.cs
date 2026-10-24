@@ -301,7 +301,7 @@ public sealed record RepoCiOutputsConfig
     /// <summary>Emission scope. Accepts <c>safe</c>, <c>full</c>, or an object with <c>mode</c>, <c>include</c>, and <c>exclude</c> masks.</summary>
     public JsonElement? Scope { get; init; }
 
-    /// <summary>When true, emit raw step outputs in addition to the safe summary payload. Default: <c>false</c>.</summary>
+    /// <summary>When true, include step file output counts and paths in the safe summary. Default: <c>false</c>.</summary>
     public bool? IncludeStepOutputs { get; init; }
 
     /// <summary>When true, emit variables even when the normalized value is empty/null. Default: <c>false</c>.</summary>

@@ -122,6 +122,8 @@ public sealed class ConfigCommandLoader
         [
             new VersionBuiltinModule(),
             new ArtifactBuiltinModule(),
+            new GitHubReleaseBuiltinModule(),
+            new GitHubReportBuiltinModule(),
             new DockerBuiltinModule(),
             new UtilityBuiltinModule(),
             new ConfigBuiltinModule(),
@@ -544,8 +546,11 @@ public sealed class ConfigCommandLoader
                 new Dictionary<string, object?> { ["message"] = emptyMessage });
         }
 
-        var manifestEntries = new List<Core.Models.ArtifactManifestEntry>();
-        var pushDecisions = new List<Core.Models.PushDecision>();
+        var manifestEntries = artifacts.Select(artifact => new Core.Models.ArtifactManifestEntry(
+            artifact.Type, ResolveArtifactName(artifact, config), Built: true, Pushed: false,
+            Tags: Array.Empty<string>())).ToList();
+        var pushDecisions = artifacts.Select(artifact => new Core.Models.PushDecision(
+            ResolveArtifactName(artifact, config), false, "Push not attempted.")).ToList();
         var globalPolicy = ParsePushPolicyRules(config);
         var confirmRequested = ResolveConfirmRequested(ctx.Options);
         var dryRun = ctx.IsDryRun;
@@ -553,19 +558,14 @@ public sealed class ConfigCommandLoader
 
         if (!confirmRequested && !dryRun)
         {
-            foreach (var artifactCfg in artifacts)
+            for (var index = 0; index < artifacts.Count; index++)
             {
+                var artifactCfg = artifacts[index];
                 var artifactName = ResolveArtifactName(artifactCfg, config);
-                manifestEntries.Add(new Core.Models.ArtifactManifestEntry(
-                    artifactCfg.Type,
-                    artifactName,
-                    Built: true,
-                    Pushed: false,
-                    Tags: Array.Empty<string>()));
-                pushDecisions.Add(new Core.Models.PushDecision(
+                pushDecisions[index] = new Core.Models.PushDecision(
                     artifactName,
                     false,
-                    "Push skipped: use --confirm locally, or use release --push."));
+                    "Push skipped: use --confirm locally, or use release --push.");
             }
 
             if (emitArtifactManifest)
@@ -581,26 +581,33 @@ public sealed class ConfigCommandLoader
                 });
         }
 
-        foreach (var artifactCfg in artifacts)
+        for (var index = 0; index < artifacts.Count; index++)
         {
+            var artifactCfg = artifacts[index];
+            var artifactName = ResolveArtifactName(artifactCfg, config);
             var provider = _artifactProviders.Resolve(artifactCfg.Type);
             if (provider is null)
             {
-                continue;
+                var error = $"No provider found for artifact type '{artifactCfg.Type}'.";
+                Console.Error.WriteLine($"  {error}");
+                pushDecisions[index] = new Core.Models.PushDecision(artifactName, false, error);
+                if (emitArtifactManifest)
+                {
+                    await WriteArtifactManifestAsync(repositoryRoot, outputRoot, manifestEntries, cancellationToken);
+                }
+                return new StepResult(stepId, false, 6, TimeSpan.Zero,
+                    new Dictionary<string, object?>
+                    {
+                        ["error"] = error,
+                        ["__artifacts"] = manifestEntries,
+                        ["__pushDecisions"] = pushDecisions,
+                    });
             }
-
-            var artifactName = ResolveArtifactName(artifactCfg, config);
 
             var effectivePolicy = BuildEffectivePushPolicy(globalPolicy, artifactCfg.Settings);
             if (!IsPushAllowed(effectivePolicy, ctx, out var gateReason))
             {
-                manifestEntries.Add(new Core.Models.ArtifactManifestEntry(
-                    artifactCfg.Type,
-                    artifactName,
-                    Built: true,
-                    Pushed: false,
-                    Tags: Array.Empty<string>()));
-                pushDecisions.Add(new Core.Models.PushDecision(artifactName, false, gateReason));
+                pushDecisions[index] = new Core.Models.PushDecision(artifactName, false, gateReason);
                 continue;
             }
 
@@ -634,21 +641,21 @@ public sealed class ConfigCommandLoader
                 }
             }
 
-            var pushPerformed = pushResult.PublishedReferences.Count > 0;
-            manifestEntries.Add(new Core.Models.ArtifactManifestEntry(
+            var pushPerformed = !dryRun && pushResult.PublishedReferences.Count > 0;
+            manifestEntries[index] = new Core.Models.ArtifactManifestEntry(
                 artifactCfg.Type,
                 artifactName,
                 Built: true,
                 Pushed: pushPerformed,
-                Tags: pushResult.PublishedReferences));
-            pushDecisions.Add(new Core.Models.PushDecision(
+                Tags: pushResult.PublishedReferences);
+            pushDecisions[index] = new Core.Models.PushDecision(
                 artifactName,
                 pushResult.Success,
                 dryRun
                     ? "Dry run: push simulated."
                     : pushResult.Success
                         ? (pushPerformed ? "Push succeeded." : "Push skipped.")
-                        : $"Failed to push artifact '{artifactName}'."));
+                        : $"Failed to push artifact '{artifactName}'.");
 
             if (!pushResult.Success)
             {
@@ -1755,6 +1762,9 @@ public sealed class ConfigCommandLoader
         bool Available,
         string Detail);
 
+    internal static bool IsGlobalPushAllowed(RepoConfig config, ExecutionContext context, out string reason) =>
+        IsPushAllowed(ParsePushPolicyRules(config), context, out reason);
+
     private static PushPolicyRules ParsePushPolicyRules(RepoConfig config)
     {
         if (config.Runtime?.Push is not { } structuredPush)
@@ -1960,7 +1970,7 @@ public sealed class ConfigCommandLoader
         string repositoryRoot,
         ITemplateRenderer templateRenderer)
     {
-        if (stepDef.StepOutputs is null || stepDef.StepOutputs.Count == 0 || !stepResult.Success)
+        if (stepDef.StepOutputs is null || stepDef.StepOutputs.Count == 0)
         {
             return stepResult;
         }

@@ -1,5 +1,9 @@
 # Configuration Reference
 
+For GitHub test and coverage display, see [reporting policies](../embedded/github-reports.md):
+import `embedded:github-tests` / `embedded:github-coverage` after the test toolchain and
+configure their documented vars instead of duplicating reporting in workflow steps.
+
 For embedded templates, built-in lifecycle defaults, options, and usage examples,
 see [Embedded Policies Reference](../embedded/README.md).
 
@@ -9,7 +13,12 @@ see [Builtins Reference](../builtins/README.md).
 For machine-readable CLI output and sidecar run-manifest fields,
 see [Output Contract](./output-contract.md).
 
-For a focused CI output emission quick reference, see [CI Output Emission](./ci-output-emission.md).
+For the complete safe/full variable catalogs, provider destinations, run-step environment, and
+release-gating recipes, see [CI/CD Emission Reference](./ci-output-emission.md).
+
+For GitHub tags and releases without workflow scripting, opt into
+[embedded:github-release](../embedded/github-release.md); it includes configurable vars,
+container/native execution, local usage, and a minimal GitHub Actions workflow.
 
 For detailed run-step container wrapping behavior (scope, defaults, env precedence,
 fallback, and validation), see [Containerized Run Steps](./containerized-run.md).

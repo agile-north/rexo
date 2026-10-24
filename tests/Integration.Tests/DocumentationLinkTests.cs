@@ -4,6 +4,10 @@ using System.Diagnostics;
 using System.IO.Compression;
 using System.Xml.Linq;
 using System.Text.RegularExpressions;
+using Rexo.Ci;
+using Rexo.Core.Models;
+using Rexo.Policies;
+using System.Text.Json;
 
 [Collection("IntegrationSequential")]
 public sealed class DocumentationLinkTests
@@ -11,6 +15,55 @@ public sealed class DocumentationLinkTests
     private static readonly Regex MarkdownLinkPattern = new(
         """!?\[[^\]]*\]\(([^)]+)\)""",
         RegexOptions.CultureInvariant);
+
+    [Fact]
+    public void GitHubReleaseReferenceDocumentsEveryPolicyVar()
+    {
+        var reference = File.ReadAllText(Path.Join(FindRepositoryRoot(), "docs", "embedded", "github-release.md"));
+        using var policy = JsonDocument.Parse(EmbeddedPolicyTemplates.ReadTemplate("github-release"));
+        foreach (var variable in policy.RootElement.GetProperty("vars").GetProperty("githubRelease").EnumerateObject())
+        {
+            Assert.Contains($"| `{variable.Name}` |", reference, StringComparison.Ordinal);
+        }
+
+        var image = policy.RootElement.GetProperty("vars").GetProperty("githubRelease").GetProperty("image").GetString();
+        Assert.NotNull(image);
+        Assert.Contains(image, reference, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("github-tests", "githubTests")]
+    [InlineData("github-coverage", "githubCoverage")]
+    public void GitHubReportingReferencesDocumentEveryPolicyVar(string policyName, string section)
+    {
+        var directory = Path.Join(FindRepositoryRoot(), "docs", "embedded");
+        var reference = File.ReadAllText(Path.Join(directory, $"{policyName}.md")) +
+            File.ReadAllText(Path.Join(directory, "github-reports.md"));
+        using var policy = JsonDocument.Parse(EmbeddedPolicyTemplates.ReadTemplate(policyName));
+        foreach (var variable in policy.RootElement.GetProperty("vars").GetProperty(section).EnumerateObject())
+            Assert.Contains($"| `{variable.Name}` |", reference, StringComparison.Ordinal);
+        if (policy.RootElement.GetProperty("vars").GetProperty(section).TryGetProperty("image", out var image))
+            Assert.Contains(image.GetString()!, reference, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CiEmissionReferenceListsEveryStaticSafeScopeVariable()
+    {
+        var reference = File.ReadAllText(Path.Join(FindRepositoryRoot(), "docs", "configuration", "ci-output-emission.md"));
+        var safeCatalog = reference.Split("## Complete Safe-Scope Catalog", StringSplitOptions.None)[1]
+            .Split("## Complete Full-Scope Catalog", StringSplitOptions.None)[0];
+        var documentedKeys = Regex.Matches(safeCatalog, @"\| `(REXO_[A-Z0-9_]+)` \|")
+            .Select(match => match.Groups[1].Value)
+            .ToHashSet(StringComparer.Ordinal);
+        var payload = CiOutputEmitter.BuildPayload(new RunManifest
+        {
+            Version = new VersionResult("1.2.3", 1, 2, 3, null, "abcdef", "abcdef", false, true),
+        }, new CiEmissionOptions { EmitEmptyValues = true });
+
+        Assert.True(documentedKeys.SetEquals(payload.Variables.Keys),
+            $"Undocumented: {string.Join(", ", payload.Variables.Keys.Except(documentedKeys))}; " +
+            $"Not emitted: {string.Join(", ", documentedKeys.Except(payload.Variables.Keys))}");
+    }
 
     [Fact]
     public void RepositoryMarkdownRelativeLinksResolveToExistingPaths()

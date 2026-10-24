@@ -739,6 +739,7 @@ public sealed class TemplateRendererTests
 
         Assert.Equal("false", renderer.Render("{{push.hasData}}", ctx));
         Assert.Equal("false", renderer.Render("{{push.anyPushed}}", ctx));
+        Assert.Equal("false", renderer.Render("{{push.allPushed}}", ctx));
         Assert.Equal("0", renderer.Render("{{push.pushedCount}}", ctx));
         Assert.Equal("", renderer.Render("{{push.blockReasons}}", ctx));
     }
@@ -777,6 +778,7 @@ public sealed class TemplateRendererTests
 
         Assert.Equal("true", renderer.Render("{{push.hasData}}", ctx));
         Assert.Equal("true", renderer.Render("{{push.anyPushed}}", ctx));
+        Assert.Equal("false", renderer.Render("{{push.allPushed}}", ctx));
         Assert.Equal("1", renderer.Render("{{push.pushedCount}}", ctx));
         Assert.Equal("2", renderer.Render("{{push.artifactCount}}", ctx));
         Assert.Equal("3", renderer.Render("{{push.decisionCount}}", ctx));
@@ -784,5 +786,28 @@ public sealed class TemplateRendererTests
         Assert.Equal("2", renderer.Render("{{push.deniedCount}}", ctx));
         Assert.Equal("true", renderer.Render("{{push.anyBlocked}}", ctx));
         Assert.Equal("Push disabled by policy.", renderer.Render("{{push.blockReasons}}", ctx));
+    }
+
+    [Fact]
+    public void RenderPublicationSummaryDeduplicatesCompletedSteps()
+    {
+        var renderer = new TemplateRenderer();
+        var pushStep = new StepResult("push", true, 0, TimeSpan.Zero, new Dictionary<string, object?>
+        {
+            ["__artifacts"] = new List<ArtifactManifestEntry> { new("docker", "api", true, true, ["api:v1", "api:latest"]) },
+            ["__pushDecisions"] = new List<PushDecision> { new("api", true, "Published.") },
+        });
+        var ctx = MakeContext() with
+        {
+            CompletedSteps = new Dictionary<string, StepResult>
+            {
+                ["push"] = pushStep,
+                ["nested"] = pushStep with { StepId = "nested" },
+            },
+        };
+
+        Assert.Equal("true", renderer.Render("{{push.anyPushed}}", ctx));
+        Assert.Equal("1", renderer.Render("{{push.pushedCount}}", ctx));
+        Assert.Equal("true", renderer.Render("{{push.allPushed}}", ctx));
     }
 }

@@ -7,6 +7,87 @@ using Rexo.Core.Models;
 
 public sealed class CiOutputEmitterTests
 {
+    [Theory]
+    [InlineData(0, 0, true, false)]
+    [InlineData(1, 0, true, false)]
+    [InlineData(1, 0, false, false)]
+    [InlineData(2, 1, true, false)]
+    [InlineData(2, 1, false, false)]
+    [InlineData(2, 2, true, true)]
+    [InlineData(2, 2, false, false)]
+    public void PublicationSummaryIsConsistentAcrossSafeFullAndJson(
+        int selectedCount, int pushedCount, bool allowed, bool allPushed)
+    {
+        var artifacts = Enumerable.Range(0, selectedCount)
+            .Select(index => new ArtifactManifestEntry("docker", index.ToString(CultureInfo.InvariantCulture),
+                true, index < pushedCount, []))
+            .ToArray();
+        var decisions = artifacts.Select(artifact => new PushDecision(artifact.Name, allowed, "decision")).ToArray();
+        var manifest = new RunManifest { Artifacts = artifacts, PushDecisions = decisions };
+        var result = CommandResult.Ok("push") with { Artifacts = artifacts, PushDecisions = decisions };
+
+        foreach (var scope in new[] { "safe", "full" })
+        {
+            using var scopeJson = JsonDocument.Parse(JsonSerializer.Serialize(scope));
+            var payload = CiOutputEmitter.BuildPayload(manifest, new CiEmissionOptions { Scope = scopeJson.RootElement });
+            Assert.Equal(pushedCount > 0 ? "true" : "false", payload.Variables["REXO_ARTIFACTS_ANY_PUSHED"]);
+            Assert.Equal(pushedCount.ToString(CultureInfo.InvariantCulture), payload.Variables["REXO_ARTIFACTS_PUSHED_COUNT"]);
+            Assert.Equal(allPushed ? "true" : "false", payload.Variables["REXO_ARTIFACTS_ALL_PUSHED"]);
+        }
+
+        using var resultJson = JsonDocument.Parse(JsonSerializer.Serialize(result));
+        using var manifestJson = JsonDocument.Parse(JsonSerializer.Serialize(manifest));
+        foreach (var json in new[] { resultJson, manifestJson })
+        {
+            Assert.Equal(pushedCount > 0, json.RootElement.GetProperty("ArtifactsAnyPushed").GetBoolean());
+            Assert.Equal(pushedCount, json.RootElement.GetProperty("ArtifactsPushedCount").GetInt32());
+            Assert.Equal(allPushed, json.RootElement.GetProperty("ArtifactsAllPushed").GetBoolean());
+        }
+    }
+
+    [Fact]
+    public void PublicationSummaryDeduplicatesBuildAndNestedResultsAndUsesPublicationSelection()
+    {
+        var manifest = new RunManifest
+        {
+            Artifacts =
+            [
+                new("docker", "api", true, false, []),
+                new("docker", "api", true, true, ["api:v1", "api:latest"]),
+                new("DOCKER", "API", true, true, ["api:v1", "api:latest"]),
+                new("npm", "built-only", true, false, []),
+            ],
+            PushDecisions = [new("api", true, "Published."), new("api", true, "Published.")],
+        };
+
+        Assert.True(manifest.ArtifactsAnyPushed);
+        Assert.Equal(1, manifest.ArtifactsPushedCount);
+        Assert.True(manifest.ArtifactsAllPushed);
+        Assert.False((manifest with
+        {
+            PushDecisions = [new("api", true, "Published."), new("unprocessed", false, "Not attempted.")],
+        }).ArtifactsAllPushed);
+    }
+
+    [Fact]
+    public void PublicationSummaryRespectsScopePrefixAndCasing()
+    {
+        using var scopeJson = JsonDocument.Parse("""
+            { "mode": "safe", "include": ["artifacts_*"], "exclude": ["artifacts_count"] }
+            """);
+        var payload = CiOutputEmitter.BuildPayload(new RunManifest(), new CiEmissionOptions
+        {
+            Scope = scopeJson.RootElement,
+            Prefix = "ci_",
+            KeyCasing = "lowerSnake",
+        });
+
+        Assert.Equal(3, payload.Variables.Count);
+        Assert.Equal("false", payload.Variables["ci_artifacts_any_pushed"]);
+        Assert.Equal("0", payload.Variables["ci_artifacts_pushed_count"]);
+        Assert.Equal("false", payload.Variables["ci_artifacts_all_pushed"]);
+    }
+
     [Fact]
     public void BuildPayloadDefaultsToUpperSnakeWithPrefix()
     {

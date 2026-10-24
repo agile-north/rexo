@@ -46,8 +46,11 @@ public sealed class PushGateTests
         Assert.Single(result.PushDecisions);
         Assert.Contains("dry run", result.PushDecisions[0].Reason, StringComparison.OrdinalIgnoreCase);
         Assert.Single(result.Artifacts);
-        Assert.True(result.Artifacts[0].Pushed);
+        Assert.False(result.Artifacts[0].Pushed);
         Assert.NotEmpty(result.Artifacts[0].Tags);
+        Assert.False(result.ArtifactsAnyPushed);
+        Assert.Equal(0, result.ArtifactsPushedCount);
+        Assert.False(result.ArtifactsAllPushed);
     }
 
     [Fact]
@@ -99,6 +102,9 @@ public sealed class PushGateTests
 
         var allowed = result.PushDecisions.Single(d => d.ArtifactName == "b");
         Assert.True(allowed.Allowed);
+        Assert.True(result.ArtifactsAnyPushed);
+        Assert.Equal(1, result.ArtifactsPushedCount);
+        Assert.False(result.ArtifactsAllPushed);
     }
 
     [Fact]
@@ -218,6 +224,74 @@ public sealed class PushGateTests
         Assert.Empty(provider.PushedArtifacts);
         Assert.Single(result.PushDecisions);
         Assert.Contains("use --confirm locally", result.PushDecisions[0].Reason, StringComparison.OrdinalIgnoreCase);
+        Assert.False(result.ArtifactsAnyPushed);
+        Assert.Equal(0, result.ArtifactsPushedCount);
+        Assert.False(result.ArtifactsAllPushed);
+    }
+
+    [Theory]
+    [InlineData(null, false, 3, true)]
+    [InlineData(null, true, 0, false)]
+    [InlineData("a", false, 0, false)]
+    [InlineData("b", false, 1, false)]
+    public async Task PublicationSummaryAccountsForSkippedFailedAndUnprocessedArtifacts(
+        string? failArtifact, bool skipPublication, int pushedCount, bool allPushed)
+    {
+        var provider = new RecordingArtifactProvider("docker", failArtifact: failArtifact, skipPublication: skipPublication);
+        var config = new RepoConfig("test",
+            new Dictionary<string, RepoCommandConfig>
+            {
+                ["publish"] = new("publish", [], [new(Id: "push", Uses: "builtin:push-artifacts")]),
+                ["release"] = new("release", [],
+                    [new(Id: "build", Uses: "builtin:build-artifacts"), new(Id: "publish", Command: "publish")]),
+            }, new Dictionary<string, string>())
+        {
+            Artifacts = [new("docker", "a"), new("docker", "b"), new("docker", "c")],
+            Outputs = new RepoOutputsConfig { Emit = false },
+        };
+        var (executor, _) = CreateExecutor(provider, config);
+
+        var result = await ExecuteAsync(executor, "release",
+            new Dictionary<string, string?> { ["confirm"] = "true" }, Path.GetTempPath());
+
+        Assert.Equal(failArtifact is null, result.Success);
+        Assert.Equal(3, result.PushDecisions.Count);
+        Assert.Equal(pushedCount > 0, result.ArtifactsAnyPushed);
+        Assert.Equal(pushedCount, result.ArtifactsPushedCount);
+        Assert.Equal(allPushed, result.ArtifactsAllPushed);
+        if (failArtifact is not null)
+        {
+            Assert.Contains(result.PushDecisions, decision => decision.ArtifactName == "c" &&
+                !decision.Allowed && decision.Reason == "Push not attempted.");
+        }
+    }
+
+    [Fact]
+    public async Task MissingPushProviderFailsWithoutReportingCompletePublication()
+    {
+        var provider = new RecordingArtifactProvider("docker");
+        var config = new RepoConfig("test",
+            new Dictionary<string, RepoCommandConfig>
+            {
+                ["push"] = new("push", [], [new(Id: "push", Uses: "builtin:push-artifacts")]),
+            }, new Dictionary<string, string>())
+        {
+            Artifacts = [new("docker", "a"), new("missing", "b"), new("docker", "c")],
+            Outputs = new RepoOutputsConfig { Emit = false },
+        };
+        var (executor, _) = CreateExecutor(provider, config);
+
+        var result = await ExecuteAsync(executor, "push",
+            new Dictionary<string, string?> { ["confirm"] = "true" }, Path.GetTempPath());
+
+        Assert.False(result.Success);
+        Assert.Equal(6, result.ExitCode);
+        Assert.Equal(3, result.Artifacts.Count);
+        Assert.Equal(3, result.PushDecisions.Count);
+        Assert.True(result.ArtifactsAnyPushed);
+        Assert.Equal(1, result.ArtifactsPushedCount);
+        Assert.False(result.ArtifactsAllPushed);
+        Assert.Contains("No provider found", result.PushDecisions[1].Reason, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -353,7 +427,8 @@ public sealed class PushGateTests
         }
     }
 
-    private sealed class RecordingArtifactProvider(string type, bool pushSuccess = true) : IArtifactProvider
+    private sealed class RecordingArtifactProvider(
+        string type, bool pushSuccess = true, string? failArtifact = null, bool skipPublication = false) : IArtifactProvider
     {
         public string Type { get; } = type;
         public List<string> PushedArtifacts { get; } = [];
@@ -367,7 +442,9 @@ public sealed class PushGateTests
         public Task<ArtifactPushResult> PushAsync(ArtifactConfig artifact, ExecutionContext context, CancellationToken cancellationToken)
         {
             PushedArtifacts.Add(artifact.Name);
-            return Task.FromResult(new ArtifactPushResult(artifact.Name, pushSuccess, pushSuccess ? [$"{artifact.Name}:latest"] : []));
+            var success = pushSuccess && artifact.Name != failArtifact;
+            return Task.FromResult(new ArtifactPushResult(artifact.Name, success,
+                success && !skipPublication ? [$"{artifact.Name}:latest"] : []));
         }
     }
 

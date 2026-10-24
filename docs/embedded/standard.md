@@ -146,6 +146,11 @@ Steps:
 6. `command:post-push` (when `{{options.push}}` and present)
 7. `command:post-release` (when present; always runs after hard failures)
 
+Optional [embedded:github-release](github-release.md), listed after standard/toolchain policies,
+appends a success-only GitHub tag/release step after `post-release`. It requires `--push` even
+for source-only releases, uses internal publication outcomes rather than CI environment variables,
+and supports distinct group-prefixed tags.
+
 The `build` command performs validation, version resolution, configured artifact build/tag,
 and its own optional build hooks. Push and post-push hooks are controlled by `--push`.
 `--artifact-group` and `--all-artifact-groups` scope artifact planning/build/tag/push and manifests;

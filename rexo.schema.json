@@ -49,7 +49,7 @@
     "extends": {
       "type": "array",
       "description": "List of config sources to merge into this config before applying local values. Supports embedded lifecycle policies via the 'embedded:' URI scheme (e.g. 'embedded:standard', 'embedded:dotnet') and local file paths. Embedded policies provide shared lifecycle commands (build, test, verify, release, plan, push, etc.). Use 'rx policies list' to see available embedded policies.",
-      "markdownDescription": "List of config sources to merge into this config before applying local values. Supports embedded lifecycle policies via the `embedded:` URI scheme (for example `embedded:standard` and `embedded:dotnet`) and local file paths. Embedded policies provide shared lifecycle commands such as build, test, verify, release, plan, and push. Use `rx policies list` to see available embedded policies.",
+      "markdownDescription": "List of config sources to merge into this config before applying local values. Supports embedded lifecycle policies via the `embedded:` URI scheme (for example `embedded:standard` and `embedded:dotnet`) and local file paths. Add `embedded:github-release` for exact-commit GitHub tags/releases during `release --push`. Add `embedded:github-tests` and `embedded:github-coverage` after the test toolchain for stack-neutral GitHub Checks, Actions summaries/artifacts and coverage thresholds; configure `vars.githubTests` / `vars.githubCoverage` and see [GitHub Reporting](docs/embedded/github-reports.md). Use `rx policies list` to see available embedded policies.",
       "items": {
         "type": "string"
       }
@@ -2368,7 +2368,7 @@
           "type": "object",
           "additionalProperties": false,
           "description": "CI-native manifest emission settings.",
-          "markdownDescription": "CI-native manifest emission settings. See [CI Output Emission](docs/configuration/ci-output-emission.md). `provider` defaults to `auto`, `github-actions.scope` defaults to `env`, `prefix` defaults to `REXO_`, `keyCasing` defaults to `upperSnake`, and `redact` defaults to `true`.",
+          "markdownDescription": "CI-native manifest emission settings. See [CI/CD Emission Reference](docs/configuration/ci-output-emission.md) for complete safe/full variable catalogs and release gates. Safe scope includes REXO_ARTIFACTS_ANY_PUSHED, REXO_ARTIFACTS_PUSHED_COUNT, and REXO_ARTIFACTS_ALL_PUSHED. `provider` defaults to `auto`, `github-actions.scope` defaults to `env`, `prefix` defaults to `REXO_`, `keyCasing` defaults to `upperSnake`, and `redact` defaults to `true`.",
           "properties": {
             "emit": {
               "type": "boolean",
@@ -2464,7 +2464,7 @@
             },
             "includeStepOutputs": {
               "type": "boolean",
-              "description": "When true, emit raw step outputs in addition to the safe summary payload.",
+              "description": "When true, include step file output counts and paths in the safe summary. Does not export arbitrary raw step outputs.",
               "default": false
             },
             "emitEmptyValues": {

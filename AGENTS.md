@@ -303,6 +303,9 @@ dotnet test solution.slnx -c Release --no-build
 | Full product scope & design decisions | `docs/scope.md` |
 | What's done vs what's pending | `docs/todo.md` |
 | Config model structure | `src/Configuration/Models/` |
+| CI/CD workflow variables, emission profiles, and release gates | `docs/configuration/ci-output-emission.md` |
+| GitHub releases/tags locally or in Actions (opt-in embedded policy) | `docs/embedded/github-release.md` |
+| GitHub test/coverage Checks, summaries, report formats, permissions and uploads | `docs/embedded/github-reports.md`, `docs/embedded/github-tests.md`, `docs/embedded/github-coverage.md` |
 | CLI routing | `src/Cli/Program.cs` |
 | Built-in command registration | `src/Execution/BuiltinCommandRegistration.cs` |
 | Config command loading | `src/Execution/ConfigCommandLoader.cs` |

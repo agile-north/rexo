@@ -626,6 +626,9 @@ public sealed class CliJsonOutputTests
       var envContent = await File.ReadAllTextAsync(envFile);
       Assert.Contains("CI_COMMAND_EXECUTED=version", envContent, StringComparison.OrdinalIgnoreCase);
       Assert.Contains("CI_SUCCESS=true", envContent, StringComparison.OrdinalIgnoreCase);
+      Assert.Contains("CI_ARTIFACTS_ANY_PUSHED=false", envContent, StringComparison.Ordinal);
+      Assert.Contains("CI_ARTIFACTS_PUSHED_COUNT=0", envContent, StringComparison.Ordinal);
+      Assert.Contains("CI_ARTIFACTS_ALL_PUSHED=false", envContent, StringComparison.Ordinal);
     }
     finally
     {
@@ -701,6 +704,9 @@ public sealed class CliJsonOutputTests
       var outputContent = await File.ReadAllTextAsync(outputFile);
       Assert.Contains("CI_COMMAND_EXECUTED=version", outputContent, StringComparison.OrdinalIgnoreCase);
       Assert.Contains("CI_SUCCESS=true", outputContent, StringComparison.OrdinalIgnoreCase);
+      Assert.Contains("CI_ARTIFACTS_ANY_PUSHED=false", outputContent, StringComparison.Ordinal);
+      Assert.Contains("CI_ARTIFACTS_PUSHED_COUNT=0", outputContent, StringComparison.Ordinal);
+      Assert.Contains("CI_ARTIFACTS_ALL_PUSHED=false", outputContent, StringComparison.Ordinal);
     }
     finally
     {

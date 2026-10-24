@@ -55,13 +55,19 @@ internal static class GitHubReleasePublisher
         }
         if (selected.Length > 0 && gate != "none")
         {
+            var identities = selected.Select(artifact => (
+                Type: artifact.Type.ToUpperInvariant(),
+                Name: ConfigCommandLoader.ResolveArtifactName(artifact, config).ToUpperInvariant())).ToHashSet();
+            var selectedNames = identities.Select(identity => identity.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var entries = context.CompletedSteps.Values
                 .SelectMany(step => step.Outputs.TryGetValue("__artifacts", out var value) &&
                     value is IEnumerable<ArtifactManifestEntry> artifacts ? artifacts : [])
+                .Where(entry => identities.Contains((entry.Type.ToUpperInvariant(), entry.Name.ToUpperInvariant())))
                 .ToArray();
             var decisions = context.CompletedSteps.Values
                 .SelectMany(step => step.Outputs.TryGetValue("__pushDecisions", out var value) &&
                     value is IEnumerable<PushDecision> items ? items : [])
+                .Where(decision => selectedNames.Contains(decision.ArtifactName))
                 .ToArray();
             var publication = ArtifactPublicationSummary.From(entries, decisions);
             var completeSelection = selected.All(artifact => entries.Any(entry =>
@@ -151,21 +157,21 @@ internal static class GitHubReleasePublisher
         // REST's by-tag lookup excludes drafts; the authenticated release list includes them.
         for (var page = 1; page <= 1000; page++)
         {
-            var releases = await cli.ApiAsync(
+            var response = await cli.ApiAsync(
                 $"{repoPath}/releases?per_page=100&page={page.ToString(CultureInfo.InvariantCulture)}",
                 "GET", false, cancellationToken);
-            if (releases!.Value.ValueKind != JsonValueKind.Array)
+            if (response is not { ValueKind: JsonValueKind.Array } releases)
             {
                 throw new InvalidOperationException("The GitHub release list was not an array.");
             }
-            foreach (var release in releases.Value.EnumerateArray())
+            foreach (var release in releases.EnumerateArray())
             {
                 if (string.Equals(release.GetProperty("tag_name").GetString(), tag, StringComparison.Ordinal))
                 {
                     return release.Clone();
                 }
             }
-            if (releases.Value.GetArrayLength() < 100) return null;
+            if (releases.GetArrayLength() < 100) return null;
         }
         throw new InvalidOperationException("The GitHub release lookup exceeded 100,000 releases.");
     }

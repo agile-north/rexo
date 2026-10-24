@@ -278,14 +278,16 @@ public sealed class ActionsReportArtifactUploaderTests : IDisposable
     [InlineData(3)]
     public async Task FailedStagesNeverReturnSuccessAndDoNotExposeResponseSecrets(int failedStage)
     {
+        using var failureResponse = new HttpResponseMessage(
+            failedStage == 1 ? HttpStatusCode.TemporaryRedirect : HttpStatusCode.Forbidden)
+        {
+            Content = new StringContent("secret-signature " + RuntimeToken() + " repository-secret"),
+            Headers = { Location = new Uri("https://evil.invalid/") },
+        };
         using var handler = new RecordingHandler
         {
             Override = (request, index, _) => index == failedStage
-                ? Task.FromResult(new HttpResponseMessage(index == 1 ? HttpStatusCode.TemporaryRedirect : HttpStatusCode.Forbidden)
-                {
-                    Content = new StringContent("secret-signature " + RuntimeToken() + " repository-secret"),
-                    Headers = { Location = new Uri("https://evil.invalid/") },
-                })
+                ? Task.FromResult(failureResponse)
                 : null,
         };
         using var client = new HttpClient(handler);

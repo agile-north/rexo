@@ -120,6 +120,44 @@ public sealed class GitHubReleaseTests
         Assert.Equal(eligible ? "created" : null, result.GetValueOrDefault("status"));
     }
 
+    [Theory]
+    [InlineData("any", false, true, false)]
+    [InlineData("any", true, false, true)]
+    [InlineData("all", true, false, true)]
+    [InlineData("all", false, true, false)]
+    public async Task ArtifactGateIgnoresUnselectedGroupsAndTypes(
+        string gate, bool selectedPushed, bool unrelatedPushed, bool eligible)
+    {
+        var config = SourceConfig with
+        {
+            Artifacts = [new("generic", "package") { Group = "selected" },
+                new("docker", "other") { Group = "other" },
+                new("docker", "package") { Group = "other" }],
+        };
+        var context = Context(config, $$"""{"artifactGate":"{{gate}}"}""") with
+        {
+            Options = new Dictionary<string, string?> { ["push"] = "true", ["artifact-group"] = "selected" },
+        };
+        context = context.WithStep(new("push", true, 0, TimeSpan.Zero, new Dictionary<string, object?>
+        {
+            ["__artifacts"] = new List<ArtifactManifestEntry>
+            {
+                new("generic", "package", true, selectedPushed, []),
+                new("docker", "other", true, unrelatedPushed, []),
+                new("docker", "package", true, unrelatedPushed, []),
+            },
+            ["__pushDecisions"] = new List<PushDecision>
+            {
+                new("package", selectedPushed, "selected decision"),
+                new("other", unrelatedPushed, "unrelated decision"),
+            },
+        }));
+        var fake = new FakeCli();
+        var result = await GitHubReleasePublisher.ExecuteAsync(config, context, CancellationToken.None, fake.RunAsync);
+        Assert.Equal(eligible, fake.Commands.Count > 0);
+        Assert.Equal(eligible ? "created" : null, result.GetValueOrDefault("status"));
+    }
+
     [Fact]
     public async Task DefaultContainerCreatesExactCommitTagAndPublishedRelease()
     {

@@ -264,9 +264,9 @@ internal static class ActionsReportArtifactUploader
             {
                 throw new FormatException();
             }
-            foreach (var scope in claim.GetString()!.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            foreach (var parts in claim.GetString()!.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .Select(scope => scope.Split(':')))
             {
-                var parts = scope.Split(':');
                 if (parts.Length == 3 && parts[0] == "Actions.Results" &&
                     Guid.TryParse(parts[1], out _) && Guid.TryParse(parts[2], out _))
                 {

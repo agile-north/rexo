@@ -10,6 +10,7 @@ using System.Text.RegularExpressions;
 using Rexo.Core.Models;
 
 internal sealed record GitHubReportAnnotation(string Path, int Line, string Title, string Message);
+internal sealed record GitHubReportCheckResult(string Status, string? Url = null, string? SkipReason = null);
 
 internal static class GitHubReportCheckPublisher
 {
@@ -18,12 +19,13 @@ internal static class GitHubReportCheckPublisher
         Timeout = TimeSpan.FromMinutes(2),
     };
 
-    public static async Task<string?> PublishAsync(
+    public static async Task<GitHubReportCheckResult> PublishAsync(
         ExecutionContext context, GitHubReportOptions options, string title, string markdown,
         string conclusion, IReadOnlyList<GitHubReportAnnotation> annotations,
         CancellationToken cancellationToken, HttpClient? client = null)
     {
-        if (!options.Publish || !options.Boolean("checks", true)) return null;
+        if (!options.Publish || !options.Boolean("checks", true))
+            return new("skipped", SkipReason: !options.Publish ? "Publishing is not enabled for this invocation." : "Checks are disabled.");
         var (originHost, originRepository) = GitHubReleaseOptions.ParseRemote(context.RemoteUrl);
         var host = options.Read("hostname", originHost);
         var repository = options.Read("repository", originRepository);
@@ -37,11 +39,9 @@ internal static class GitHubReportCheckPublisher
             var fallback = tokenName == "GH_TOKEN" ? "GITHUB_TOKEN" : "GITHUB_ENTERPRISE_TOKEN";
             token = context.MappedSecretEnvironment.GetValueOrDefault(fallback) ?? context.GetEnvironmentValue(fallback);
         }
-        if (string.IsNullOrWhiteSpace(token) || await IsKnownReadOnlyAsync(context, options, cancellationToken))
-        {
-            Console.Error.WriteLine("GitHub report Check skipped: no explicit token or a known read-only Actions context. A GitHub App token with checks: write is required.");
-            return null;
-        }
+        if (string.IsNullOrWhiteSpace(token)) return Skip("No explicit GitHub token is available.");
+        if (await IsKnownReadOnlyAsync(context, options, cancellationToken))
+            return Skip("The Actions context is known to be read-only.");
         if (Uri.CheckHostName(host) == UriHostNameType.Unknown || host.Contains(':', StringComparison.Ordinal) ||
             !Regex.IsMatch(repository, @"\A[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\z", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)) ||
             repository.Split('/').Any(part => part is "." or ".."))
@@ -55,8 +55,10 @@ internal static class GitHubReportCheckPublisher
         var run = options.IsActions
             ? $"{context.GetEnvironmentValue("GITHUB_RUN_ID")}:{context.GetEnvironmentValue("GITHUB_RUN_ATTEMPT")}:{context.GetEnvironmentValue("GITHUB_JOB")}"
             : "local";
-        var identity = $"{options.Section}:{repository}:{sha}:{options.Scope}:{run}:{JsonSerializer.Serialize(annotations)}";
-        var externalId = $"rexo-report:{Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(identity)))}";
+        var identity = $"{options.Section}:{repository}:{sha}:{options.Scope}:{run}";
+        var identityPrefix = $"rexo-report:{Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(identity)))}:";
+        var externalId = identityPrefix + Convert.ToHexStringLower(
+            SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(annotations))));
         var api = host.Equals("github.com", StringComparison.OrdinalIgnoreCase)
             ? "https://api.github.com/" : $"https://{host}/api/v3/";
         var path = $"{api}repos/{repository}/check-runs";
@@ -74,6 +76,7 @@ internal static class GitHubReportCheckPublisher
         }).ToArray();
         client ??= Client;
         long? existingId = null;
+        var supersededIds = new HashSet<long>();
         for (var page = 1; page <= 100; page++)
         {
             var list = await SendAsync(client, HttpMethod.Get,
@@ -82,14 +85,16 @@ internal static class GitHubReportCheckPublisher
             var checks = list.GetProperty("check_runs");
             foreach (var check in checks.EnumerateArray())
             {
-                if (check.TryGetProperty("external_id", out var id) && id.GetString() == externalId &&
-                    check.GetProperty("name").GetString() == name)
+                if (!check.TryGetProperty("external_id", out var id) || id.GetString() is not { } value ||
+                    !value.StartsWith(identityPrefix, StringComparison.Ordinal) ||
+                    check.GetProperty("name").GetString() != name) continue;
+                if (value == externalId)
                 {
                     existingId = check.GetProperty("id").GetInt64();
-                    break;
                 }
+                else supersededIds.Add(check.GetProperty("id").GetInt64());
             }
-            if (existingId is not null || checks.GetArrayLength() < 100) break;
+            if (checks.GetArrayLength() < 100) break;
             if (page == 100) throw new InvalidOperationException("GitHub Check discovery exceeded 10,000 Checks.");
         }
         // Identical reruns update the summary, without appending duplicate annotations.
@@ -111,7 +116,18 @@ internal static class GitHubReportCheckPublisher
                 new { output = new { title, summary = safeMarkdown, annotations = annotationsToSend.Skip(offset).Take(50).ToArray() } },
                 cancellationToken);
         }
-        return response.GetProperty("html_url").GetString();
+        var url = response.GetProperty("html_url").GetString();
+        // Neutralize stale annotated runs only after the replacement is fully published.
+        foreach (var superseded in supersededIds)
+        {
+            await SendAsync(client, HttpMethod.Patch, $"{path}/{superseded.ToString(CultureInfo.InvariantCulture)}", token,
+                new
+                {
+                    status = "completed", conclusion = "neutral",
+                    output = new { title = "Superseded report", summary = $"This report was superseded by a newer result: {url}" },
+                }, cancellationToken);
+        }
+        return new("published", url);
     }
 
     private static async Task<bool> IsKnownReadOnlyAsync(
@@ -150,4 +166,10 @@ internal static class GitHubReportCheckPublisher
     }
 
     internal static string Limit(string value, int length) => value.Length <= length ? value : value[..length];
+
+    private static GitHubReportCheckResult Skip(string reason)
+    {
+        Console.Error.WriteLine($"GitHub report Check skipped: {reason} A GitHub App token with checks: write is required.");
+        return new("skipped", SkipReason: reason);
+    }
 }

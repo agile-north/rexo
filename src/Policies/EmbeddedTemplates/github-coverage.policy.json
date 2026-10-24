@@ -16,6 +16,7 @@
       "checks": true,
       "jobSummary": true,
       "uploadArtifact": true,
+      "artifactUpload": "auto",
       "artifactName": "coverage",
       "retentionDays": 14,
       "repository": "",
@@ -38,14 +39,20 @@
   "commands": {
     "test": {
       "merge": "append",
-      "options": { "publish-reports": { "type": "bool", "default": false } },
+      "options": {
+        "publish-reports": { "type": "bool", "default": false },
+        "report-preview": { "type": "bool", "default": false }
+      },
       "steps": [
         { "id": "github-coverage", "uses": "builtin:github-coverage", "alwaysRun": true }
       ]
     },
     "reports coverage": {
       "description": "Generate coverage reports and optionally publish to GitHub.",
-      "options": { "publish-reports": { "type": "bool", "default": false } },
+      "options": {
+        "publish-reports": { "type": "bool", "default": false },
+        "report-preview": { "type": "bool", "default": false }
+      },
       "steps": [
         { "id": "github-coverage", "uses": "builtin:github-coverage" }
       ]

@@ -29,9 +29,8 @@ internal static class ReportFiles
     {
         var matches = new HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
         var exclusions = Split(excludes).Select(GlobRegex).ToArray();
-        foreach (var pattern in Split(patterns))
+        foreach (var normalized in Split(patterns).Select(pattern => pattern.Replace('\\', '/')))
         {
-            var normalized = pattern.Replace('\\', '/');
             var wildcard = normalized.IndexOfAny(['*', '?']);
             var prefix = wildcard < 0 ? normalized : normalized[..wildcard];
             var slash = prefix.LastIndexOf('/');

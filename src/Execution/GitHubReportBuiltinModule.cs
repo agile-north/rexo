@@ -36,6 +36,7 @@ internal sealed class GitHubReportBuiltinModule : IConfigBuiltinModule
         var options = new GitHubReportOptions(context, coverage);
         var errors = new List<string>();
         var files = new List<string>();
+        var detectedFiles = new List<object>();
         var annotations = new List<GitHubReportAnnotation>();
         var title = coverage ? "Rexo coverage" : "Rexo tests";
         var markdown = "";
@@ -61,17 +62,19 @@ internal sealed class GitHubReportBuiltinModule : IConfigBuiltinModule
             if (explicitPaths.Length == 0)
             {
                 var outputKind = coverage ? "coverage" : "testResults";
-                foreach (var step in context.CompletedSteps.Values)
+                var declaredOutputs = context.CompletedSteps.Values
+                    .Select(step => step.Outputs.GetValueOrDefault("__fileOutputs"))
+                    .OfType<IReadOnlyDictionary<string, IReadOnlyList<string>>>()
+                    .Where(declared => declared.ContainsKey(outputKind));
+                foreach (var declared in declaredOutputs)
                 {
-                    if (!step.Outputs.TryGetValue("__fileOutputs", out var value) ||
-                        value is not IReadOnlyDictionary<string, IReadOnlyList<string>> declared ||
-                        !declared.TryGetValue(outputKind, out var declaredFiles)) continue;
-                    foreach (var declaredFile in declaredFiles)
+                    foreach (var declaredFile in declared[outputKind])
                     {
                         foreach (var path in ReportFiles.Discover(context.RepositoryRoot, declaredFile,
-                            options.Read("exclude"), options.OutputDirectory))
+                            options.Read("exclude"), options.OutputDirectory)
+                            .Where(path => !candidates.Contains(path, StringComparer.Ordinal)))
                         {
-                            if (!candidates.Contains(path, StringComparer.Ordinal)) candidates.Add(path);
+                            candidates.Add(path);
                         }
                     }
                 }
@@ -83,6 +86,7 @@ internal sealed class GitHubReportBuiltinModule : IConfigBuiltinModule
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var detected = coverage ? CoverageReportGenerator.DetectFormat(file) : TestReportReader.DetectFormat(file);
+                detectedFiles.Add(new { path = Path.GetRelativePath(context.RepositoryRoot, file).Replace('\\', '/'), format = detected });
                 if (detected is null)
                 {
                     if (explicitPaths.Length > 0 || format != "auto")
@@ -94,12 +98,28 @@ internal sealed class GitHubReportBuiltinModule : IConfigBuiltinModule
                 files.Add(file);
             }
             outputs["reportCount"] = files.Count;
+            if (options.Preview)
+            {
+                outputs["status"] = "preview";
+                outputs["paths"] = paths;
+                outputs["exclude"] = options.Read("exclude");
+                outputs["detectedReports"] = detectedFiles;
+                Console.WriteLine(JsonSerializer.Serialize(outputs, ConfigCommandLoader.IndentedJsonOptions));
+                return Result();
+            }
             if (files.Count == 0)
             {
                 markdown = $"# {title}\n\nNo supported reports were found. No passing result is inferred.\n";
                 conclusion = "neutral";
                 Console.Error.WriteLine($"{title}: no supported reports found.");
                 if (options.Read("missingReports", "warn") == "fail") errors.Add("Expected reports were not found.");
+                if (coverage)
+                {
+                    outputs["lineCoverage"] = null;
+                    outputs["branchCoverage"] = null;
+                    CheckThreshold("minimumLineCoverage", null, "line");
+                    CheckThreshold("minimumBranchCoverage", null, "branch");
+                }
             }
             else if (coverage)
             {
@@ -190,23 +210,29 @@ internal sealed class GitHubReportBuiltinModule : IConfigBuiltinModule
         }
         try
         {
-            var url = await GitHubReportCheckPublisher.PublishAsync(context, options, title, markdown, conclusion,
+            var publication = await GitHubReportCheckPublisher.PublishAsync(context, options, title, markdown, conclusion,
                 annotations, cancellationToken, client);
-            outputs["checkUrl"] = url;
+            outputs["checkUrl"] = publication.Url;
+            outputs["checkStatus"] = publication.Status;
+            if (publication.SkipReason is not null) outputs["checkSkipReason"] = publication.SkipReason;
         }
         catch (Exception ex) when (Expected(ex))
         {
+            outputs["checkStatus"] = "failed";
             PublishError(ex);
         }
-        if (options.Publish && options.IsActions && options.Boolean("uploadArtifact", true) && files.Count > 0)
+        outputs["artifactStatus"] = "skipped";
+        if (options.Publish && options.IsActions && options.ArtifactUpload != "never" && files.Count > 0)
         {
             try
             {
                 if (string.IsNullOrWhiteSpace(context.GetEnvironmentValue("ACTIONS_RUNTIME_TOKEN")) ||
                     string.IsNullOrWhiteSpace(context.GetEnvironmentValue("ACTIONS_RESULTS_URL")))
                 {
-                    Console.Error.WriteLine($"{title}: artifact upload skipped: Actions runtime credentials are unavailable. GITHUB_TOKEN alone cannot upload workflow artifacts.");
                     outputs["artifactSkipReason"] = "Actions runtime credentials unavailable.";
+                    if (options.ArtifactUpload == "required")
+                        throw new InvalidOperationException("Actions runtime credentials are unavailable for required artifact upload. GITHUB_TOKEN alone cannot upload workflow artifacts.");
+                    Console.WriteLine($"{title}: artifact upload unavailable in this host; local reports retained. Use actions/upload-artifact for shell workflows.");
                 }
                 else
                 {
@@ -216,10 +242,12 @@ internal sealed class GitHubReportBuiltinModule : IConfigBuiltinModule
                     outputs["artifactId"] = await ActionsReportArtifactUploader.UploadAsync(
                         uploadFiles.Select(file => Path.GetRelativePath(context.RepositoryRoot, file)).ToArray(), context.RepositoryRoot,
                         name, options.Integer("retentionDays", 14, 1, 400), context.GetEnvironmentValue, cancellationToken, client);
+                    outputs["artifactStatus"] = "published";
                 }
             }
             catch (Exception ex) when (Expected(ex))
             {
+                outputs["artifactStatus"] = "failed";
                 PublishError(ex);
             }
         }
@@ -261,7 +289,7 @@ internal sealed class GitHubReportBuiltinModule : IConfigBuiltinModule
 
     private static bool Expected(Exception ex) => ex is InvalidOperationException or IOException or
         UnauthorizedAccessException or JsonException or ArgumentException or KeyNotFoundException or
-        XmlException or HttpRequestException or System.ComponentModel.Win32Exception;
+        XmlException or InvalidDataException or HttpRequestException or System.ComponentModel.Win32Exception;
 
     private static string Mask(ExecutionContext context, string value)
     {

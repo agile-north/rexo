@@ -43,6 +43,9 @@ internal sealed class GitHubReportOptions(ExecutionContext context, bool coverag
 
     public bool IsActions => string.Equals(context.GetEnvironmentValue("GITHUB_ACTIONS"), "true", StringComparison.OrdinalIgnoreCase);
     public bool DryRun => context.IsDryRun || ConfigCommandLoader.TryGetOptionBoolean(context.Options, "dry-run") == true;
+    public bool Preview => ConfigCommandLoader.TryGetOptionBoolean(context.Options, "report-preview") == true;
+    public string ArtifactUpload => Boolean("uploadArtifact", true)
+        ? Choice("artifactUpload", "auto", "auto", "required", "never") : "never";
     public bool Publish => Choice("publish", "auto", "auto", "always", "never") switch
     {
         "never" => false,
@@ -73,6 +76,7 @@ internal sealed class GitHubReportOptions(ExecutionContext context, bool coverag
         _ = Boolean("checks", true);
         _ = Boolean("jobSummary", true);
         _ = Boolean("uploadArtifact", true);
+        _ = Choice("artifactUpload", "auto", "auto", "required", "never");
         if (!coverage) _ = Boolean("includeOutput", false);
         _ = Integer("retentionDays", 14, 1, 400);
         _ = Integer("annotationLimit", 50, 0, 1000);
@@ -81,10 +85,9 @@ internal sealed class GitHubReportOptions(ExecutionContext context, bool coverag
         if (string.Equals(OutputDirectory, Path.GetFullPath(context.RepositoryRoot),
             OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
             throw new InvalidOperationException("The report outputDirectory must not be the repository root.");
-        if (coverage)
-            _ = Choice("format", "auto", "auto", "cobertura", "opencover", "lcov", "jacoco", "clover");
-        else
-            _ = Choice("format", "auto", "auto", "trx", "junit", "nunit", "xunit");
+        _ = coverage
+            ? Choice("format", "auto", "auto", "cobertura", "opencover", "lcov", "jacoco", "clover")
+            : Choice("format", "auto", "auto", "trx", "junit", "nunit", "xunit");
         if (coverage)
         {
             _ = Threshold("minimumLineCoverage");

@@ -16,6 +16,7 @@
       "checks": true,
       "jobSummary": true,
       "uploadArtifact": true,
+      "artifactUpload": "auto",
       "artifactName": "test-results",
       "retentionDays": 14,
       "repository": "",
@@ -32,14 +33,20 @@
   "commands": {
     "test": {
       "merge": "append",
-      "options": { "publish-reports": { "type": "bool", "default": false } },
+      "options": {
+        "publish-reports": { "type": "bool", "default": false },
+        "report-preview": { "type": "bool", "default": false }
+      },
       "steps": [
         { "id": "github-tests", "uses": "builtin:github-tests", "alwaysRun": true }
       ]
     },
     "reports tests": {
       "description": "Process existing test reports and optionally publish to GitHub.",
-      "options": { "publish-reports": { "type": "bool", "default": false } },
+      "options": {
+        "publish-reports": { "type": "bool", "default": false },
+        "report-preview": { "type": "bool", "default": false }
+      },
       "steps": [
         { "id": "github-tests", "uses": "builtin:github-tests" }
       ]

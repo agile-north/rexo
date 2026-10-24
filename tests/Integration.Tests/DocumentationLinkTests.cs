@@ -46,6 +46,26 @@ public sealed class DocumentationLinkTests
             Assert.Contains(image.GetString()!, reference, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("github-tests", "githubTests", "githubReportVars")]
+    [InlineData("github-coverage", "githubCoverage", "githubReportVars")]
+    [InlineData("github-release", "githubRelease", "githubReleaseVars")]
+    public void GitHubPolicySchemasCoverDefaultsAndStaySynchronized(string policyName, string section, string definition)
+    {
+        var root = FindRepositoryRoot();
+        using var repo = JsonDocument.Parse(File.ReadAllText(Path.Join(root, "rexo.schema.json")));
+        using var policy = JsonDocument.Parse(File.ReadAllText(Path.Join(root, "policy.schema.json")));
+        using var defaults = JsonDocument.Parse(EmbeddedPolicyTemplates.ReadTemplate(policyName));
+        foreach (var variable in defaults.RootElement.GetProperty("vars").GetProperty(section).EnumerateObject())
+        {
+            Assert.True(repo.RootElement.GetProperty("$defs").GetProperty(definition)
+                .GetProperty("properties").TryGetProperty(variable.Name, out _), variable.Name);
+        }
+        foreach (var name in new[] { "vars", "githubTemplate", "githubBoolean", "githubThreshold", definition })
+            Assert.Equal(repo.RootElement.GetProperty("$defs").GetProperty(name).GetRawText(),
+                policy.RootElement.GetProperty("$defs").GetProperty(name).GetRawText());
+    }
+
     [Fact]
     public void CiEmissionReferenceListsEveryStaticSafeScopeVariable()
     {

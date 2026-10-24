@@ -32,6 +32,8 @@ rx reports tests
 rx reports coverage
 rx reports tests --publish-reports
 rx reports coverage --publish-reports
+rx reports tests --report-preview
+rx reports coverage --report-preview
 ```
 
 The first two generate local reports. Outside Actions, `--publish-reports` opts into
@@ -39,6 +41,11 @@ publishing; `publish: always` also enables it. Inside Actions, publishing is aut
 `publish: never` overrides the flag. Reporting authorization is deliberately separate
 from release `--push` and `runtime.push` restrictions. `--dry-run` neither processes
 reports nor writes summaries, creates Checks, starts ReportGenerator, or uploads artifacts.
+`--report-preview` on an explicit `reports` command instead shows resolved globs,
+exclusions, candidate files and detected formats without writing or publishing anything.
+It does not parse complete test results, run conversion or enforce coverage thresholds;
+use it to diagnose discovery. `--dry-run` still takes precedence and skips discovery.
+Do not use the preview flag as a validation gate.
 
 ## Shared configuration
 
@@ -55,11 +62,12 @@ separators, not shell syntax.
 | `exclude` | empty | Repository-relative exclusion globs separated by `;`. |
 | `format` | `auto` | Content detection, or one explicitly selected format from the policy's supported list. Mixed formats require `auto`. |
 | `outputDirectory` | policy-specific | Repository-contained generated report directory. Generated files here are excluded from input discovery. |
-| `missingReports` | `warn` | `warn`: visible diagnostic and neutral Check; `fail`: fail reporting. Never infer a passing test/coverage result. |
+| `missingReports` | `warn` | `warn`: visible diagnostic and neutral Check unless a configured coverage threshold requires the missing metric; `fail`: fail reporting. Never infer a passing test/coverage result. |
 | `publishErrors` | `fail` | Attempted publishing errors fail the step; `warn` explicitly opts into warnings. Processing errors and test/threshold failures are never downgraded. |
 | `checks` | `true` | Publish a commit Check, shown in commit/PR Checks. Requires explicit authorized token. |
 | `jobSummary` | `true` | Append Markdown to `GITHUB_STEP_SUMMARY` when publishing inside Actions. No job-summary file outside Actions. |
 | `uploadArtifact` | `true` | Upload selected raw reports and generated output inside Actions when runtime credentials are available; never upload from a local run. |
+| `artifactUpload` | `auto` | `auto`: upload when runtime credentials exist, otherwise informational skip; `required`: unavailable runtime credentials fail through `publishErrors`; `never`: disable. `uploadArtifact: false` overrides this setting. |
 | `artifactName` | policy-specific | Artifact prefix; final name is `<prefix>-<scope>-<run-attempt>`. Names must satisfy GitHub artifact naming rules. |
 | `retentionDays` | `14` | Integer 1–400, capped by repository retention when supplied by Actions. |
 | `repository` | origin owner/repo | Override GitHub destination as `owner/repo`. |
@@ -115,13 +123,14 @@ test code with elevated credentials.
 Workflow artifact storage is **not** a generic GitHub repository upload API. Uploads
 require an active job's `ACTIONS_RUNTIME_TOKEN` and `ACTIONS_RESULTS_URL`;
 `GH_TOKEN`/`GITHUB_TOKEN` cannot provide that capability. When runtime credentials are
-not available, Rexo explicitly warns and emits `artifactSkipReason` rather than claiming
+not available, the default `artifactUpload: auto` emits an informational skip and
+`artifactSkipReason` rather than claiming
 an upload. This is distinct from an attempted upload failing, which follows `publishErrors`.
 Outside Actions, raw reports and generated reports remain local.
 
 **Ordinary `run: rx verify` steps normally do not receive these runtime credentials.**
 They still publish Checks and job summaries, but downloadable workflow artifacts are
-skipped with the diagnostic above. JavaScript action hosts can supply the runtime
+skipped with the informational diagnostic above. JavaScript action hosts can supply the runtime
 environment; Rexo does not scrape runner credentials, export them to later steps,
 or ship a runner wrapper. Keep an explicit upload action if downloadable artifacts
 are essential in an ordinary shell-based workflow.
@@ -130,7 +139,7 @@ are essential in an ordinary shell-based workflow.
 
 Keep report generation, Checks, summaries, and thresholds in Rexo. Let
 `actions/upload-artifact` handle only transporting the local files to Actions storage.
-Disable Rexo's internal upload attempts to avoid runtime-credential warnings or duplicate
+Disable Rexo's internal upload attempts to avoid runtime-credential diagnostics or duplicate
 uploads:
 
 ```yaml
@@ -205,7 +214,10 @@ Set `REPORT_SCOPE` in the workflow to a safe value such as `linux-net10-shard1`.
 Check identity includes policy, repository, commit, scope, and Actions run ID/attempt/job.
 Attempts are distinct; identical reruns update the matching Check without duplicating
 annotations. GitHub cannot replace annotations, so a changed annotation set creates a
-new completed Check rather than appending stale failures. Artifact names also include
+new completed Check rather than appending stale failures. Only after its replacement
+publishes completely, Rexo marks older matching scoped results neutral with a
+"Superseded report" summary and a link to the current result. Other scopes and attempts
+are never superseded. Artifact names also include
 scope and attempt; publishing the same artifact name twice in a job is an explicit
 upload error, not an overwrite. There is no cross-job or historical-baseline aggregation.
 
@@ -219,18 +231,26 @@ step outputs. Run manifests preserve step success/exit status and the
 
 | Output | Meaning |
 | --- | --- |
-| `status` | `skipped`, `local`, `published`, or `failed`; `published` means a Check URL or uploaded artifact ID was obtained, not that tests passed. |
+| `status` | `skipped`, `preview`, `local`, `published`, or `failed`; `published` means a Check URL or uploaded artifact ID was obtained, not that tests passed. |
 | `skipReason` | Present for disabled/dry-run steps. |
 | `reportCount` | Number of selected supported input files when discovery completes. |
 | `summaryPath` | Repository-relative Markdown file when written successfully. |
 | `conclusion` | Report conclusion: `success`, `failure`, or `neutral`. Overall step failure may additionally reflect publishing errors. |
 | `checkUrl` | GitHub Check URL, or null when disabled/skipped. |
+| `checkStatus` | `published`, `skipped`, or `failed`; independent of test/coverage conclusion. |
+| `checkSkipReason` | Machine-readable explanation when Check publication is skipped, including disabled publishing or unavailable credentials. |
 | `artifactId` | Uploaded Actions artifact ID, only after successful finalization. |
+| `artifactStatus` | `published`, `skipped`, or `failed`; a local summary does not imply upload. |
 | `artifactSkipReason` | Runtime credentials missing for a requested Actions upload. |
 | `publishWarning` | Publishing failure text, including when configured to warn. |
 | `error` | Visible processing/publication failure message when the step fails. |
 | `total`, `passed`, `failed`, `skipped` | Test counts, only after successful test parsing. |
 | `lineCoverage`, `branchCoverage` | Coverage percentages, nullable when the source format has no corresponding metric. |
+| `paths`, `exclude`, `detectedReports` | Preview-only discovery settings and repository-relative candidate paths/formats; null format identifies an unrelated file. |
+
+Known GitHub policy variable names have schema completion and reject misspelled keys.
+Literal types/ranges are validated before execution; template expressions remain supported
+and their rendered values are validated by the policy at runtime.
 
 No report-specific scalar variables are added to CI emission: neither safe nor full
 scope emits test counts or coverage percentages. With step file outputs enabled, safe

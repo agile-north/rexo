@@ -55,8 +55,10 @@ public sealed class GitHubReportTests : IDisposable
         Assert.Contains("expected &lt;value&gt;", summary, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task BothReportingPoliciesRunAfterFailureAndPreserveDeclaredOutputs()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BothReportingPoliciesRunAfterFailureAndPreserveDeclaredOutputs(bool invalidReport)
     {
         var file = Path.Join(_root, "rexo.json");
         await File.WriteAllTextAsync(file, """
@@ -79,7 +81,9 @@ public sealed class GitHubReportTests : IDisposable
         loader.LoadInto(registry, config, _root, executor);
         builtins.Register("builtin:test-runner", (_, _, _) =>
         {
-            Write("custom/junit.xml", "<testsuite><testcase name=\"works\"/></testsuite>");
+            Write("custom/junit.xml", invalidReport
+                ? """<assemblies><assembly><collection><test name="broken" result="banana"/></collection></assembly></assemblies>"""
+                : "<testsuite><testcase name=\"works\"/></testsuite>");
             return Task.FromResult(new StepResult("runner", false, 1, TimeSpan.Zero, new Dictionary<string, object?>()));
         });
         var result = await executor.ExecuteAsync("test", new CommandInvocation(
@@ -87,7 +91,10 @@ public sealed class GitHubReportTests : IDisposable
         Assert.False(result.Success);
         var tests = Assert.Single(result.Steps, step => step.StepId == "github-tests");
         Assert.False(tests.Success);
-        Assert.Equal(1, tests.Outputs["total"]);
+        if (invalidReport)
+            Assert.Contains("banana", Assert.IsType<string>(tests.Outputs["error"]), StringComparison.Ordinal);
+        else
+            Assert.Equal(1, tests.Outputs["total"]);
         Assert.Equal("failure", tests.Outputs["conclusion"]);
         Assert.Contains(result.Steps, step => step.StepId == "github-coverage");
         Assert.True(Assert.Single(result.Steps, step => step.StepId == "runner").Outputs.ContainsKey("__fileOutputs"));
@@ -145,9 +152,10 @@ public sealed class GitHubReportTests : IDisposable
     public async Task DryRunDoesNotReadReportsWriteSummaryOrPublish()
     {
         Write("results/bad.xml", "bad");
+        using var client = new HttpClient(new RejectNetworkHandler());
         var result = await GitHubReportBuiltinModule.ExecuteAsync("github-tests",
             Context(new() { ["publish"] = "always" }) with { IsDryRun = true }, false,
-            CancellationToken.None, new HttpClient(new RejectNetworkHandler()));
+            CancellationToken.None, client);
         Assert.True(result.Success);
         Assert.Equal("skipped", result.Outputs["status"]);
         Assert.False(Directory.Exists(Path.Join(_root, "results", "github-report")));
@@ -175,9 +183,10 @@ public sealed class GitHubReportTests : IDisposable
         var options = new GitHubReportOptions(context, false);
         var annotations = Enumerable.Range(1, 51).Select(index => new GitHubReportAnnotation(
             "src/file.cs", index, "broken", "dummy-token failure")).ToArray();
-        var url = await GitHubReportCheckPublisher.PublishAsync(context, options, "Rexo tests",
+        var publication = await GitHubReportCheckPublisher.PublishAsync(context, options, "Rexo tests",
             "dummy-token summary", "failure", annotations, CancellationToken.None, client);
-        Assert.Equal("https://github.com/owner/repo/runs/1", url);
+        Assert.Equal("https://github.com/owner/repo/runs/1", publication.Url);
+        Assert.Equal("published", publication.Status);
         Assert.Equal(3, handler.Requests.Count);
         Assert.Equal(HttpMethod.Post, handler.Requests[1].Method);
         Assert.Equal(HttpMethod.Patch, handler.Requests[2].Method);
@@ -226,8 +235,71 @@ public sealed class GitHubReportTests : IDisposable
         {
             MappedSecretEnvironment = new Dictionary<string, string> { ["GH_TOKEN"] = "", ["GITHUB_TOKEN"] = "" },
         };
-        Assert.Null(await GitHubReportCheckPublisher.PublishAsync(context, new(context, false),
-            "Tests", "summary", "success", [], CancellationToken.None, client));
+        var result = await GitHubReportCheckPublisher.PublishAsync(context, new(context, false),
+            "Tests", "summary", "success", [], CancellationToken.None, client);
+        Assert.Equal("skipped", result.Status);
+        Assert.Null(result.Url);
+        Assert.Contains("token", result.SkipReason, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ChangedAnnotationRunsAreSupersededAfterReplacement()
+    {
+        var handler = new CheckHandler { KeepCheck = true };
+        using var client = new HttpClient(handler);
+        var context = Context(new() { ["publish"] = "always" });
+        var options = new GitHubReportOptions(context, false);
+        await GitHubReportCheckPublisher.PublishAsync(context, options, "Tests", "failed", "failure",
+            [new("src/test.cs", 1, "broken", "failure")], CancellationToken.None, client);
+        await GitHubReportCheckPublisher.PublishAsync(context, options, "Tests", "passed", "success",
+            [], CancellationToken.None, client);
+        Assert.Equal(HttpMethod.Post, handler.Requests[^2].Method);
+        Assert.Equal(HttpMethod.Patch, handler.Requests[^1].Method);
+        using var superseded = JsonDocument.Parse(handler.Requests[^1].Body);
+        Assert.Equal("neutral", superseded.RootElement.GetProperty("conclusion").GetString());
+        Assert.Equal("Superseded report", superseded.RootElement.GetProperty("output").GetProperty("title").GetString());
+    }
+
+    [Fact]
+    public async Task PreviewShowsDiscoveryWithoutGenerationWritesOrPublishing()
+    {
+        Write("results/tests.xml", "<testsuite><testcase name=\"passes\"/></testsuite>");
+        using var client = new HttpClient(new RejectNetworkHandler());
+        var context = Context(new() { ["publish"] = "always" }) with
+        {
+            Options = new Dictionary<string, string?> { ["report-preview"] = "true" },
+        };
+        var result = await GitHubReportBuiltinModule.ExecuteAsync("github-tests", context, false, CancellationToken.None, client);
+        Assert.True(result.Success);
+        Assert.Equal("preview", result.Outputs["status"]);
+        Assert.Equal(1, result.Outputs["reportCount"]);
+        var detected = JsonSerializer.Serialize(result.Outputs["detectedReports"]);
+        Assert.Contains("results/tests.xml", detected, StringComparison.Ordinal);
+        Assert.Contains("junit", detected, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Join(_root, "results", "github-report")));
+    }
+
+    [Theory]
+    [InlineData("auto", true, "skipped")]
+    [InlineData("required", false, "failed")]
+    [InlineData("never", true, "skipped")]
+    public async Task ArtifactModeDistinguishesUnavailableFromRequiredUploads(string mode, bool success, string status)
+    {
+        Write("results/tests.xml", "<testsuite><testcase name=\"passes\"/></testsuite>");
+        var context = Context(new() { ["publish"] = "always", ["checks"] = false, ["artifactUpload"] = mode }) with
+        {
+            FileEnvironment = new Dictionary<string, string>
+            {
+                ["GITHUB_ACTIONS"] = "true",
+                ["ACTIONS_RUNTIME_TOKEN"] = "",
+                ["ACTIONS_RESULTS_URL"] = "",
+            },
+        };
+        var result = await GitHubReportBuiltinModule.ExecuteAsync("github-tests", context, false, CancellationToken.None);
+        Assert.Equal(success, result.Success);
+        Assert.Equal(status, result.Outputs["artifactStatus"]);
+        Assert.Equal("skipped", result.Outputs["checkStatus"]);
+        Assert.Equal("Checks are disabled.", result.Outputs["checkSkipReason"]);
     }
 
     [Theory]
@@ -247,6 +319,22 @@ public sealed class GitHubReportTests : IDisposable
         Assert.Equal(75m, result.Outputs["lineCoverage"]);
         Assert.Equal(25m, result.Outputs["branchCoverage"]);
         Assert.True(result.Outputs.ContainsKey("__fileOutputs"));
+    }
+
+    [Theory]
+    [InlineData("0", "")]
+    [InlineData("", "80")]
+    public async Task ConfiguredThresholdFailsWhenCoverageReportsAreMissing(string line, string branch)
+    {
+        var result = await GitHubReportBuiltinModule.ExecuteAsync("github-coverage",
+            Context(new() { ["minimumLineCoverage"] = line, ["minimumBranchCoverage"] = branch }), true,
+            CancellationToken.None);
+        Assert.False(result.Success);
+        Assert.Equal("failure", result.Outputs["conclusion"]);
+        Assert.Equal(0, result.Outputs["reportCount"]);
+        Assert.Null(result.Outputs["lineCoverage"]);
+        Assert.Null(result.Outputs["branchCoverage"]);
+        Assert.Contains("unavailable", Assert.IsType<string>(result.Outputs["error"]), StringComparison.Ordinal);
     }
 
     [Fact]

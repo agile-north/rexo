@@ -147,6 +147,14 @@ This uploads local outputs only; keep parsing, Checks, summaries and thresholds 
 Adjust paths for configured output locations and use unique artifact names for matrix
 axes/shards and run attempts. See the shared reporting reference's shell-workflow example.
 
+Use `rx reports tests --report-preview` / `rx reports coverage --report-preview` to inspect
+resolved discovery without writes or publishing. `artifactUpload: auto` skips unavailable
+runtime upload credentials informationally; `required` makes their absence fail reporting.
+Inspect `checkStatus` / `checkSkipReason` / `artifactStatus`, not just command success.
+Configured coverage thresholds fail when reports or metrics are missing. GitHub policy
+vars have typed schema completion and typo checking; keep new settings synchronized with
+the policy schema, runtime validation, documentation and tests.
+
 ### GitHub releases without workflow scripts
 
 When the user wants GitHub releases, include the shipped policy alongside standard/toolchain policies:

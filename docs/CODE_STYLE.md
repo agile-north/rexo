@@ -39,6 +39,14 @@ silencing an analyzer.
   failure should not replace the primary operation's result, but it must remain observable.
 - For races such as a child process exiting just before cancellation tries to kill it, filter the
   expected exception to that state. Let failures outside the expected state propagate.
+- Verify actual exception inheritance when writing boundary catch filters:
+  `InvalidDataException` does not derive from `IOException`. Malformed report input must
+  produce a failed step without preventing independent `alwaysRun` reporting.
+- Own disposable HTTP clients, responses and content explicitly in tests as well as production.
+  When a fake handler returns a response, document ownership through a scoped fixture or
+  the consuming request path; avoid response allocations hidden inside task-returning lambdas.
+- Prove nullable values present with guards/patterns before dereferencing; null-forgiving
+  operators do not substitute for runtime API-response validation.
 
 ## Collection transforms and conditions
 
@@ -57,6 +65,17 @@ silencing an analyzer.
 After a fix is pushed, inspect feedback on the new head commit. A successful analysis check means
 the analyzer ran successfully, not that it found no quality issues. Re-read the current inline
 comments and scan sibling code for the same pattern before declaring the review addressed.
+
+## CI gates and reporting
+
+- Apply gates to the exact selected artifact identities (type and name), not unrelated
+  publication history accumulated by parent/child commands. Test unrelated successes and
+  denials, named groups, and same-name artifacts of different types.
+- An explicitly configured coverage threshold requires a measurable result. Missing reports
+  and absent metrics must not bypass it, even when the generic missing-report policy warns.
+- Separate report-processing success from publication outcomes. Make credential skips and
+  unavailable destinations machine-readable, and do not infer that a successful command
+  created a GitHub Check or uploaded an artifact.
 
 ## Provider capabilities
 

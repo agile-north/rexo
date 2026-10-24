@@ -38,8 +38,8 @@ For downloadable HTML and raw reports from ordinary shell steps, use the documen
 | `assemblyFilters` | empty | ReportGenerator semicolon-separated inclusion/exclusion filters. |
 | `classFilters` | empty | ReportGenerator class filters. |
 | `fileFilters` | empty | ReportGenerator source file filters. |
-| `minimumLineCoverage` | empty | Optional 0–100 percentage. Missing line metric fails an explicitly configured threshold. |
-| `minimumBranchCoverage` | empty | Optional 0–100 percentage. Missing branch metric fails an explicitly configured threshold. |
+| `minimumLineCoverage` | empty | Optional 0–100 percentage. A missing line metric or missing reports fails an explicitly configured threshold, even with `missingReports: warn`. |
+| `minimumBranchCoverage` | empty | Optional 0–100 percentage. A missing branch metric or missing reports fails an explicitly configured threshold, even with `missingReports: warn`. |
 
 Docker is required when coverage inputs exist, including local-only reporting.
 Inputs are mounted read-only and generated output is writable; GitHub credentials

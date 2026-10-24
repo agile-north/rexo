@@ -25,6 +25,9 @@ internal sealed class RepoCommandConfigJsonConverter : JsonConverter<RepoCommand
             After = ReadOptionalHookSteps(root, "after", options),
             MaxDepth = ReadOptionalInt(root, "maxDepth"),
             Container = ReadOptionalObject<RepoStepContainerConfig>(root, "container", options),
+            User = ReadOptionalString(root, "user"),
+            Domain = ReadOptionalString(root, "domain"),
+            PasswordSecret = ReadOptionalString(root, "passwordSecret"),
         };
 
         if (!root.TryGetProperty("merge", out var mergeElement))
@@ -62,6 +65,10 @@ internal sealed class RepoCommandConfigJsonConverter : JsonConverter<RepoCommand
         {
             writer.WriteString("echo", value.Echo);
         }
+
+        if (value.User is not null) writer.WriteString("user", value.User);
+        if (value.Domain is not null) writer.WriteString("domain", value.Domain);
+        if (value.PasswordSecret is not null) writer.WriteString("passwordSecret", value.PasswordSecret);
 
         writer.WritePropertyName("options");
         JsonSerializer.Serialize(writer, value.Options, options);

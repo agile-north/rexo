@@ -786,7 +786,7 @@ public sealed partial class RepoConfigurationLoader
         return new RepoCommandConfig(
             Description: childCmd.Description ?? baseCmd.Description,
             Options: MergeDictionaries(baseCmd.Options, childCmd.Options) ?? [],
-            Steps: PushDownCommandContainer([.. baseCmd.Steps ?? []], baseCmd.Container))
+            Steps: PushDownCommandDefaults([.. baseCmd.Steps ?? []], baseCmd))
         {
             Echo = childCmd.Echo ?? baseCmd.Echo,
             Hidden = childCmd.Hidden ?? baseCmd.Hidden,
@@ -795,10 +795,13 @@ public sealed partial class RepoConfigurationLoader
             Merge = effectiveMode,
             MaxParallel = childCmd.MaxParallel ?? baseCmd.MaxParallel,
             StepOps = effectiveStepOps,
-            Before = baseCmd.Before is null ? null : PushDownCommandContainer([.. baseCmd.Before], baseCmd.Container),
-            After = baseCmd.After is null ? null : PushDownCommandContainer([.. baseCmd.After], baseCmd.Container),
+            Before = baseCmd.Before is null ? null : PushDownCommandDefaults([.. baseCmd.Before], baseCmd),
+            After = baseCmd.After is null ? null : PushDownCommandDefaults([.. baseCmd.After], baseCmd),
             MaxDepth = childCmd.MaxDepth ?? baseCmd.MaxDepth,
             Container = childCmd.Container,
+            User = childCmd.User,
+            Domain = childCmd.Domain,
+            PasswordSecret = childCmd.PasswordSecret,
         };
     }
 
@@ -847,7 +850,13 @@ public sealed partial class RepoConfigurationLoader
             steps.AddRange(operations.Append);
         }
 
-        return command with { Steps = steps };
+        return command with
+        {
+            Steps = PushDownCommandDefaults(steps, command),
+            User = null,
+            Domain = null,
+            PasswordSecret = null,
+        };
     }
 
     private static RepoCommandConfig MergeCommandAppend(RepoCommandConfig baseCmd, RepoCommandConfig childCmd)
@@ -978,25 +987,21 @@ public sealed partial class RepoConfigurationLoader
             steps.AddRange(commandConfig.After);
         }
 
-        return PushDownCommandContainer(steps, commandConfig.Container);
+        return PushDownCommandDefaults(steps, commandConfig);
     }
 
     /// <summary>
-    /// Copies a command-level container default onto its own run steps so that the default keeps
+    /// Copies command-level execution defaults onto its own run steps so that each default keeps
     /// applying only to the steps it was declared for once commands from different layers are combined.
     /// </summary>
-    private static List<RepoStepConfig> PushDownCommandContainer(List<RepoStepConfig> steps, RepoStepContainerConfig? container)
+    private static List<RepoStepConfig> PushDownCommandDefaults(List<RepoStepConfig> steps, RepoCommandConfig command)
     {
-        if (container is null)
-        {
-            return steps;
-        }
-
         for (var i = 0; i < steps.Count; i++)
         {
+            steps[i] = CommandUserResolver.ApplyDefaults(steps[i], command);
             if (steps[i].Run is not null && steps[i].Container is null)
             {
-                steps[i] = steps[i] with { Container = container };
+                steps[i] = steps[i] with { Container = command.Container };
             }
         }
 

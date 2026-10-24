@@ -198,7 +198,10 @@
         "container": {
           "$ref": "#/$defs/containerRef",
           "description": "Default container for every run step in this command (steps can override, or opt out with false/'none'). Applies only to this command's own steps, not to delegated commands."
-        }
+        },
+        "user": { "type": "string", "pattern": "\\S", "description": "Default host account for this command's own run steps and hooks. Templates are allowed." },
+        "domain": { "type": "string", "pattern": "\\S", "description": "Optional Windows host account domain." },
+        "passwordSecret": { "type": "string", "pattern": "\\S", "description": "Name of a secrets.items entry containing the Windows host logon password. Never a literal password." }
       }
     },
     "commandMerge": {
@@ -399,6 +402,9 @@
           "$ref": "#/$defs/containerRef",
           "description": "Optional run-step container. A registry name, false/'none' for host execution, or an inline/override object. Overrides the command-level container."
         },
+        "user": { "type": "string", "pattern": "\\S", "description": "Host account override for this run step. Changing the account clears inherited domain/passwordSecret defaults." },
+        "domain": { "type": "string", "pattern": "\\S", "description": "Optional Windows host account domain." },
+        "passwordSecret": { "type": "string", "pattern": "\\S", "description": "Name of a secrets.items entry containing the Windows host logon password." },
         "when": {
           "type": "string",
           "description": "Conditional expression that controls whether the step executes."
@@ -488,6 +494,12 @@
       "allOf": [
         {
           "anyOf": [
+            { "required": ["run"] },
+            { "not": { "anyOf": [{ "required": ["user"] }, { "required": ["domain"] }, { "required": ["passwordSecret"] }] } }
+          ]
+        },
+        {
+          "anyOf": [
             {
               "not": {
                 "required": [
@@ -509,6 +521,7 @@
       "description": "Container execution spec. Either an inline definition (image/dockerfile/...) or a reference to a named entry in the top-level 'containers' registry via 'use', optionally with inline overrides.",
       "additionalProperties": false,
       "properties": {
+        "user": { "type": "string", "pattern": "\\S", "description": "Docker runtime user: username or UID, optionally followed by :group or :GID. Templates are allowed; does not affect host fallback." },
         "use": {
           "type": "string",
           "description": "Name of a container defined in the top-level 'containers' registry. Template expressions are allowed (e.g. '{{vars.dotnet.container}}'). 'none', 'false', or an empty rendered value means run on the host.",

@@ -8,38 +8,25 @@ public sealed record ShellRunResult(int ExitCode, string Stdout, string Stderr);
 
 public static class ShellRunner
 {
-    public static async Task<ShellRunResult> RunAsync(
+    public static Task<ShellRunResult> RunAsync(
         string command,
         string workingDirectory,
         IReadOnlyDictionary<string, string?>? environment = null,
         Action<string>? onStdout = null,
+        CancellationToken cancellationToken = default) =>
+        RunAsync(command, workingDirectory, null, null, null, environment, onStdout, cancellationToken);
+
+    public static async Task<ShellRunResult> RunAsync(
+        string command,
+        string workingDirectory,
+        string? user,
+        string? domain,
+        string? password,
+        IReadOnlyDictionary<string, string?>? environment = null,
+        Action<string>? onStdout = null,
         CancellationToken cancellationToken = default)
     {
-        var isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
-        var psi = isWindows
-            ? new ProcessStartInfo("cmd.exe", $"/d /c \"{command}\"")
-            : new ProcessStartInfo("/bin/sh")
-            {
-                ArgumentList = { "-c", command },
-            };
-
-        psi.WorkingDirectory = workingDirectory;
-        psi.RedirectStandardOutput = true;
-        psi.RedirectStandardError = true;
-        psi.UseShellExecute = false;
-        psi.CreateNoWindow = true;
-
-        if (environment is not null)
-        {
-            foreach (var kv in environment)
-            {
-                if (kv.Value is not null)
-                    psi.Environment[kv.Key] = kv.Value;
-                else
-                    psi.Environment.Remove(kv.Key);
-            }
-        }
-
+        var psi = CreateShellStartInfo(command, workingDirectory, user, domain, password, environment);
         using var process = new Process { StartInfo = psi };
         var stdoutLines = new System.Text.StringBuilder();
         var stderrLines = new System.Text.StringBuilder();
@@ -57,6 +44,66 @@ public static class ShellRunner
             process.ExitCode,
             stdoutLines.ToString().Trim(),
             stderrLines.ToString().Trim());
+    }
+
+    internal static ProcessStartInfo CreateShellStartInfo(
+        string command,
+        string workingDirectory,
+        string? user,
+        string? domain,
+        string? password,
+        IReadOnlyDictionary<string, string?>? environment)
+    {
+        var isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+        var psi = isWindows
+            ? new ProcessStartInfo(Path.Join(Environment.SystemDirectory, "cmd.exe"), $"/d /c \"{command}\"")
+            : new ProcessStartInfo("/bin/sh")
+            {
+                ArgumentList = { "-c", command },
+            };
+
+        psi.WorkingDirectory = workingDirectory;
+        psi.RedirectStandardOutput = true;
+        psi.RedirectStandardError = true;
+        psi.UseShellExecute = false;
+        psi.CreateNoWindow = true;
+
+        if (user is not null)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(user);
+            psi.UserName = user;
+            if (OperatingSystem.IsWindows())
+            {
+                if (string.IsNullOrEmpty(password))
+                {
+                    throw new InvalidOperationException("Windows host user execution requires a resolved passwordSecret.");
+                }
+
+                psi.Domain = domain;
+                psi.PasswordInClearText = password;
+            }
+            else if (domain is not null || password is not null)
+            {
+                throw new PlatformNotSupportedException("Host domain and passwordSecret are supported only on Windows.");
+            }
+        }
+        else if (domain is not null || password is not null)
+        {
+            throw new InvalidOperationException("Host credentials require a user.");
+        }
+
+        if (environment is not null)
+        {
+            foreach (var kv in environment)
+            {
+                if (kv.Value is not null)
+                    psi.Environment[kv.Key] = kv.Value;
+                else
+                    psi.Environment.Remove(kv.Key);
+            }
+        }
+
+        return psi;
     }
 
     public static async Task<ShellRunResult> RunProcessAsync(

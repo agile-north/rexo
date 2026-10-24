@@ -670,8 +670,10 @@ public sealed class StepExecutorWhenConditionTests
         }
     }
 
-    [Fact]
-    public async Task ContainerRunUsesHostOnlyWhenFallbackIsExplicitlyAllowed()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ContainerRunUsesHostOnlyWhenFallbackIsExplicitlyAllowed(bool hostUser)
     {
         await ContainerEnvMutationGate.WaitAsync();
         var originalDockerCommand = Environment.GetEnvironmentVariable("REXO_DOCKER_COMMAND");
@@ -690,7 +692,8 @@ public sealed class StepExecutorWhenConditionTests
                 Command: null,
                 When: null)
             {
-                Container = new StepContainerDefinition("rexo/test:latest", Fallback: "host"),
+                User = hostUser ? "rx" + Guid.NewGuid().ToString("N")[..12] : null,
+                Container = new StepContainerDefinition("rexo/test:latest", Fallback: "host", User: "container-only-user"),
             };
 
             var result = await CreateExecutor().ExecuteAsync(
@@ -698,8 +701,16 @@ public sealed class StepExecutorWhenConditionTests
                 ExecutionContext.Empty(repositoryRoot),
                 CancellationToken.None);
 
-            Assert.True(result.Success);
-            Assert.Contains("host-fallback-ran", result.Outputs["stdout"]?.ToString(), StringComparison.Ordinal);
+            Assert.Equal(!hostUser, result.Success);
+            if (hostUser)
+            {
+                Assert.Equal(string.Empty, result.Outputs["stdout"]);
+                Assert.Contains("Host user execution failed", result.Outputs["stderr"]?.ToString(), StringComparison.Ordinal);
+            }
+            else
+            {
+                Assert.Contains("host-fallback-ran", result.Outputs["stdout"]?.ToString(), StringComparison.Ordinal);
+            }
             Assert.Equal("host", result.Outputs["__containerFallbackPolicy"]);
             Assert.Equal("True", result.Outputs["__containerFallbackAllowed"]?.ToString());
             Assert.Equal("True", result.Outputs["__containerFallbackUsed"]?.ToString());
@@ -712,8 +723,11 @@ public sealed class StepExecutorWhenConditionTests
         }
     }
 
-    [Fact]
-    public async Task ContainerRunBuildsImageWhenMissingAndUsesConfiguredEntrypoint()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("1000:1000")]
+    [InlineData("builder")]
+    public async Task ContainerRunBuildsImageWhenMissingAndUsesConfiguredEntrypoint(string? user)
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
@@ -747,6 +761,8 @@ public sealed class StepExecutorWhenConditionTests
                 Command: null,
                 When: null)
             {
+                User = "host-account-must-not-be-used",
+                PasswordSecret = "undefined-host-secret",
                 Container = new StepContainerDefinition(
                     Image: "rexo/test-image:local",
                     Env: null,
@@ -756,7 +772,8 @@ public sealed class StepExecutorWhenConditionTests
                     Context: ".",
                     Build: new StepContainerBuildDefinition(
                         Target: "publish",
-                        Args: new Dictionary<string, string> { ["APP_VERSION"] = "1.2.3" })),
+                        Args: new Dictionary<string, string> { ["APP_VERSION"] = "1.2.3" }),
+                    User: user),
             };
 
             var result = await executor.ExecuteAsync(step, context, CancellationToken.None);
@@ -771,6 +788,15 @@ public sealed class StepExecutorWhenConditionTests
             Assert.Contains("--build-arg APP_VERSION=1.2.3", log, StringComparison.Ordinal);
             Assert.Contains("run ", log, StringComparison.Ordinal);
             Assert.Contains("--entrypoint custom-entry", log, StringComparison.Ordinal);
+            if (user is null)
+            {
+                Assert.DoesNotContain("--user", log, StringComparison.Ordinal);
+            }
+            else
+            {
+                Assert.Contains($"--user {user}", log, StringComparison.Ordinal);
+                Assert.DoesNotContain("--user", log.Split('\n').First(line => line.StartsWith("build ", StringComparison.Ordinal)), StringComparison.Ordinal);
+            }
         }
         finally
         {

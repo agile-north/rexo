@@ -110,6 +110,9 @@ public sealed record RepoCommandConfig(
     /// Steps can override it with their own <c>container</c>, or opt out with <c>container: none</c>.
     /// </summary>
     public RepoStepContainerConfig? Container { get; init; }
+    public string? User { get; init; }
+    public string? Domain { get; init; }
+    public string? PasswordSecret { get; init; }
 }
 
 public sealed record RepoArgConfig(
@@ -139,6 +142,13 @@ public sealed record RepoStepConfig(
     Dictionary<string, string[]>? Outputs = null,
     RepoStepContainerConfig? Container = null)
 {
+    [JsonIgnore]
+    internal bool HostUserDefaultsApplied { get; init; }
+
+    public string? User { get; init; }
+    public string? Domain { get; init; }
+    public string? PasswordSecret { get; init; }
+
     /// <summary>Overrides command-level execution echo behavior for this step.</summary>
     public string? Echo { get; init; }
 }
@@ -157,6 +167,8 @@ public sealed record RepoStepContainerConfig(
     string? Context = null,
     RepoStepContainerBuildConfig? Build = null)
 {
+    public string? User { get; init; }
+
     /// <summary>Value of <see cref="Use"/> that disables containerization for a step.</summary>
     public const string NoneReference = "none";
 

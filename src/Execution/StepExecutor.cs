@@ -7,7 +7,7 @@ using Rexo.Ci;
 using Rexo.Core.Abstractions;
 using Rexo.Core.Models;
 
-public sealed class StepExecutor : IStepExecutor
+public sealed class StepExecutor : IStepExecutor, IDisposable
 {
     private const string ContainerSourceHashLabel = "rexo.container.sourceHash";
     private const string DockerCommandEnvVar = "REXO_DOCKER_COMMAND";
@@ -15,16 +15,22 @@ public sealed class StepExecutor : IStepExecutor
     private readonly ICommandExecutor _commandExecutor;
     private readonly ITemplateRenderer _templateRenderer;
     private readonly BuiltinRegistry _builtinRegistry;
+    private readonly ISecretResolver? _secretResolver;
+    private readonly SemaphoreSlim _credentialGate = new(1, 1);
 
     public StepExecutor(
         ICommandExecutor commandExecutor,
         ITemplateRenderer templateRenderer,
-        BuiltinRegistry builtinRegistry)
+        BuiltinRegistry builtinRegistry,
+        ISecretResolver? secretResolver = null)
     {
         _commandExecutor = commandExecutor;
         _templateRenderer = templateRenderer;
         _builtinRegistry = builtinRegistry;
+        _secretResolver = secretResolver;
     }
+
+    public void Dispose() => _credentialGate.Dispose();
 
     public async Task<StepResult> ExecuteAsync(
         StepDefinition stepDefinition,
@@ -94,8 +100,7 @@ public sealed class StepExecutor : IStepExecutor
         var command = _templateRenderer.Render(run, context);
         var runtimeSecrets = context.ResolvedSecrets.Values
             .Concat(context.MappedSecretEnvironment.Values);
-        var secrets = SecretMasker.CollectSecretValues(runtimeSecrets);
-        var env = BuildNativeRunEnvironment(context);
+        var secrets = new HashSet<string>(SecretMasker.CollectSecretValues(runtimeSecrets), StringComparer.Ordinal);
         ShellRunResult shellResult;
         var executionMetadata = new RunExecutionMetadata("native", "native", null, null, false, null, false, null);
         var debugEnabled = IsDebugEnabled(context);
@@ -108,6 +113,7 @@ public sealed class StepExecutor : IStepExecutor
                 displayStepId,
                 command,
                 container,
+                stepDefinition,
                 context,
                 secrets,
                 debugEnabled,
@@ -129,12 +135,12 @@ public sealed class StepExecutor : IStepExecutor
                 Console.WriteLine($"  > [native] {SecretMasker.Mask(command, secrets)}");
             }
 
-            shellResult = await ShellRunner.RunAsync(
+            shellResult = await RunNativeAsync(
                 command,
-                context.RepositoryRoot,
-                environment: env,
-                onStdout: line => Console.WriteLine($"    {SecretMasker.Mask(line, secrets)}"),
-                cancellationToken: cancellationToken);
+                stepDefinition,
+                context,
+                secrets,
+                cancellationToken);
         }
 
         sw.Stop();
@@ -205,16 +211,107 @@ public sealed class StepExecutor : IStepExecutor
             outputs);
     }
 
-    private static async Task<ContainerRunResult> ExecuteContainerizedRunWithFallbackAsync(
+    private async Task<ShellRunResult> RunNativeAsync(
+        string command,
+        StepDefinition step,
+        ExecutionContext context,
+        HashSet<string> secrets,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var user = RenderIdentityField(step.User, "user", context);
+            var domain = RenderIdentityField(step.Domain, "domain", context);
+            var passwordSecret = RenderIdentityField(step.PasswordSecret, "passwordSecret", context);
+            string? password = null;
+            if (user is null && (domain is not null || passwordSecret is not null))
+            {
+                throw new InvalidOperationException("Host domain/passwordSecret require a user.");
+            }
+
+            if (!OperatingSystem.IsWindows() && (domain is not null || passwordSecret is not null))
+            {
+                throw new PlatformNotSupportedException("Host domain and passwordSecret are supported only on Windows.");
+            }
+
+            if (OperatingSystem.IsWindows() && user is not null)
+            {
+                if (passwordSecret is null || _secretResolver is null)
+                {
+                    throw new InvalidOperationException("Windows host user execution requires a passwordSecret referencing secrets.items.");
+                }
+
+                // The resolver maintains mutable provider/cache state shared by parallel steps.
+                await _credentialGate.WaitAsync(cancellationToken);
+                try
+                {
+                    password = await _secretResolver.GetSecretValueAsync(passwordSecret, cancellationToken);
+                }
+                finally
+                {
+                    _credentialGate.Release();
+                }
+
+                if (string.IsNullOrEmpty(password))
+                {
+                    throw new InvalidOperationException($"Host password secret '{passwordSecret}' is undefined, empty, or could not be resolved.");
+                }
+
+                secrets.Add(password);
+            }
+
+            return await ShellRunner.RunAsync(
+                command,
+                context.RepositoryRoot,
+                environment: BuildNativeRunEnvironment(context),
+                onStdout: line => Console.WriteLine($"    {SecretMasker.Mask(line, secrets)}"),
+                cancellationToken: cancellationToken,
+                user: user,
+                domain: domain,
+                password: password);
+        }
+        catch (Exception ex) when (
+            (step.User is not null || step.Domain is not null || step.PasswordSecret is not null) &&
+            ex is System.ComponentModel.Win32Exception or InvalidOperationException or ArgumentException or NotSupportedException)
+        {
+            return new ShellRunResult(1, string.Empty, SecretMasker.Mask($"Host user execution failed: {ex.Message}", secrets));
+        }
+    }
+
+    private string? RenderIdentityField(string? value, string name, ExecutionContext context)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        var rendered = _templateRenderer.Render(value, context);
+        if (string.IsNullOrWhiteSpace(rendered))
+        {
+            throw new InvalidOperationException($"Host {name} must not be empty or whitespace.");
+        }
+
+        return rendered;
+    }
+
+    private async Task<ContainerRunResult> ExecuteContainerizedRunWithFallbackAsync(
         string stepId,
         string command,
         StepContainerDefinition container,
+        StepDefinition step,
         ExecutionContext context,
-        IReadOnlySet<string> secrets,
+        HashSet<string> secrets,
         bool debugEnabled,
         string echoMode,
         CancellationToken cancellationToken)
     {
+        if (container.User is not null && string.IsNullOrWhiteSpace(container.User))
+        {
+            return new ContainerRunResult(
+                new ShellRunResult(1, string.Empty, "Container user must not be empty or whitespace."),
+                new RunExecutionMetadata("container", "container", container.Image, container.WorkingDirectory, false, container.Fallback, false, null));
+        }
+
         var containerWorkingDirectory = string.IsNullOrWhiteSpace(container.WorkingDirectory)
             ? "/work"
             : container.WorkingDirectory;
@@ -248,6 +345,7 @@ public sealed class StepExecutor : IStepExecutor
                         stepId,
                         command,
                         container,
+                        step,
                         context,
                         secrets,
                         containerWorkingDirectory,
@@ -291,6 +389,7 @@ public sealed class StepExecutor : IStepExecutor
                     stepId,
                     command,
                     container,
+                    step,
                     context,
                     secrets,
                     containerWorkingDirectory,
@@ -318,6 +417,7 @@ public sealed class StepExecutor : IStepExecutor
                 stepId,
                 command,
                 container,
+                step,
                 context,
                 secrets,
                 containerWorkingDirectory,
@@ -328,12 +428,13 @@ public sealed class StepExecutor : IStepExecutor
         }
     }
 
-    private static async Task<ContainerRunResult> HandleContainerRuntimeUnavailableAsync(
+    private async Task<ContainerRunResult> HandleContainerRuntimeUnavailableAsync(
         string stepId,
         string command,
         StepContainerDefinition container,
+        StepDefinition step,
         ExecutionContext context,
-        IReadOnlySet<string> secrets,
+        HashSet<string> secrets,
         string containerWorkingDirectory,
         string reason,
         string runtimeError,
@@ -366,13 +467,12 @@ public sealed class StepExecutor : IStepExecutor
         {
             Console.WriteLine($"  > [native:fallback] {SecretMasker.Mask(command, secrets)}");
         }
-        var env = BuildNativeRunEnvironment(context);
-        var fallbackResult = await ShellRunner.RunAsync(
+        var fallbackResult = await RunNativeAsync(
             command,
-            context.RepositoryRoot,
-            environment: env,
-            onStdout: line => Console.WriteLine($"    {SecretMasker.Mask(line, secrets)}"),
-            cancellationToken: cancellationToken);
+            step,
+            context,
+            secrets,
+            cancellationToken);
 
         return new ContainerRunResult(
             fallbackResult,
@@ -415,6 +515,12 @@ public sealed class StepExecutor : IStepExecutor
             "-w",
             string.IsNullOrWhiteSpace(container.WorkingDirectory) ? "/work" : container.WorkingDirectory,
         };
+
+        if (container.User is not null)
+        {
+            args.Add("--user");
+            args.Add(container.User);
+        }
 
         if (!string.IsNullOrWhiteSpace(container.Entrypoint))
         {

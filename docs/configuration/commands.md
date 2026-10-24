@@ -96,6 +96,81 @@ Example:
 
 Forwarding remains explicit: use `with` on hook steps/commands when mapping args/options.
 
+### Host execution user (`user`)
+
+Set `user` on a command to run its own shell steps and shell hooks under an existing host
+account. A run step can override it. These settings do not change Rexo's own identity,
+in-process builtins, artifact providers, or delegated commands.
+
+```yaml
+commands:
+  build:
+    user: builder
+    steps:
+      - run: dotnet build
+      - run: ./scripts/package.sh
+        user: packager
+```
+
+On Linux/macOS, Rexo uses native process credentials. Switching to another account requires
+appropriate OS permissions (typically root); Rexo does not invoke `sudo`, prompt for a password,
+or elevate itself. Use an account name, not Docker's UID/group syntax.
+
+On Windows, provide `passwordSecret`, the name of a [secret](secrets.md) containing the
+account's logon password. `domain` is optional; `.` selects the local computer. For a UPN
+such as `builder@example.com`, omit `domain`.
+
+```yaml
+secrets:
+  items:
+    buildLogin:
+      provider: env
+      env: BUILD_ACCOUNT_PASSWORD
+      required: false
+      exposeInTemplates: false
+
+commands:
+  build:
+    user: builder
+    domain: "."
+    passwordSecret: buildLogin
+    steps:
+      - run: dotnet build
+```
+
+The secret can use any existing Rexo provider or provider chain, including 1Password or a
+CI-backed provider. Optional, non-template-visible secrets are resolved when needed for host
+execution. Existing required-secret preflight behavior still applies.
+
+`user`, `domain`, and the `passwordSecret` **name** support templates. Passwords themselves
+are not config fields and must not be embedded in templates. Rexo passes the resolved password
+directly to Windows process creation, not as an argument or automatic environment mapping;
+it masks it in captured output and errors. Config snapshots and manifests retain references,
+not the resolved logon password. Do not expose login secrets through `mapToEnv`, `mapToEnvs`,
+or templates. An env-backed source still exists in the inherited host environment; use a
+non-env provider when that inheritance is inappropriate.
+
+Command defaults stay attached to their originating steps through policy/config composition.
+An explicit step `user` differing from the command's user expression clears inherited
+`domain` and `passwordSecret`: supply that account's own credentials. If the user expression
+is unchanged, a step can override only `passwordSecret`, for example for password rotation.
+Use the same user expression to inherit credentials; distinct expressions are treated
+conservatively as account overrides even if they happen to render to the same name.
+
+Windows requires a resolvable, non-empty password and OS permission to log on as the account.
+Logon restrictions and unsupported service-host contexts fail explicitly. Windows-only
+`domain`/`passwordSecret` settings are rejected for actual Unix host execution. Missing accounts,
+denied switches, invalid/empty values, and credential failures never retry under the current
+account.
+
+User switching does not start a login shell, load a user profile, change the working
+directory/home, or sanitize the inherited environment. Existing repository environment overlays,
+output capture, and cancellation semantics remain in effect.
+
+Host `user` is separate from [`container.user`](containerized-run.md#execution-user).
+Container execution ignores host credentials. Explicit `fallback: host` uses the host settings,
+never the container identity. Omitting all user settings preserves existing behavior.
+
 ### Command merge and step operations
 
 When commands are merged through `extends` (or policy overlays), you can control

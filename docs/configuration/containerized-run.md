@@ -68,6 +68,7 @@ When step.container is set, Rexo executes the rendered run command through Docke
 Optional container fields:
 
 - `container.entrypoint`: passed to `docker run --entrypoint`.
+- `container.user`: passed to `docker run --user`; see [Execution user](#execution-user).
 - `container.dockerfile`: Dockerfile source used to materialize `container.image` before run.
 - `container.context`: docker build context directory (default: repository root).
 - `container.build.target`: optional docker build stage passed as `--target`.
@@ -145,6 +146,42 @@ Examples include:
 
 These are available in both native and container-wrapped run steps.
 
+## Execution User
+
+Set `container.user` to choose the account inside the container:
+
+```yaml
+containers:
+  sdk:
+    image: mcr.microsoft.com/dotnet/sdk:10.0
+    user: "1000:1000"
+
+commands:
+  build:
+    container: sdk
+    steps:
+      - run: dotnet build
+      - run: dotnet --info
+        container:
+          use: sdk
+          user: "{{options.containerUser | default(builder)}}"
+```
+
+Docker accepts a username or UID, optionally followed by `:group` or `:GID`. Rexo passes
+the value as a single argument, not shell text. Registry inheritance, policy/config overlays,
+command container defaults, inline overrides, and templates all preserve this setting.
+Omitting it uses the image's default user; an explicitly empty/whitespace value is invalid.
+
+This setting affects only `docker run`, not Docker inspect/build or the host Docker client.
+It does not rewrite mounted-file ownership or change the inherited environment, and the
+selected account must have access to the mounted repository.
+
+Container identity is independent of the command/step's host [`user`](commands.md#host-execution-user-user).
+On Windows, container identity does not require host logon credentials. If explicit
+`fallback: host` is used, host execution uses only the host `user`, `domain`, and
+`passwordSecret` settings. It never treats a container username/UID as a host account or
+silently drops a configured host identity when switching fails.
+
 ---
 
 ## Fallback Semantics
@@ -215,7 +252,7 @@ Containerized run steps preserve existing run-step features:
 
 - Template expansion in step.run
 - Template expansion is also available in container fields such as image, dockerfile,
-  context, workingDirectory, entrypoint, env values, and build args.
+  context, workingDirectory, entrypoint, user, env values, and build args.
 - stdout/stderr capture
 - outputPattern extraction
 - outputFile writing

@@ -204,9 +204,9 @@ public sealed class ConfigCommandLoader
                 Args = invocation.Args,
                 Options = BuildOptionsWithDefaults(invocation.Options, normalizedCommandConfig),
                 FileEnvironment = fileEnvironment,
-                ResolvedSecrets = secretPreflight.ResolvedValues,
-                SecretMetadata = secretPreflight.Metadata,
-                MappedSecretEnvironment = secretPreflight.MappedEnvironment,
+                ResolvedSecrets = new Dictionary<string, string>(secretPreflight.ResolvedValues, StringComparer.OrdinalIgnoreCase),
+                SecretMetadata = new Dictionary<string, SecretResolutionMetadata>(secretPreflight.Metadata, StringComparer.OrdinalIgnoreCase),
+                MappedSecretEnvironment = new Dictionary<string, string>(secretPreflight.MappedEnvironment, StringComparer.Ordinal),
                 CiVariablePrefix = ciVariablePrefix,
                 IsDryRun = TryGetOptionBoolean(invocation.Options, "dry-run") == true,
                 CliEchoMode = invocation.EchoMode,
@@ -226,7 +226,7 @@ public sealed class ConfigCommandLoader
                 ? EnsureConfiguredOutputDirectories(repositoryRoot, resolvedOutputs)
                 : [];
 
-            var stepExecutor = new StepExecutor(commandExecutor, _templateRenderer, _builtinRegistry);
+            using var stepExecutor = new StepExecutor(commandExecutor, _templateRenderer, _builtinRegistry, secretResolver);
             var stepResults = new List<StepResult>();
             var currentContext = context;
             var artifactEntries = new List<Core.Models.ArtifactManifestEntry>();
@@ -240,6 +240,7 @@ public sealed class ConfigCommandLoader
             try
             {
                 resolvedSteps = normalizedCommandConfig.Steps
+                    .Select(step => Rexo.Configuration.CommandUserResolver.ApplyDefaults(step, commandConfig))
                     .Select(step => step.Run is null && step.Container is null
                         ? step
                         : step with
@@ -1415,6 +1416,9 @@ public sealed class ConfigCommandLoader
             MaxParallel = commandConfig.MaxParallel,
             MaxDepth = commandConfig.MaxDepth,
             Container = commandConfig.Container,
+            User = commandConfig.User,
+            Domain = commandConfig.Domain,
+            PasswordSecret = commandConfig.PasswordSecret,
         };
 
     private static List<RepoStepConfig> BuildCommandSteps(RepoCommandConfig commandConfig)
@@ -2090,6 +2094,9 @@ public sealed class ConfigCommandLoader
             OutputPattern = stepConfig.OutputPattern,
             OutputFile = stepConfig.OutputFile,
             Echo = stepConfig.Echo,
+            User = stepConfig.User,
+            Domain = stepConfig.Domain,
+            PasswordSecret = stepConfig.PasswordSecret,
             StepOutputs = BuildStepOutputs(stepConfig.Outputs),
             Container = stepConfig.Container is null
                 ? null
@@ -2113,7 +2120,8 @@ public sealed class ConfigCommandLoader
                     container.Build.Target is null ? null : templateRenderer.Render(container.Build.Target, context),
                     RenderStringDictionary(container.Build.Args, context, templateRenderer)),
             container.Fallback is null ? "error" : templateRenderer.Render(container.Fallback, context),
-            container.InlineDockerfile is null ? null : templateRenderer.Render(container.InlineDockerfile, context));
+            container.InlineDockerfile is null ? null : templateRenderer.Render(container.InlineDockerfile, context),
+            container.User is null ? null : templateRenderer.Render(container.User, context));
 
     private static IReadOnlyDictionary<string, string>? RenderStringDictionary(
         IReadOnlyDictionary<string, string>? source,

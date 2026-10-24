@@ -1,0 +1,55 @@
+{
+  "$schema": "policy.schema.json",
+  "schemaVersion": "1.0",
+  "name": "github-tests-policy",
+  "description": "Publish stack-neutral test reports to GitHub Checks, Actions summaries and artifacts. Import after the test toolchain. See docs/embedded/github-tests.md.",
+  "vars": {
+    "githubTests": {
+      "enabled": true,
+      "publish": "auto",
+      "paths": "",
+      "exclude": "",
+      "format": "auto",
+      "outputDirectory": "{{outputs.tests.results}}/github-report",
+      "missingReports": "warn",
+      "publishErrors": "fail",
+      "checks": true,
+      "jobSummary": true,
+      "uploadArtifact": true,
+      "artifactUpload": "auto",
+      "artifactName": "test-results",
+      "retentionDays": 14,
+      "repository": "",
+      "hostname": "",
+      "commitSha": "",
+      "tokenEnvironment": "",
+      "checkName": "Rexo tests",
+      "scope": "",
+      "annotationLimit": 50,
+      "sourceRoot": "",
+      "includeOutput": false
+    }
+  },
+  "commands": {
+    "test": {
+      "merge": "append",
+      "options": {
+        "publish-reports": { "type": "bool", "default": false },
+        "report-preview": { "type": "bool", "default": false }
+      },
+      "steps": [
+        { "id": "github-tests", "uses": "builtin:github-tests", "alwaysRun": true }
+      ]
+    },
+    "reports tests": {
+      "description": "Process existing test reports and optionally publish to GitHub.",
+      "options": {
+        "publish-reports": { "type": "bool", "default": false },
+        "report-preview": { "type": "bool", "default": false }
+      },
+      "steps": [
+        { "id": "github-tests", "uses": "builtin:github-tests" }
+      ]
+    }
+  }
+}

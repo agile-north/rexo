@@ -1,0 +1,37 @@
+{
+  "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/policy.schema.json",
+  "schemaVersion": "1.0",
+  "name": "github-release-policy",
+  "description": "Create a GitHub release and exact-commit tag after a successful standard release --push. Configure vars.githubRelease; see docs/embedded/github-release.md.",
+  "vars": {
+    "githubRelease": {
+      "enabled": true,
+      "allowSourceOnly": true,
+      "artifactGate": "all",
+      "execution": "container",
+      "image": "docker.io/maniator/gh:v2.103.2@sha256:a76d7b905cc3cb07cd158eff872494bc29f8f64aee8d6e50456307b285dfab97",
+      "repository": "",
+      "hostname": "",
+      "tagTemplate": "",
+      "titleTemplate": "",
+      "draft": false,
+      "prerelease": "auto",
+      "generateNotes": true,
+      "notesFile": "",
+      "notesStartTag": ""
+    }
+  },
+  "commands": {
+    "release": {
+      "description": "Create the GitHub release after successful lifecycle work and publication.",
+      "merge": "append",
+      "options": {},
+      "steps": [
+        {
+          "id": "github-release",
+          "uses": "builtin:github-release"
+        }
+      ]
+    }
+  }
+}

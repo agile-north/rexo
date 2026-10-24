@@ -1,0 +1,61 @@
+{
+  "$schema": "policy.schema.json",
+  "schemaVersion": "1.0",
+  "name": "github-coverage-policy",
+  "description": "Generate coverage Markdown/HTML with containerized ReportGenerator and publish GitHub reports. Import after the test toolchain. See docs/embedded/github-coverage.md.",
+  "vars": {
+    "githubCoverage": {
+      "enabled": true,
+      "publish": "auto",
+      "paths": "",
+      "exclude": "",
+      "format": "auto",
+      "outputDirectory": "{{outputs.tests.coverage}}/github-report",
+      "missingReports": "warn",
+      "publishErrors": "fail",
+      "checks": true,
+      "jobSummary": true,
+      "uploadArtifact": true,
+      "artifactUpload": "auto",
+      "artifactName": "coverage",
+      "retentionDays": 14,
+      "repository": "",
+      "hostname": "",
+      "commitSha": "",
+      "tokenEnvironment": "",
+      "checkName": "Rexo coverage",
+      "scope": "",
+      "annotationLimit": 0,
+      "image": "mcr.microsoft.com/dotnet/sdk:10.0.402@sha256:747cbade5bfd918a175ac32f8f1d931edec2c7d0d5397a3de72eaef1ac1f66d2",
+      "sourceDirectories": "",
+      "reportTypes": "Html;MarkdownSummaryGithub",
+      "assemblyFilters": "",
+      "classFilters": "",
+      "fileFilters": "",
+      "minimumLineCoverage": "",
+      "minimumBranchCoverage": ""
+    }
+  },
+  "commands": {
+    "test": {
+      "merge": "append",
+      "options": {
+        "publish-reports": { "type": "bool", "default": false },
+        "report-preview": { "type": "bool", "default": false }
+      },
+      "steps": [
+        { "id": "github-coverage", "uses": "builtin:github-coverage", "alwaysRun": true }
+      ]
+    },
+    "reports coverage": {
+      "description": "Generate coverage reports and optionally publish to GitHub.",
+      "options": {
+        "publish-reports": { "type": "bool", "default": false },
+        "report-preview": { "type": "bool", "default": false }
+      },
+      "steps": [
+        { "id": "github-coverage", "uses": "builtin:github-coverage" }
+      ]
+    }
+  }
+}

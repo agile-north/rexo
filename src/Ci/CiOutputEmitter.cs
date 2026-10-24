@@ -75,6 +75,7 @@ public static class CiOutputEmitter
 
     private static IReadOnlyList<KeyValuePair<string, object?>> BuildSafeManifest(RunManifest manifest, bool includeStepOutputs)
     {
+        var publication = ArtifactPublicationSummary.From(manifest.Artifacts, manifest.PushDecisions);
         var items = new List<KeyValuePair<string, object?>>(32)
         {
             new("schemaVersion", manifest.SchemaVersion),
@@ -106,6 +107,9 @@ public static class CiOutputEmitter
             new("stepsSucceeded", manifest.Steps.Count(step => step.Success)),
             new("stepsFailed", manifest.Steps.Count(step => !step.Success)),
             new("artifactsCount", manifest.Artifacts.Count),
+            new("artifactsAnyPushed", publication.AnyPushed),
+            new("artifactsPushedCount", publication.PushedCount),
+            new("artifactsAllPushed", publication.AllPushed),
             new("pushDecisionsCount", manifest.PushDecisions.Count),
             new("warningsCount", manifest.Warnings.Count),
             new("errorsCount", manifest.Errors.Count),

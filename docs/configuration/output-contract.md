@@ -34,7 +34,8 @@ JSON into `outputs.security.audit`. Repositories can override it with `false` wh
 prepare their own directories. The .NET policy and Rexo's self-hosted configuration do not need
 precreation: test runners and SARIF builtins create their required directories.
 
-For a defaults-and-provider quick reference, see [CI Output Emission](ci-output-emission.md).
+For all safe/full variables, emission policies, provider destinations, and release gates, see
+[CI/CD Emission Reference](ci-output-emission.md).
 
 ### CI Key Formatting
 
@@ -101,7 +102,10 @@ Primary machine payload:
   "Version": { "SemVer": "1.2.3" },
   "StructuredErrors": [],
   "Artifacts": [],
-  "PushDecisions": []
+  "PushDecisions": [],
+  "ArtifactsAnyPushed": false,
+  "ArtifactsPushedCount": 0,
+  "ArtifactsAllPushed": false
 }
 ```
 
@@ -114,8 +118,12 @@ Primary machine payload:
 
 `Artifacts`
 
-- Populated by `builtin:push-artifacts` output (`__artifacts`).
-- Empty when push phase is skipped (for example `release` without `--push`) or when no artifacts are configured.
+- Populated by build and push builtin output (`__artifacts`).
+- May include build-only entries when the push phase is skipped, and repeated lifecycle entries.
+- Push output includes the complete selected publication set, including artifacts not processed
+  after an earlier failure. No configured artifacts means an empty list.
+- A selected artifact with no registered push provider fails with exit code 6 instead of being
+  silently omitted from the publication set.
 
 `PushDecisions`
 
@@ -123,10 +131,22 @@ Primary machine payload:
 - Entries include policy allow/deny reasons per artifact.
 - Empty when push phase is skipped.
 
+`ArtifactsAnyPushed`, `ArtifactsPushedCount`, `ArtifactsAllPushed`
+
+- Computed consistently for command JSON, run manifests, CI safe/full profiles, and templates.
+- Count distinct case-insensitive artifact type/name identities selected for publication.
+- `AllPushed` requires a nonempty publication set with every selected artifact published and
+  no denied, failed, or unprocessed push decisions.
+- Dry runs keep planned tags but set `Pushed=false`; simulations never open a release gate.
+- These outcomes do not replace `Success`: a later step can fail after successful publication.
+- Existing artifacts in a registry are not counted unless the provider reports publication
+  during this invocation. A provider no-op is not publication.
+
 Template linkage:
 
 - `{{push.hasData}}` is true when either `__artifacts` or `__pushDecisions` exists in completed steps.
-- `{{push.anyPushed}}`, `{{push.pushedCount}}`, and `{{push.artifactCount}}` are computed from `__artifacts` (`Pushed` flags).
+- `{{push.anyPushed}}`, `{{push.pushedCount}}`, and `{{push.allPushed}}` use the shared publication
+  summary from `__artifacts` and `__pushDecisions`; `{{push.artifactCount}}` counts raw entries.
 - `{{push.allowedCount}}`, `{{push.deniedCount}}`, `{{push.anyBlocked}}`, and `{{push.blockReasons}}` are computed from `__pushDecisions`.
 
 `Steps[*].Outputs`
@@ -211,6 +231,9 @@ Example shape:
   ],
   "Artifacts": [],
   "PushDecisions": [],
+  "ArtifactsAnyPushed": false,
+  "ArtifactsPushedCount": 0,
+  "ArtifactsAllPushed": false,
   "PolicyLockHash": "sha256...",
   "Warnings": [],
   "Errors": [],
@@ -245,7 +268,8 @@ outputs without a provider-reported immutable digest are not promoted as if they
 
 - Build/verify lifecycle runs.
 - Push steps are skipped unless `--push` is provided.
-- `Artifacts` and `PushDecisions` are typically empty.
+- `Artifacts` can contain build-only entries; `PushDecisions` is empty.
+- Publication summaries are false/0/false.
 
 `rx release --push --json-file artifacts/runs/release.json`
 

@@ -69,12 +69,17 @@ The push summary is derived from `__artifacts` and `__pushDecisions` emitted by 
 - `hasData` (`true`/`false`)
 - `anyPushed` (`true`/`false`)
 - `pushedCount`
+- `allPushed` (`true`/`false`; nonempty publication set, every selected artifact published)
 - `artifactCount`
 - `decisionCount`
 - `allowedCount`
 - `deniedCount`
 - `anyBlocked` (`true`/`false`)
 - `blockReasons` (distinct denied reasons joined with ` | `)
+
+Publication summaries count distinct artifact type/name identities, not repeated build/nested-step
+entries or tags. Dry runs do not count as publication. For equivalent CI variables and workflow
+gates, see [CI/CD Emission Reference](ci-output-emission.md).
 
 ### `git.*` fields
 

@@ -2,6 +2,10 @@
 
 `embedded:git-tag` provides reusable git tag creation for versioned repositories.
 
+For GitHub releases **and** exact-commit tag verification/creation, use
+[embedded:github-release](github-release.md) instead. It is imported the same way and does not
+require this policy as well.
+
 This policy ships a single command:
 
 - `post-push` — resolves the version, checks whether the tag already exists, and creates/pushes the tag only when needed.

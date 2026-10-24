@@ -1822,7 +1822,7 @@ public sealed class RepoConfigurationLoaderTests
         Assert.DoesNotContain("github-status", names);
         Assert.DoesNotContain("github-sarif", names);
         Assert.DoesNotContain("gitlab-status", names);
-        Assert.DoesNotContain("github-release", names);
+        Assert.Contains("github-release", names);
         Assert.DoesNotContain("dotnet-library", names);
         Assert.DoesNotContain("dotnet-api", names);
     }

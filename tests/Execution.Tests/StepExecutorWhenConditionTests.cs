@@ -547,13 +547,17 @@ public sealed class StepExecutorWhenConditionTests
                         {
                             new("artifact-a", true, "ok"),
                         },
+                        ["__artifacts"] = new List<ArtifactManifestEntry>
+                        {
+                            new("docker", "artifact-a", true, true, ["artifact-a:latest"]),
+                        },
                     }),
             },
         };
 
         var run = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-            ? "echo %REXO_SUCCESS%^|%REXO_VERSION_SEM_VER%^|%REXO_PUSH_DECISIONS_COUNT%"
-            : "echo \"$REXO_SUCCESS|$REXO_VERSION_SEM_VER|$REXO_PUSH_DECISIONS_COUNT\"";
+            ? "echo %REXO_SUCCESS%^|%REXO_VERSION_SEM_VER%^|%REXO_PUSH_DECISIONS_COUNT%^|%REXO_ARTIFACTS_ANY_PUSHED%^|%REXO_ARTIFACTS_PUSHED_COUNT%^|%REXO_ARTIFACTS_ALL_PUSHED%"
+            : "echo \"$REXO_SUCCESS|$REXO_VERSION_SEM_VER|$REXO_PUSH_DECISIONS_COUNT|$REXO_ARTIFACTS_ANY_PUSHED|$REXO_ARTIFACTS_PUSHED_COUNT|$REXO_ARTIFACTS_ALL_PUSHED\"";
 
         var step = new StepDefinition(
             Id: "env-vars",
@@ -566,7 +570,7 @@ public sealed class StepExecutorWhenConditionTests
 
         Assert.True(result.Success);
         var stdout = result.Outputs["stdout"]?.ToString() ?? string.Empty;
-        Assert.Contains("true|1.2.3|1", stdout, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("true|1.2.3|1|true|1|true", stdout, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

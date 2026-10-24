@@ -135,8 +135,9 @@ Push policy and eligibility rules enforced by `builtin:push-artifacts`.
 overrides from `artifacts[].settings.push.*`.
 
 When dry-run is enabled, `builtin:push-artifacts` does not call artifact providers. It
-simulates a successful push, records the planned references in the runtime manifest,
-and keeps the run side-effect free.
+simulates a successful push, records the planned references in the runtime manifest with
+`Pushed=false`, and keeps the run side-effect free. Dry runs do not count toward the
+[publication summary CI variables](ci-output-emission.md#counts-and-publication-outcomes).
 
 | Rule | Effect |
 | --- | --- |

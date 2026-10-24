@@ -739,7 +739,7 @@ public sealed class TemplateRenderer : ITemplateRenderer
             }
         }
 
-        var pushedCount = artifacts.Count(a => a.Pushed);
+        var publication = ArtifactPublicationSummary.From(artifacts, decisions);
         var deniedDecisions = decisions.Where(d => !d.Allowed).ToList();
         var blockReasons = deniedDecisions
             .Select(d => d.Reason)
@@ -750,8 +750,9 @@ public sealed class TemplateRenderer : ITemplateRenderer
         return new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
             ["hasData"] = (artifacts.Count > 0 || decisions.Count > 0).ToString().ToLowerInvariant(),
-            ["anyPushed"] = (pushedCount > 0).ToString().ToLowerInvariant(),
-            ["pushedCount"] = pushedCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["anyPushed"] = publication.AnyPushed.ToString().ToLowerInvariant(),
+            ["pushedCount"] = publication.PushedCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["allPushed"] = publication.AllPushed.ToString().ToLowerInvariant(),
             ["artifactCount"] = artifacts.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["decisionCount"] = decisions.Count.ToString(System.Globalization.CultureInfo.InvariantCulture),
             ["allowedCount"] = decisions.Count(d => d.Allowed).ToString(System.Globalization.CultureInfo.InvariantCulture),

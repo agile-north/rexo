@@ -650,7 +650,96 @@
         },
         "gitTag": {
           "$ref": "#/$defs/gitTagVars"
+        },
+        "githubTests": {
+          "$ref": "#/$defs/githubReportVars",
+          "description": "GitHub test reporting overrides. See docs/embedded/github-tests.md."
+        },
+        "githubCoverage": {
+          "$ref": "#/$defs/githubReportVars",
+          "description": "GitHub coverage reporting overrides. See docs/embedded/github-coverage.md."
+        },
+        "githubRelease": {
+          "$ref": "#/$defs/githubReleaseVars"
         }
+      }
+    },
+    "githubTemplate": {
+      "type": "string",
+      "pattern": "\\{\\{.+\\}\\}",
+      "description": "A Rexo template expression, validated after rendering."
+    },
+    "githubBoolean": {
+      "anyOf": [
+        { "type": "boolean" },
+        { "$ref": "#/$defs/githubTemplate" }
+      ]
+    },
+    "githubThreshold": {
+      "anyOf": [
+        { "type": "number", "minimum": 0, "maximum": 100 },
+        { "type": "string", "pattern": "^(?:|(?:100(?:\\.0+)?|[0-9]{1,2}(?:\\.[0-9]+)?))$" },
+        { "$ref": "#/$defs/githubTemplate" }
+      ],
+      "description": "Optional coverage percentage, 0-100; missing reports or metrics fail an enabled threshold."
+    },
+    "githubReportVars": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "GitHub reporting options shared by tests and coverage. Unknown keys are rejected. Policy-specific format/tool settings are validated at runtime.",
+      "properties": {
+        "enabled": { "$ref": "#/$defs/githubBoolean", "default": true },
+        "publish": { "anyOf": [{ "enum": ["auto", "always", "never"] }, { "$ref": "#/$defs/githubTemplate" }], "default": "auto" },
+        "paths": { "type": "string", "description": "Semicolon-separated input paths/globs; empty selects declared outputs." },
+        "exclude": { "type": "string", "description": "Semicolon-separated repository-relative exclusion globs." },
+        "format": { "anyOf": [{ "enum": ["auto", "trx", "junit", "nunit", "xunit", "cobertura", "opencover", "lcov", "jacoco", "clover"] }, { "$ref": "#/$defs/githubTemplate" }], "default": "auto" },
+        "outputDirectory": { "type": "string", "description": "Dedicated repository-contained generated report directory." },
+        "missingReports": { "anyOf": [{ "enum": ["warn", "fail"] }, { "$ref": "#/$defs/githubTemplate" }], "default": "warn" },
+        "publishErrors": { "anyOf": [{ "enum": ["warn", "fail"] }, { "$ref": "#/$defs/githubTemplate" }], "default": "fail" },
+        "checks": { "$ref": "#/$defs/githubBoolean", "default": true },
+        "jobSummary": { "$ref": "#/$defs/githubBoolean", "default": true },
+        "uploadArtifact": { "$ref": "#/$defs/githubBoolean", "default": true, "description": "Master upload switch; false overrides artifactUpload." },
+        "artifactUpload": { "anyOf": [{ "enum": ["auto", "required", "never"] }, { "$ref": "#/$defs/githubTemplate" }], "default": "auto", "description": "auto uploads when runtime credentials exist; required fails when unavailable; never disables." },
+        "artifactName": { "type": "string" },
+        "retentionDays": { "anyOf": [{ "type": "integer", "minimum": 1, "maximum": 400 }, { "$ref": "#/$defs/githubTemplate" }], "default": 14 },
+        "repository": { "type": "string", "description": "owner/repo; empty derives from origin." },
+        "hostname": { "type": "string", "description": "GitHub hostname; empty derives from origin." },
+        "commitSha": { "type": "string", "description": "Full target commit SHA; empty uses the checkout." },
+        "tokenEnvironment": { "type": "string", "description": "Environment variable name, never the token value." },
+        "checkName": { "type": "string" },
+        "scope": { "type": "string", "description": "Unique matrix/shard scope; empty uses GITHUB_JOB or default." },
+        "annotationLimit": { "anyOf": [{ "type": "integer", "minimum": 0, "maximum": 1000 }, { "$ref": "#/$defs/githubTemplate" }] },
+        "sourceRoot": { "type": "string", "description": "Tests: source path prefix stripped before annotation mapping." },
+        "includeOutput": { "$ref": "#/$defs/githubBoolean", "default": false, "description": "Tests: include captured output in failure details." },
+        "image": { "type": "string", "description": "Coverage: digest-pinned SDK image for verified ReportGenerator." },
+        "sourceDirectories": { "type": "string", "description": "Coverage: semicolon-separated read-only source mounts; none disables." },
+        "reportTypes": { "type": "string", "default": "Html;MarkdownSummaryGithub" },
+        "assemblyFilters": { "type": "string" },
+        "classFilters": { "type": "string" },
+        "fileFilters": { "type": "string" },
+        "minimumLineCoverage": { "$ref": "#/$defs/githubThreshold" },
+        "minimumBranchCoverage": { "$ref": "#/$defs/githubThreshold" }
+      }
+    },
+    "githubReleaseVars": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Embedded GitHub release policy overrides. See docs/embedded/github-release.md.",
+      "properties": {
+        "enabled": { "$ref": "#/$defs/githubBoolean", "default": true },
+        "allowSourceOnly": { "$ref": "#/$defs/githubBoolean", "default": true },
+        "artifactGate": { "anyOf": [{ "enum": ["all", "any", "none"] }, { "$ref": "#/$defs/githubTemplate" }], "default": "all" },
+        "execution": { "anyOf": [{ "enum": ["container", "native"] }, { "$ref": "#/$defs/githubTemplate" }], "default": "container" },
+        "image": { "type": "string" },
+        "repository": { "type": "string" },
+        "hostname": { "type": "string" },
+        "tagTemplate": { "type": "string" },
+        "titleTemplate": { "type": "string" },
+        "draft": { "$ref": "#/$defs/githubBoolean", "default": false },
+        "prerelease": { "anyOf": [{ "enum": ["auto", "true", "false"] }, { "type": "boolean" }, { "$ref": "#/$defs/githubTemplate" }], "default": "auto" },
+        "generateNotes": { "$ref": "#/$defs/githubBoolean", "default": true },
+        "notesFile": { "type": "string" },
+        "notesStartTag": { "type": "string" }
       }
     },
     "secretCacheConfig": {

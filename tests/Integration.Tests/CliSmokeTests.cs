@@ -73,12 +73,20 @@ public sealed class CliSmokeTests
         Assert.Single(workflow.RootElement.GetProperty("jobs").EnumerateObject());
         Assert.False(workflow.RootElement.GetProperty("on").GetProperty("workflow_dispatch").GetProperty("inputs").GetProperty("publish").GetProperty("default").GetBoolean());
         Assert.True(workflow.RootElement.GetProperty("on").TryGetProperty("pull_request", out _));
-        var selection = Assert.Single(steps, step => step.GetProperty("name").GetString() == "Select publication");
-        var gate = selection.GetProperty("env").GetProperty("REQUESTED").GetString();
+        var job = workflow.RootElement.GetProperty("jobs").GetProperty("release");
+        var gate = job.GetProperty("env").GetProperty("PUBLISH_REQUESTED").GetString();
         Assert.Contains("github.event_name == 'push'", gate, StringComparison.Ordinal);
         Assert.Contains("github.event_name == 'workflow_dispatch' && inputs.publish", gate, StringComparison.Ordinal);
         Assert.DoesNotContain("pull_request", gate, StringComparison.Ordinal);
-        Assert.Contains("main|alpha|alpha-*|beta|beta-*|edge|edge-*", selection.GetProperty("run").GetString(), StringComparison.Ordinal);
+        Assert.Equal("write", workflow.RootElement.GetProperty("permissions").GetProperty("checks").GetString());
+        Assert.Equal(8, steps.Length);
+        Assert.DoesNotContain("Select publication", names);
+        Assert.DoesNotContain("Generate coverage summary", names);
+        Assert.DoesNotContain("Publish schema branch", names);
+        Assert.DoesNotContain("Create GitHub Release", names);
+        Assert.DoesNotContain("softprops/", workflowText, StringComparison.Ordinal);
+        Assert.DoesNotContain("git push", workflowText, StringComparison.Ordinal);
+        Assert.DoesNotContain("reportgenerator", workflowText, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("actions/download-artifact", workflowText, StringComparison.Ordinal);
         Assert.DoesNotContain("ci publish", workflowText, StringComparison.Ordinal);
         Assert.DoesNotContain("ci handoff", workflowText, StringComparison.Ordinal);
@@ -86,41 +94,41 @@ public sealed class CliSmokeTests
         Assert.Contains("--json-file artifacts/selfhost/release.json release", acceptance.GetProperty("run").GetString(), StringComparison.Ordinal);
         Assert.False(File.Exists(Path.Join(directory.FullName, "scripts", "Test-SelfHost.ps1")));
         Assert.DoesNotContain(".ps1", workflowText, StringComparison.Ordinal);
-        Assert.DoesNotContain("--push", acceptance.GetProperty("run").GetString(), StringComparison.Ordinal);
-        Assert.Equal("${{ steps.publication.outputs.enabled }}", acceptance.GetProperty("env").GetProperty("REXO_PUBLISH").GetString());
+        Assert.Contains("release --push=\"$PUBLISH_ENABLED\"", acceptance.GetProperty("run").GetString(), StringComparison.Ordinal);
+        var enabled = acceptance.GetProperty("env").GetProperty("PUBLISH_ENABLED").GetString();
+        Assert.Contains("env.PUBLISH_REQUESTED == 'true'", enabled, StringComparison.Ordinal);
+        Assert.Contains("env.NUGET_ORG_USER != '' || env.GITHUB_PACKAGES == 'true'", enabled, StringComparison.Ordinal);
+        Assert.Equal("${{ github.token }}", acceptance.GetProperty("env").GetProperty("GH_TOKEN").GetString());
+        var login = Assert.Single(steps, step => step.GetProperty("name").GetString() == "NuGet login");
+        Assert.Equal("${{ env.PUBLISH_REQUESTED == 'true' && env.NUGET_ORG_USER != '' }}", login.GetProperty("if").GetString());
         var configPath = Path.Join(directory.FullName, ".rexo", "rexo.yaml");
         using var config = JsonDocument.Parse(YamlJsonConverter.ToJson(await File.ReadAllTextAsync(configPath), configPath));
         var release = config.RootElement.GetProperty("commands").GetProperty("release");
-        Assert.True(release.GetProperty("options").GetProperty("push").GetProperty("default").GetBoolean());
-        var push = Assert.Single(release.GetProperty("steps").EnumerateArray(), step => step.GetProperty("id").GetString() == "push");
-        var when = push.GetProperty("when").GetString()!;
-        var renderer = new TemplateRenderer();
-        (string Publish, bool IsPr, string Push, string Expected)[] cases =
-        [
-            ("true", false, "true", "true"),
-            ("true", true, "true", "false"),
-            ("false", false, "true", "false"),
-            ("", false, "true", "false"),
-            ("true", false, "false", "false"),
-        ];
-        var originalPublish = Environment.GetEnvironmentVariable("REXO_PUBLISH");
-        try
-        {
-            foreach (var scenario in cases)
-            {
-                Environment.SetEnvironmentVariable("REXO_PUBLISH", scenario.Publish);
-                var context = Rexo.Core.Models.ExecutionContext.Empty(directory.FullName) with
-                {
-                    IsPullRequest = scenario.IsPr,
-                    Options = new Dictionary<string, string?> { ["push"] = scenario.Push },
-                };
-                Assert.Equal(scenario.Expected, renderer.Render(when, context));
-            }
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable("REXO_PUBLISH", originalPublish);
-        }
+        Assert.Equal("append", release.GetProperty("merge").GetString());
+        Assert.False(release.TryGetProperty("options", out _));
+        Assert.Single(release.GetProperty("steps").EnumerateArray());
+        var resolved = await RepoConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
+        var releaseSteps = resolved.Commands!["release"].Steps;
+        Assert.Equal(
+            ["pre-release", "verify", "build", "pre-push", "push-artifacts", "post-push", "post-release", "github-release", "publish-schema"],
+            releaseSteps.Select(step => step.Id ?? string.Empty).ToArray());
+        Assert.False(resolved.Commands["release"].Options!["push"].Default!.Value.GetBoolean());
+        Assert.Equal(
+            ["dotnet-test-no-coverage", "dotnet-test", "github-tests", "github-coverage"],
+            resolved.Commands["test"].Steps.Select(step => step.Id ?? string.Empty).ToArray());
+        Assert.All(resolved.Commands["test"].Steps.Where(step => step.Uses is "builtin:github-tests" or "builtin:github-coverage"),
+            step => Assert.True(step.AlwaysRun));
+        var vars = config.RootElement.GetProperty("vars");
+        Assert.False(vars.GetProperty("githubTests").GetProperty("uploadArtifact").GetBoolean());
+        Assert.False(vars.GetProperty("githubCoverage").GetProperty("uploadArtifact").GetBoolean());
+        Assert.Equal("{{outputs.tests.coverage}}/github-coverage",
+            vars.GetProperty("githubCoverage").GetProperty("outputDirectory").GetString());
+        Assert.False(resolved.Commands.ContainsKey("ci coverage"));
+        Assert.False(File.Exists(Path.Join(directory.FullName, ".config", "dotnet-tools.json")));
+        using var schema = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Join(directory.FullName, "rexo.schema.json")));
+        Assert.Equal(
+            $"schema/v{schema.RootElement.GetProperty("properties").GetProperty("schemaVersion").GetProperty("const").GetString()}",
+            vars.GetProperty("schemaBranch").GetString());
         var pushPolicy = config.RootElement.GetProperty("runtime").GetProperty("push");
         Assert.True(pushPolicy.GetProperty("noPushInPullRequest").GetBoolean());
         Assert.Equal(
@@ -129,9 +137,8 @@ public sealed class CliSmokeTests
         var evidence = Assert.Single(steps, step => step.GetProperty("name").GetString() == "Upload lifecycle evidence");
         Assert.Contains("artifacts/selfhost/**", evidence.GetProperty("with").GetProperty("path").GetString(), StringComparison.Ordinal);
         Assert.Contains("artifacts/packages/*.nupkg", evidence.GetProperty("with").GetProperty("path").GetString(), StringComparison.Ordinal);
-        var coverage = Assert.Single(steps, step => step.GetProperty("name").GetString() == "Generate coverage summary");
-        Assert.Contains("--non-interactive ci coverage", coverage.GetProperty("run").GetString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("reportgenerator", coverage.GetProperty("run").GetString(), StringComparison.Ordinal);
+        Assert.Contains("artifacts/test-results/**", evidence.GetProperty("with").GetProperty("path").GetString(), StringComparison.Ordinal);
+        Assert.Equal("always()", evidence.GetProperty("if").GetString());
         Assert.All(steps, step =>
         {
             if (step.TryGetProperty("run", out var run))
@@ -1228,7 +1235,7 @@ public sealed class CliSmokeTests
             Assert.DoesNotContain("github-status", output, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("github-sarif", output, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("gitlab-status", output, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("github-release", output, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("github-release", output, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {

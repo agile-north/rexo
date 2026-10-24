@@ -21,6 +21,10 @@ public sealed record CommandResult(
     /// <summary>Push policy decisions produced by <c>builtin:push-artifacts</c>.</summary>
     public IReadOnlyList<PushDecision> PushDecisions { get; init; } = Array.Empty<PushDecision>();
 
+    public bool ArtifactsAnyPushed => ArtifactPublicationSummary.From(Artifacts, PushDecisions).AnyPushed;
+    public int ArtifactsPushedCount => ArtifactPublicationSummary.From(Artifacts, PushDecisions).PushedCount;
+    public bool ArtifactsAllPushed => ArtifactPublicationSummary.From(Artifacts, PushDecisions).AllPushed;
+
     public static CommandResult Ok(string command, string? message = null) =>
         new(command, true, 0, message, new Dictionary<string, object?>());
 

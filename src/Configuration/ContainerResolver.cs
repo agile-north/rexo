@@ -110,6 +110,7 @@ public static class ContainerResolver
             Use = @override.Use ?? @base.Use,
             Extends = @override.Extends ?? @base.Extends,
             Fallback = @override.Fallback ?? @base.Fallback,
+            User = @override.User ?? @base.User,
         };
     }
 

@@ -373,6 +373,7 @@ public sealed class CommandLayeringTests
                                     "image": "rexo/test-image:local",
                                     "workdir": "/workspace",
                                     "entrypoint": "custom-entry",
+                                    "user": "1001:1002",
                                     "dockerfile": "Dockerfile",
                                     "context": ".",
                                     "buildTarget": "publish",
@@ -389,6 +390,7 @@ public sealed class CommandLayeringTests
                                                 "image": "{{vars.container.image}}",
                                                 "workingDirectory": "{{vars.container.workdir}}",
                                                 "entrypoint": "{{vars.container.entrypoint}}",
+                                                "user": "{{vars.container.user}}",
                                                 "dockerfile": "{{vars.container.dockerfile}}",
                                                 "context": "{{vars.container.context}}",
                                                 "env": {
@@ -430,6 +432,7 @@ public sealed class CommandLayeringTests
                         Assert.Contains("--build-arg APP_VERSION=1.2.3", log, StringComparison.Ordinal);
                         Assert.Contains("run ", log, StringComparison.Ordinal);
                         Assert.Contains("--entrypoint custom-entry", log, StringComparison.Ordinal);
+                        Assert.Contains("--user 1001:1002", log, StringComparison.Ordinal);
                         Assert.Contains("-w /workspace", log, StringComparison.Ordinal);
                         Assert.Contains("-e APP_ENV=prod", log, StringComparison.Ordinal);
                         Assert.Contains("hello-from-template", log, StringComparison.Ordinal);

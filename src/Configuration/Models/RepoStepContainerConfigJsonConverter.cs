@@ -46,6 +46,7 @@ internal sealed class RepoStepContainerConfigJsonConverter : JsonConverter<RepoS
             Extends = dto.Extends,
             Fallback = dto.Fallback,
             InlineDockerfile = inlineDockerfile,
+            User = dto.User,
         };
     }
 
@@ -54,6 +55,7 @@ internal sealed class RepoStepContainerConfigJsonConverter : JsonConverter<RepoS
         var dto = new ContainerDto
         {
             Use = value.Use,
+            User = value.User,
             Extends = value.Extends,
             Image = value.Image,
             Env = value.Env,
@@ -123,6 +125,10 @@ internal sealed class RepoStepContainerConfigJsonConverter : JsonConverter<RepoS
 
     private sealed class ContainerDto
     {
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("user")]
+        public string? User { get; set; }
+
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         [JsonPropertyName("use")]
         public string? Use { get; set; }

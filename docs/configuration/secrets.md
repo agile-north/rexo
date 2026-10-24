@@ -6,6 +6,47 @@ Use `secrets.items` to define named secrets, then consume them through:
 
 - template values: `{{secrets.<name>}}`
 - mapped runtime environment variables via `mapToEnv`
+- Windows host logon credentials via command/run-step `passwordSecret`, a named secret reference
+
+## Windows Host Logon Passwords
+
+[`user`, optional `domain`, and `passwordSecret`](commands.md#host-execution-user-user)
+allow host shell commands to run as a Windows account. `passwordSecret` names a `secrets.items`
+entry; it is not a password or a password template.
+
+```yaml
+secrets:
+  items:
+    buildLogin:
+      provider: env
+      env: BUILD_ACCOUNT_PASSWORD
+      required: false
+      exposeInTemplates: false
+
+commands:
+  build:
+    user: builder
+    domain: "."
+    passwordSecret: buildLogin
+    steps:
+      - run: dotnet build
+```
+
+Use any existing provider/provider chain for the named secret. Rexo can retrieve it with
+`exposeInTemplates: false` and `required: false` when host execution actually needs it;
+a missing/empty password still fails that execution. Global required secrets continue to
+participate in normal preflight.
+
+Keep login secrets out of template exposure and environment mappings. Rexo supplies the
+resolved password directly to Windows process creation, masks it in captured output/errors,
+and does not put it in command arguments or config/run-manifest output. Existing inherited
+environment variables are not sanitized: an env-backed password source remains in that
+environment. Choose a non-env provider if the child must not inherit the password source.
+Secrets are handled in process memory; this is not a guarantee of encrypted memory storage.
+
+Container-only execution does not consume optional host logon credentials; explicit host
+fallback does. A step changing accounts must provide credentials for the new account rather
+than inherit the command's credentials. Unix host switching does not use Windows passwords.
 
 ## Structure
 

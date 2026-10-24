@@ -16,6 +16,9 @@ public sealed record StepDefinition(
     public string? OutputFile { get; init; }
     public string? Echo { get; init; }
     public StepContainerDefinition? Container { get; init; }
+    public string? User { get; init; }
+    public string? Domain { get; init; }
+    public string? PasswordSecret { get; init; }
 
     /// <summary>
     /// Declared output glob patterns produced by this step.
@@ -35,7 +38,8 @@ public sealed record StepContainerDefinition(
     string? Context = null,
     StepContainerBuildDefinition? Build = null,
     string Fallback = "error",
-    string? InlineDockerfile = null);
+    string? InlineDockerfile = null,
+    string? User = null);
 
 public sealed record StepContainerBuildDefinition(
     string? Target = null,

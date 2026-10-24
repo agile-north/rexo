@@ -957,6 +957,7 @@ public sealed class StepExecutor : IStepExecutor, IDisposable
                         Tags = artifact.Tags.Count > 0 ? artifact.Tags : existing.Tags,
                         ContentSha256 = artifact.ContentSha256 ?? existing.ContentSha256,
                         Location = artifact.Location ?? existing.Location,
+                        SourceProject = artifact.SourceProject ?? existing.SourceProject,
                     };
                 }
             }
@@ -1070,6 +1071,7 @@ public sealed class StepExecutor : IStepExecutor, IDisposable
             context.RepositoryRoot)
         {
             CallStack = context.CommandCallStack,
+            ArtifactDiscoveryCache = context.ArtifactDiscoveryCache,
             MaxCommandDepth = context.MaxCommandDepth,
             EchoMode = context.CliEchoMode ?? stepDefinition.Echo,
         };

@@ -1,5 +1,8 @@
 namespace Rexo.Core.Models;
 
+using System.Collections.Concurrent;
+using System.Text.Json.Serialization;
+
 public sealed record CommandInvocation(
     IReadOnlyDictionary<string, string> Args,
     IReadOnlyDictionary<string, string?> Options,
@@ -16,4 +19,8 @@ public sealed record CommandInvocation(
 
     /// <summary>Maximum delegated command call depth allowed for the active invocation chain.</summary>
     public int? MaxCommandDepth { get; init; }
+
+    /// <summary>Discovery snapshots shared by the active command delegation chain.</summary>
+    [JsonIgnore]
+    public ConcurrentDictionary<string, Lazy<Task<IReadOnlyList<ArtifactProject>>>> ArtifactDiscoveryCache { get; init; } = new(StringComparer.Ordinal);
 }

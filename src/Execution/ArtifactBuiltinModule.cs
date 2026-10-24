@@ -117,7 +117,7 @@ internal sealed class ArtifactBuiltinModule : IConfigBuiltinModule
                 cancellationToken: ct));
 
         registry.Register("builtin:plan-artifacts", (step, ctx, ct) =>
-            Task.FromResult(ConfigCommandLoader.PlanArtifacts(
+            ConfigCommandLoader.PlanArtifactsAsync(
                 step.Id ?? "plan-artifacts",
                 context.Config,
                 ctx,
@@ -125,7 +125,8 @@ internal sealed class ArtifactBuiltinModule : IConfigBuiltinModule
                 pushRequested: ConfigCommandLoader.TryGetOptionBoolean(ctx.Options, "push") == true,
                 includePredicate: static _ => true,
                 successMessage: "Planned all artifacts.",
-                emptyMessage: "No artifacts configured.")));
+                emptyMessage: "No artifacts configured.",
+                cancellationToken: ct));
 
         registry.Register("builtin:ship-artifacts", async (step, ctx, ct) =>
         {
@@ -200,7 +201,7 @@ internal sealed class ArtifactBuiltinModule : IConfigBuiltinModule
         });
 
         registry.Register("builtin:plan", (step, ctx, ct) =>
-            Task.FromResult(ConfigCommandLoader.PlanArtifacts(
+            ConfigCommandLoader.PlanArtifactsAsync(
                 step.Id ?? "plan",
                 context.Config,
                 ctx,
@@ -208,7 +209,8 @@ internal sealed class ArtifactBuiltinModule : IConfigBuiltinModule
                 pushRequested: ConfigCommandLoader.TryGetOptionBoolean(ctx.Options, "push") == true,
                 includePredicate: static _ => true,
                 successMessage: "Planned all artifacts.",
-                emptyMessage: "No artifacts configured.")));
+                emptyMessage: "No artifacts configured.",
+                cancellationToken: ct));
 
         registry.Register("builtin:ship", async (step, ctx, ct) =>
             await (registry.TryResolve("builtin:ship-artifacts", out var ship) && ship is not null

@@ -376,7 +376,7 @@ public static class BuiltinCommandRegistration
         {
             foreach (var artifact in config.Artifacts)
             {
-                AddArtifactSourcePathFindings(artifact, workingDirectory, findings);
+                AddArtifactSourcePathFindings(artifact, workingDirectory, findings, cancellationToken);
             }
 
             foreach (var artifactType in config.Artifacts.Select(artifact => artifact.Type).Distinct(StringComparer.OrdinalIgnoreCase))
@@ -654,8 +654,24 @@ public static class BuiltinCommandRegistration
     private static void AddArtifactSourcePathFindings(
         RepoArtifactConfig artifact,
         string workingDirectory,
-        List<CheckFinding> findings)
+        List<CheckFinding> findings,
+        CancellationToken cancellationToken)
     {
+        if (artifact.Discover is { } discovery)
+        {
+            try
+            {
+                var matches = NuGetProjectDiscovery.MatchProjects(workingDirectory, discovery, cancellationToken);
+                findings.Add(matches.Count > 0
+                    ? new CheckFinding("artifact.source.available", "ok",
+                        $"NuGet discovery matched {matches.Count} project(s). Run plan to evaluate PackageId and IsPackable.")
+                    : new CheckFinding("artifact.source.missing", "error", "NuGet discovery matched no projects."));
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+            {
+                findings.Add(new CheckFinding("artifact.source.invalid", "error", ex.Message));
+            }
+        }
         if (artifact.Settings is null)
         {
             return;

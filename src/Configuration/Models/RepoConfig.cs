@@ -222,7 +222,15 @@ public sealed record RepoArtifactConfig(
     Dictionary<string, JsonElement>? Settings = null)
 {
     public string? Group { get; init; }
+    public RepoArtifactDiscoveryConfig? Discover { get; init; }
+
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? SourceProject { get; init; }
 }
+
+public sealed record RepoArtifactDiscoveryConfig(
+    IReadOnlyList<string> Include,
+    IReadOnlyList<string>? Exclude = null);
 
 public sealed record RepoEnvironmentConfig(string Path);
 

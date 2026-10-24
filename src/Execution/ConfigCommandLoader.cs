@@ -217,6 +217,7 @@ public sealed class ConfigCommandLoader
                 ResolvedSettings = BuildSettingsContext(config),
                 ResolvedVars = BuildVarsContext(config),
                 MaxCommandDepth = effectiveMaxDepth,
+                ArtifactDiscoveryCache = invocation.ArtifactDiscoveryCache,
             };
 
             var resolvedOutputs = BuildOutputsContext(config, context);
@@ -399,9 +400,9 @@ public sealed class ConfigCommandLoader
         List<RepoArtifactConfig> artifacts;
         try
         {
-            artifacts = SelectArtifacts(config, ctx, includePredicate).ToList();
+            artifacts = (await NuGetProjectDiscovery.ResolveAsync(config, ctx, includePredicate, cancellationToken)).ToList();
         }
-        catch (InvalidOperationException ex)
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
         {
             return ArtifactSelectionFailure(stepId, ex.Message);
         }
@@ -444,6 +445,7 @@ public sealed class ConfigCommandLoader
             {
                 Location = artifactLocation,
                 ContentSha256 = contentSha256,
+                SourceProject = artifactCfg.SourceProject,
             });
         }
 
@@ -491,9 +493,9 @@ public sealed class ConfigCommandLoader
         List<RepoArtifactConfig> artifacts;
         try
         {
-            artifacts = SelectArtifacts(config, ctx, includePredicate).ToList();
+            artifacts = (await NuGetProjectDiscovery.ResolveAsync(config, ctx, includePredicate, cancellationToken)).ToList();
         }
-        catch (InvalidOperationException ex)
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
         {
             return ArtifactSelectionFailure(stepId, ex.Message);
         }
@@ -534,9 +536,9 @@ public sealed class ConfigCommandLoader
         List<RepoArtifactConfig> artifacts;
         try
         {
-            artifacts = SelectArtifacts(config, ctx, includePredicate).ToList();
+            artifacts = (await NuGetProjectDiscovery.ResolveAsync(config, ctx, includePredicate, cancellationToken)).ToList();
         }
-        catch (InvalidOperationException ex)
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
         {
             return ArtifactSelectionFailure(stepId, ex.Message);
         }
@@ -549,7 +551,7 @@ public sealed class ConfigCommandLoader
 
         var manifestEntries = artifacts.Select(artifact => new Core.Models.ArtifactManifestEntry(
             artifact.Type, ResolveArtifactName(artifact, config), Built: true, Pushed: false,
-            Tags: Array.Empty<string>())).ToList();
+            Tags: Array.Empty<string>()) { SourceProject = artifact.SourceProject }).ToList();
         var pushDecisions = artifacts.Select(artifact => new Core.Models.PushDecision(
             ResolveArtifactName(artifact, config), false, "Push not attempted.")).ToList();
         var globalPolicy = ParsePushPolicyRules(config);
@@ -648,7 +650,7 @@ public sealed class ConfigCommandLoader
                 artifactName,
                 Built: true,
                 Pushed: pushPerformed,
-                Tags: pushResult.PublishedReferences);
+                Tags: pushResult.PublishedReferences) { SourceProject = artifactCfg.SourceProject };
             pushDecisions[index] = new Core.Models.PushDecision(
                 artifactName,
                 pushResult.Success,
@@ -856,6 +858,32 @@ public sealed class ConfigCommandLoader
             });
     }
 
+    internal static async Task<StepResult> PlanArtifactsAsync(
+        string stepId, RepoConfig config, ExecutionContext ctx,
+        Artifacts.ArtifactProviderRegistry artifactProviders, bool pushRequested,
+        Func<RepoArtifactConfig, bool> includePredicate, string successMessage,
+        string emptyMessage, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var skipped = new List<string>();
+            var artifacts = await NuGetProjectDiscovery.ResolveAsync(config, ctx, includePredicate, cancellationToken, skipped);
+            var result = PlanArtifacts(stepId, config with { Artifacts = artifacts.ToList() }, ctx,
+                artifactProviders, pushRequested, static _ => true, successMessage, emptyMessage);
+            return result with
+            {
+                Outputs = new Dictionary<string, object?>(result.Outputs)
+                {
+                    ["skippedProjects"] = skipped.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray(),
+                },
+            };
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            return ArtifactSelectionFailure(stepId, ex.Message);
+        }
+    }
+
     internal static IReadOnlyList<RepoArtifactConfig> SelectArtifacts(
         RepoConfig config,
         ExecutionContext context,
@@ -981,6 +1009,14 @@ public sealed class ConfigCommandLoader
         bool pushRequested)
     {
         var artifactName = ResolveArtifactName(artifact, config);
+        if (artifact.SourceProject is not null)
+        {
+            artifact = artifact with
+            {
+                Settings = new Dictionary<string, JsonElement>(
+                    ToArtifactConfig(artifact, config, ResolveOutputRoot(config, ctx)).Settings, StringComparer.Ordinal),
+            };
+        }
         var artifactConfig = new ArtifactConfig(artifact.Type, artifactName, artifact.Settings ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal));
         var provider = artifactProviders.Resolve(artifact.Type);
         var tags = provider?.GetPlannedTags(artifactConfig, ctx) ?? Array.Empty<string>();
@@ -1050,6 +1086,18 @@ public sealed class ConfigCommandLoader
 
     private static IReadOnlyList<string> GetExpectedOutputs(RepoArtifactConfig artifact, Core.Models.ExecutionContext ctx, string artifactName)
     {
+        if (artifact.SourceProject is not null)
+        {
+            var output = TryGetArtifactSettingString(artifact.Settings, "output") ?? Path.Join("artifacts", "packages");
+            var version = ctx.Version?.NuGetVersion ?? ctx.Version?.SemVer ?? "<version>";
+            var paths = new List<string> { Path.Join(output, $"{artifactName}.{version}.nupkg") };
+            if (bool.TryParse(TryGetArtifactSettingString(artifact.Settings, "symbols.enabled"), out var symbols) && symbols)
+            {
+                paths.Add(TryGetArtifactSettingString(artifact.Settings, "symbols.pattern") ??
+                    Path.Join(output, $"{artifactName}.{version}.snupkg"));
+            }
+            return paths;
+        }
         return artifact.Type.ToLowerInvariant() switch
         {
             "nuget" => [Path.Join(TryGetArtifactSettingString(artifact.Settings, "output") ?? Path.Join("artifacts", "packages"), $"{artifactName}.*.nupkg")],
@@ -1313,7 +1361,7 @@ public sealed class ConfigCommandLoader
         return new ArtifactConfig(
             artifactCfg.Type,
             ResolveArtifactName(artifactCfg, config),
-            settings);
+            settings) { SourceProject = artifactCfg.SourceProject };
     }
 
     internal static string ResolveArtifactName(RepoArtifactConfig artifactCfg, RepoConfig config) =>

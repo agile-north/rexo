@@ -22,20 +22,23 @@ public static class VerifiedArtifactHandoff
         CancellationToken cancellationToken)
     {
         var run = await ReadAsync<RunManifest>(ResolvePath(context.RepositoryRoot, runManifestPath), cancellationToken);
-        ValidateRun(run, config, context);
+        var expected = await NuGetProjectDiscovery.ResolveAsync(config, context, static _ => true, cancellationToken);
+        ValidateRun(run, config, context, expected);
         await ValidateLockAsync(run, context.RepositoryRoot, cancellationToken);
         var artifacts = new List<PreparedArtifact>();
-        foreach (var artifact in ConfigCommandLoader.SelectArtifacts(config, context, static _ => true))
+        foreach (var artifact in expected)
         {
             var artifactConfig = ConfigCommandLoader.ToArtifactConfig(artifact, config, ConfigCommandLoader.ResolveOutputRoot(config, context));
             var built = run.Artifacts.Where(entry => entry.Name == artifactConfig.Name && entry.Type == artifact.Type).ToArray();
-            if (built.Length != 1 || !built[0].Built || built[0].Pushed)
+            if (built.Length != 1 || !built[0].Built || built[0].Pushed ||
+                built[0].SourceProject != artifact.SourceProject)
             {
                 throw new InvalidOperationException($"Artifact '{artifact.Name}' was not built exactly once without publication.");
             }
 
             var provider = ResolveProvider(providers, artifact.Type);
-            var prepared = await provider.PrepareAsync(artifactConfig, context, cancellationToken);
+            var prepared = (await provider.PrepareAsync(artifactConfig, context, cancellationToken))
+                with { SourceProject = artifact.SourceProject };
             if (prepared.Type != artifactConfig.Type || prepared.Name != artifactConfig.Name)
             {
                 throw new InvalidOperationException("Provider returned prepared outputs for a different artifact.");
@@ -76,9 +79,9 @@ public static class VerifiedArtifactHandoff
             throw new InvalidOperationException("Handoff is missing its release run or artifact inventory.");
         }
 
-        ValidateRun(handoff.Run, config, context);
+        var expected = await NuGetProjectDiscovery.ResolveAsync(config, context, static _ => true, cancellationToken);
+        ValidateRun(handoff.Run, config, context, expected);
         await ValidateLockAsync(handoff.Run, context.RepositoryRoot, cancellationToken);
-        var expected = ConfigCommandLoader.SelectArtifacts(config, context, static _ => true);
         var selectedGroup = ConfigCommandLoader.ResolveArtifactGroup(context);
         if (handoff.AllArtifactGroups != selectedGroup.AllGroups ||
             !string.Equals(handoff.ArtifactGroup, selectedGroup.Group, StringComparison.OrdinalIgnoreCase))
@@ -96,11 +99,12 @@ public static class VerifiedArtifactHandoff
         {
             var artifactConfig = ConfigCommandLoader.ToArtifactConfig(artifact, config, ConfigCommandLoader.ResolveOutputRoot(config, context));
             var prepared = handoff.Artifacts.SingleOrDefault(entry => entry.Type == artifact.Type && entry.Name == artifactConfig.Name);
-            if (prepared is null)
+            if (prepared is null || prepared.SourceProject != artifact.SourceProject)
             {
                 throw new InvalidOperationException($"Handoff has no prepared output for '{artifactConfig.Name}'.");
             }
-            if (handoff.Run.Artifacts.Count(entry => entry.Type == artifact.Type && entry.Name == artifactConfig.Name) != 1)
+            if (handoff.Run.Artifacts.Count(entry => entry.Type == artifact.Type && entry.Name == artifactConfig.Name &&
+                entry.SourceProject == artifact.SourceProject) != 1)
             {
                 throw new InvalidOperationException($"Release evidence has no unique build result for '{artifactConfig.Name}'.");
             }
@@ -110,9 +114,9 @@ public static class VerifiedArtifactHandoff
         return handoff;
     }
 
-    private static void ValidateRun(RunManifest run, RepoConfig config, ExecutionContext context)
+    private static void ValidateRun(RunManifest run, RepoConfig config, ExecutionContext context,
+        IReadOnlyList<RepoArtifactConfig> expectedArtifacts)
     {
-        var expectedArtifacts = ConfigCommandLoader.SelectArtifacts(config, context, static _ => true);
         if (run.SchemaVersion != "1.0" || !run.Success || run.ExitCode != 0 ||
             run.CommandExecuted != "release" || run.Version is null ||
             run.Steps is null || run.Steps.Count == 0 || run.Steps.Any(step => !step.Success) ||

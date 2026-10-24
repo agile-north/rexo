@@ -1,5 +1,7 @@
 namespace Rexo.Core.Models;
 
+using System.Collections.Concurrent;
+using System.Text.Json.Serialization;
 using Rexo.Core.Environment;
 
 public sealed record ExecutionContext(
@@ -33,6 +35,10 @@ public sealed record ExecutionContext(
     public string CiVariablePrefix { get; init; } = "REXO_";
     public VersionResult? Version { get; init; }
     public IReadOnlyList<PreparedArtifact> PreparedArtifacts { get; init; } = [];
+
+    /// <summary>Discovery snapshots shared with delegated commands, keyed by evaluation inputs.</summary>
+    [JsonIgnore]
+    public ConcurrentDictionary<string, Lazy<Task<IReadOnlyList<ArtifactProject>>>> ArtifactDiscoveryCache { get; init; } = new(StringComparer.Ordinal);
     public IReadOnlyDictionary<string, StepResult> CompletedSteps { get; init; } = new Dictionary<string, StepResult>();
 
     /// <summary>Resolved output paths available as <c>{{outputs.*}}</c> in templates.</summary>

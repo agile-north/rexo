@@ -118,6 +118,10 @@ Primary machine payload:
 
 `Artifacts`
 
+- NuGet discovery produces per-package entries, not one entry for the glob.
+  `SourceProject` identifies the repository-relative discovered project; build
+  entries carry the exact package `Location` and `ContentSha256`. Literal
+  artifacts do not have a source-project association.
 - Populated by build and push builtin output (`__artifacts`).
 - May include build-only entries when the push phase is skipped, and repeated lifecycle entries.
 - Push output includes the complete selected publication set, including artifacts not processed

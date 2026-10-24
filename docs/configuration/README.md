@@ -228,6 +228,12 @@ When `rx init --schema-source local --with-policy` is used, both schema files ar
 
 ## Artifact lifecycle groups
 
+NuGet declarations may use top-level `discover.include` / `discover.exclude` to
+expand project globs into individual package artifacts. Discovery inherits the
+declaration's group and settings, and runs only after group selection. See
+[NuGet project discovery](../artifacts/nuget.md#discover-projects-with-globs) for
+syntax, SDK evaluation requirements and failure behavior.
+
 Assign an optional top-level `group` to put an artifact in an exclusive lifecycle lane.
 Artifacts without a group remain in the implicit `default` lane:
 

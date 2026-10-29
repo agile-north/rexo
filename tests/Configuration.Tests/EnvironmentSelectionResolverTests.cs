@@ -5,6 +5,38 @@ using Rexo.Configuration.Models;
 
 public sealed class EnvironmentSelectionResolverTests
 {
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" \t")]
+    public void ResolveIgnoresEmptyEnvironmentVariable(string? value)
+    {
+        var automatic = EnvironmentSelectionResolver.Resolve(
+            CreateConfig(), null, value, "feature/login", "local-git", false);
+        var unresolved = EnvironmentSelectionResolver.Resolve(
+            CreateConfig(), null, value, null, "unresolved", true);
+
+        Assert.True(automatic.IsResolved);
+        Assert.Equal("development", automatic.EnvironmentName);
+        Assert.Equal("branch", automatic.SelectionSource);
+        Assert.False(automatic.IsExplicit);
+        Assert.Null(automatic.Error);
+        Assert.False(unresolved.IsResolved);
+        Assert.False(unresolved.IsExplicit);
+        Assert.Null(unresolved.Error);
+    }
+
+    [Fact]
+    public void ResolveRejectsEmptyExplicitEnvironment()
+    {
+        var result = EnvironmentSelectionResolver.Resolve(
+            CreateConfig(), string.Empty, null, "feature/login", "local-git", false);
+
+        Assert.False(result.IsResolved);
+        Assert.NotNull(result.Error);
+        Assert.Equal("cli", result.SelectionSource);
+    }
+
     [Fact]
     public void ResolveSelectsOnlyEnvironmentMatchingSourceBranch()
     {

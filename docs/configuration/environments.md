@@ -53,6 +53,10 @@ their normal preflight behavior.
 3. Exactly one environment whose ordered `selection.branches` matches the source branch
 4. No environment when there is no safe, unique match
 
+An unset, empty, or whitespace-only `REXO_ENVIRONMENT` is ignored, including empty
+values exported to child processes when no environment is selected. An explicitly
+empty `--environment` remains an error.
+
 An explicit environment overrides an automatic branch match. If multiple environments
 match, Rexo fails with the matching names and patterns instead of choosing one. Configure
 mutually exclusive selectors or pass an explicit environment.

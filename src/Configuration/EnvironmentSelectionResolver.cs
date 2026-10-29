@@ -62,7 +62,7 @@ public static class EnvironmentSelectionResolver
             return ResolveExplicit(config.Environments, explicitEnvironment, "cli", sourceBranch, branchSource, branchMatches, isPullRequest);
         }
 
-        if (environmentVariableEnvironment is not null)
+        if (!string.IsNullOrWhiteSpace(environmentVariableEnvironment))
         {
             return ResolveExplicit(
                 config.Environments,

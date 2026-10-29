@@ -205,6 +205,80 @@ public sealed class CliSmokeTests
     }
 
     [Fact]
+    public async Task SelectedEnvironmentConfigIsInspectableAndHashedInRunManifest()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), $"rexo-environment-config-audit-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        var originalDirectory = Environment.CurrentDirectory;
+        var originalOut = Console.Out;
+        var originalError = Console.Error;
+
+        try
+        {
+            var configPath = Path.Join(tempDir, "rexo.json");
+            await File.WriteAllTextAsync(configPath, """
+                {
+                  "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+                  "schemaVersion": "1.0",
+                  "name": "environment-audit",
+                  "aliases": {},
+                  "vars": { "deploymentTarget": "repository" },
+                  "outputs": { "ci": { "emit": false } },
+                  "environments": {
+                    "qa": {
+                      "vars": { "deploymentTarget": "qa" }
+                    }
+                  },
+                  "commands": {
+                    "deploy": {
+                      "usesEnvironment": true,
+                      "steps": [
+                        { "id": "target", "run": "echo {{vars.deploymentTarget}}" }
+                      ]
+                    }
+                  }
+                }
+                """);
+            Environment.CurrentDirectory = tempDir;
+
+            var resolvedPath = Path.Join(tempDir, "resolved.json");
+            Assert.Equal(0, await Program.ExecuteAsync(
+                ["--environment", "qa", "--json-file", resolvedPath, "config", "resolved"],
+                CancellationToken.None));
+
+            using var resolved = JsonDocument.Parse(await File.ReadAllTextAsync(resolvedPath));
+            var resolvedOutputs = resolved.RootElement.GetProperty("Outputs");
+            Assert.Equal("qa", resolvedOutputs.GetProperty("environment").GetString());
+            Assert.Equal(
+                "qa",
+                resolvedOutputs.GetProperty("effectiveConfig").GetProperty("Vars").GetProperty("deploymentTarget").GetString());
+            Assert.Equal(
+                "repository",
+                resolvedOutputs.GetProperty("baseConfig").GetProperty("Vars").GetProperty("deploymentTarget").GetString());
+
+            var manifestInputPath = Path.Join(tempDir, "deploy.json");
+            Assert.Equal(0, await Program.ExecuteAsync(
+                ["--environment", "qa", "--json-file", manifestInputPath, "deploy"],
+                CancellationToken.None));
+
+            var loadedConfig = await RepoConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
+            var expectedEnvironmentHash = CanonicalConfigHasher.Compute(
+                RepoConfigurationLoader.ApplyEnvironment(loadedConfig, "qa"));
+            using var manifest = JsonDocument.Parse(
+                await File.ReadAllTextAsync(Path.Join(tempDir, "deploy-manifest.json")));
+            Assert.Equal(expectedEnvironmentHash, manifest.RootElement.GetProperty("ConfigHash").GetString());
+            Assert.Equal(expectedEnvironmentHash, manifest.RootElement.GetProperty("EnvironmentConfigHash").GetString());
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+            Console.SetError(originalError);
+            Environment.CurrentDirectory = originalDirectory;
+            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
     public async Task ConfigExplainReturnsEffectiveValueAndRedactsNestedCredentials()
     {
         var tempDir = Path.Join(Path.GetTempPath(), $"rexo-config-explain-{Guid.NewGuid():N}");

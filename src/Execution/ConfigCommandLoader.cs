@@ -274,9 +274,19 @@ public sealed class ConfigCommandLoader
                 .Where(secret => !string.IsNullOrWhiteSpace(secret))
                 .Select(secret => secret!)
                 .ToArray();
+            var environmentSecretsToPreflight = commandConfig.UsesEnvironment == true &&
+                config.Secrets?.Items is { } secretItems
+                    ? deferredEnvironmentSecretNames
+                        .Where(name => secretItems.TryGetValue(name, out var definition) &&
+                            ((definition.Required ?? config.Secrets.Defaults?.Required ?? true) ||
+                             !string.IsNullOrWhiteSpace(definition.MapToEnv) ||
+                             definition.MapToEnvs is { Count: > 0 }))
+                        .ToArray()
+                    : [];
             var requiredSecrets = (normalizedCommandConfig.RequiredSecrets ?? [])
                 .Concat(baseRequiredSecretNames)
                 .Concat(mountedSecrets)
+                .Concat(environmentSecretsToPreflight)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
             var secretPreflight = await secretResolver.PreflightRequiredAsync(

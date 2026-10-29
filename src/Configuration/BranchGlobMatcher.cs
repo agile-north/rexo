@@ -176,14 +176,22 @@ public sealed class BranchGlobMatcher
 
             if (character == '?')
             {
-                atoms.Add(new PatternAtom("[^/]", false));
+                if (atoms.Count == 0 ||
+                    !atoms[^1].CanBeQuantified ||
+                    atoms[^1].Quantifier != PatternQuantifier.None)
+                {
+                    throw new FormatException(
+                        $"Branch pattern '{pattern}' uses '?' without one preceding literal or character class.");
+                }
+
+                atoms[^1] = atoms[^1] with { Quantifier = PatternQuantifier.Optional };
                 continue;
             }
 
             if (character == '+')
             {
                 if (atoms.Count == 0 ||
-                    !atoms[^1].CanBeRepeated ||
+                    !atoms[^1].CanBeQuantified ||
                     atoms[^1].Quantifier != PatternQuantifier.None)
                 {
                     throw new FormatException(
@@ -209,6 +217,7 @@ public sealed class BranchGlobMatcher
             expression.Append(atom.Expression);
             expression.Append(atom.Quantifier switch
             {
+                PatternQuantifier.Optional => "?",
                 PatternQuantifier.OneOrMore => "+",
                 _ => string.Empty,
             });
@@ -310,7 +319,7 @@ public sealed class BranchGlobMatcher
 
     private sealed record PatternAtom(
         string Expression,
-        bool CanBeRepeated)
+        bool CanBeQuantified)
     {
         public PatternQuantifier Quantifier { get; init; }
     }
@@ -318,6 +327,7 @@ public sealed class BranchGlobMatcher
     private enum PatternQuantifier
     {
         None,
+        Optional,
         OneOrMore,
     }
 }

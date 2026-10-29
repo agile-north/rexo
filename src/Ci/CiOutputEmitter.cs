@@ -107,6 +107,7 @@ public static class CiOutputEmitter
             new("completedAt", manifest.CompletedAt),
             new("durationMs", manifest.Duration.TotalMilliseconds),
             new("configHash", manifest.ConfigHash),
+            new("environmentConfigHash", manifest.EnvironmentConfigHash),
             new("assemblyVersion", manifest.AssemblyVersion),
             new("informationalVersion", manifest.InformationalVersion),
             new("nugetVersion", manifest.NuGetVersion),

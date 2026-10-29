@@ -56,6 +56,10 @@ redacted alongside repository config files, the merged policy group, and CLI `--
 (override values are omitted). Repository file paths indicate declarations rather than exact
 field-level merge ownership.
 
+With `--environment <name>`, `rx config resolved` reports the selected environment's effective
+configuration and its base configuration separately. This inspection shows the overlay regardless
+of whether an individual command opts in with `usesEnvironment: true`.
+
 ## Remote policy lockfile
 
 Policy sources declared in `policySources` or `REXO_POLICY_SOURCES` can be content-locked in

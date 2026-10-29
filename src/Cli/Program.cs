@@ -54,11 +54,12 @@ public static class Program
         CommandRegistry registry;
         DefaultCommandExecutor executor;
         RepoConfig? config;
+        RepoConfig? environmentConfig;
         ConfigProvenanceSnapshot provenance;
         EnvironmentSelectionResult environmentSelection;
         try
         {
-            (registry, executor, config, provenance, environmentSelection) = await CliBootstrapper.BuildServicesAsync(
+            (registry, executor, config, environmentConfig, provenance, environmentSelection) = await CliBootstrapper.BuildServicesAsync(
                 workingDir,
                 debug,
                 setOverrides,
@@ -124,7 +125,14 @@ public static class Program
             return 2;
         }
 
-        var outputSettings = ResolveCommandOutputSettings(config, json, jsonFile, echoMode, quiet, environmentSelection);
+        var outputSettings = ResolveCommandOutputSettings(
+            config,
+            json,
+            jsonFile,
+            echoMode,
+            quiet,
+            environmentSelection,
+            environmentConfig);
         var dryRun = ResolveDryRun(config, dryRunFlag);
 
         if (environmentSelection.Error is not null &&
@@ -571,9 +579,20 @@ public static class Program
         var startedAt = DateTimeOffset.UtcNow;
         var includeProvenance = subCommand == "config resolved" &&
             args.Skip(2).Any(argument => argument.Equals("--provenance", StringComparison.OrdinalIgnoreCase));
-        var result = includeProvenance
-            ? CreateConfigResolvedWithProvenance(config, provenance, workingDir)
-            : await ExecuteCommandAsync(executor, subCommand, invocation, cancellationToken);
+        var inspectionConfig = outputSettings.EnvironmentConfig ?? config;
+        var result = subCommand == "config resolved" && includeProvenance
+            ? CreateConfigResolvedWithProvenance(
+                inspectionConfig,
+                config,
+                provenance,
+                workingDir,
+                outputSettings.EnvironmentSelection)
+            : subCommand == "config resolved" && outputSettings.EnvironmentSelection.EnvironmentName is not null
+                ? CreateConfigResolvedForEnvironment(
+                    inspectionConfig,
+                    config,
+                    outputSettings.EnvironmentSelection.EnvironmentName)
+                : await ExecuteCommandAsync(executor, subCommand, invocation, cancellationToken);
         var completedAt = DateTimeOffset.UtcNow;
         var exitCode = await WriteResultAsync(result, invocation, verbose, quiet, cancellationToken);
 
@@ -584,8 +603,10 @@ public static class Program
 
     private static CommandResult CreateConfigResolvedWithProvenance(
         RepoConfig? config,
+        RepoConfig? baseConfig,
         ConfigProvenanceSnapshot provenance,
-        string workingDirectory)
+        string workingDirectory,
+        EnvironmentSelectionResult environmentSelection)
     {
         if (config is null)
         {
@@ -605,6 +626,11 @@ public static class Program
         }
 
         sourceLayers.AddRange(repositoryFiles.Select(path => $"repository file: {path}"));
+        if (environmentSelection.EnvironmentName is { } selectedEnvironment)
+        {
+            sourceLayers.Add($"environment overlay: {selectedEnvironment}");
+        }
+
         sourceLayers.AddRange(provenance.SetOverrides.Select(overrideValue =>
         {
             var separator = overrideValue.IndexOf('=', StringComparison.Ordinal);
@@ -620,9 +646,23 @@ public static class Program
             ["policySourceAttributionAvailable"] = false,
             ["sensitiveValuesRedacted"] = true,
         };
+        if (environmentSelection.EnvironmentName is { } environmentName)
+        {
+            outputs["environment"] = environmentName;
+            outputs["environmentConfigHash"] = CanonicalConfigHasher.Compute(config);
+            outputs["baseConfig"] = RedactConfigNode(
+                System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(baseConfig)));
+        }
         var message = JsonSerializer.Serialize(new
         {
             effectiveConfig,
+            baseConfig = environmentSelection.EnvironmentName is not null
+                ? RedactConfigNode(System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(baseConfig)))
+                : null,
+            environment = environmentSelection.EnvironmentName,
+            environmentConfigHash = environmentSelection.EnvironmentName is not null
+                ? CanonicalConfigHasher.Compute(config)
+                : null,
             provenance = new
             {
                 sourceLayers,
@@ -635,10 +675,49 @@ public static class Program
                 mergedPolicySourceGroupAvailable = provenance.PolicyConfig is not null,
                 repositoryFileAttributionAvailable = provenance.RepositoryLayers.Count > 0,
                 policySourceAttributionAvailable = false,
-                note = "Repository files are listed as declaration sources; exact field-level merge ownership and individual policy-source attribution are not available.",
+                note = "Repository files are listed as declaration sources; exact field-level merge ownership and individual policy-source attribution are not available. The resolved configuration includes the selected environment overlay before final CLI --set overrides.",
             },
         }, JsonOptions);
         return new CommandResult("config resolved", true, 0, message, outputs);
+    }
+
+    private static CommandResult CreateConfigResolvedForEnvironment(
+        RepoConfig? environmentConfig,
+        RepoConfig? baseConfig,
+        string environmentName)
+    {
+        if (environmentConfig is null)
+        {
+            return CommandResult.Fail("config resolved", 1, "No rexo configuration loaded.");
+        }
+
+        var resolvedConfig = RedactConfigNode(
+            System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(environmentConfig)));
+        var redactedBaseConfig = baseConfig is null
+            ? null
+            : RedactConfigNode(System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(baseConfig)));
+        var configHash = CanonicalConfigHasher.Compute(environmentConfig);
+        var result = new
+        {
+            effectiveConfig = resolvedConfig,
+            baseConfig = redactedBaseConfig,
+            environment = environmentName,
+            environmentConfigHash = configHash,
+        };
+        var outputs = new Dictionary<string, object?>
+        {
+            ["effectiveConfig"] = resolvedConfig,
+            ["baseConfig"] = redactedBaseConfig,
+            ["environment"] = environmentName,
+            ["environmentConfigHash"] = configHash,
+            ["sensitiveValuesRedacted"] = true,
+        };
+        return new CommandResult(
+            "config resolved",
+            true,
+            0,
+            JsonSerializer.Serialize(result, JsonOptions),
+            outputs);
     }
 
     private static async Task<int> RunConfigExplainAsync(
@@ -1164,7 +1243,16 @@ public static class Program
             if (manifestPath == jsonFile) manifestPath = jsonFile + ".manifest.json";
         }
 
-        var configHash = config is null ? null : CanonicalConfigHasher.Compute(config);
+        var usesEnvironment = config?.Commands is { } commandConfigurations &&
+            commandConfigurations.TryGetValue(commandName, out var commandConfig) &&
+            commandConfig.UsesEnvironment == true;
+        var manifestConfig = usesEnvironment && outputSettings.EnvironmentConfig is not null
+            ? outputSettings.EnvironmentConfig
+            : config;
+        var configHash = manifestConfig is null ? null : CanonicalConfigHasher.Compute(manifestConfig);
+        var environmentConfigHash = outputSettings.EnvironmentConfig is null
+            ? null
+            : CanonicalConfigHasher.Compute(outputSettings.EnvironmentConfig);
         var policyLockPath = Path.Join(workingDir, ".rexo", "rexo.lock.yaml");
         string? policyLockHash = null;
         if (File.Exists(policyLockPath))
@@ -1196,6 +1284,7 @@ public static class Program
             StartedAt = startedAt,
             CompletedAt = completedAt,
             ConfigHash = configHash,
+            EnvironmentConfigHash = environmentConfigHash,
             PolicyLockHash = policyLockHash,
             Version = result.Version,
             AssemblyVersion = result.Version?.AssemblyVersion,
@@ -1658,7 +1747,8 @@ public static class Program
         string? jsonFileFlag,
         string? echoMode,
         bool quiet,
-        EnvironmentSelectionResult environmentSelection)
+        EnvironmentSelectionResult environmentSelection,
+        RepoConfig? environmentConfig)
     {
         var commandOutputs = config?.Outputs?.Command;
         var json = jsonFlag || commandOutputs?.Json == true;
@@ -1679,7 +1769,8 @@ public static class Program
             stdout,
             echoMode,
             normalizedEchoMode,
-            environmentSelection);
+            environmentSelection,
+            environmentConfig);
     }
 
     private static string ResolvePresentationEchoMode(string? cliEcho, string? commandEcho, string? runtimeEcho)
@@ -1863,7 +1954,8 @@ public static class Program
         bool Stdout,
         string? EchoMode,
         string PresentationEchoMode,
-        EnvironmentSelectionResult EnvironmentSelection);
+        EnvironmentSelectionResult EnvironmentSelection,
+        RepoConfig? EnvironmentConfig);
 
     private static IReadOnlyList<string> DiscoverUiProjectRoots(string currentWorkingDir)
     {

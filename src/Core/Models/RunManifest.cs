@@ -45,6 +45,9 @@ public sealed record RunManifest
     /// <summary>Deterministic SHA-256 hash of the effective, secret-redacted rexo configuration.</summary>
     public string? ConfigHash { get; init; }
 
+    /// <summary>Deterministic SHA-256 hash of the selected environment's effective configuration, when selected.</summary>
+    public string? EnvironmentConfigHash { get; init; }
+
     /// <summary>SHA-256 of the verified local policy lockfile, when one is present.</summary>
     public string? PolicyLockHash { get; init; }
 

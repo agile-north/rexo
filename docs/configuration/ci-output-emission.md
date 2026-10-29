@@ -97,7 +97,8 @@ or excluded by the variable limit.
 | `startedAt` | `REXO_STARTED_AT` | Round-trip timestamp. |
 | `completedAt` | `REXO_COMPLETED_AT` | Round-trip timestamp. |
 | `durationMs` | `REXO_DURATION_MS` | Elapsed milliseconds. |
-| `configHash` | `REXO_CONFIG_HASH` | Hash of effective, secret-redacted configuration. |
+| `configHash` | `REXO_CONFIG_HASH` | Hash of the configuration used by the command. |
+| `environmentConfigHash` | `REXO_ENVIRONMENT_CONFIG_HASH` | Hash of the selected environment's effective configuration, when selected. |
 | `assemblyVersion` | `REXO_ASSEMBLY_VERSION` | Resolved assembly version. |
 | `informationalVersion` | `REXO_INFORMATIONAL_VERSION` | Resolved informational version. |
 | `nugetVersion` | `REXO_NUGET_VERSION` | Resolved NuGet version. |

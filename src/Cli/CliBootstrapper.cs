@@ -32,6 +32,7 @@ internal static class CliBootstrapper
         CommandRegistry registry,
         DefaultCommandExecutor executor,
         RepoConfig? config,
+        RepoConfig? environmentConfig,
         ConfigProvenanceSnapshot provenance,
         EnvironmentSelectionResult environmentSelection)>
         BuildServicesAsync(
@@ -152,6 +153,7 @@ internal static class CliBootstrapper
             registry,
             executor,
             effectiveConfig,
+            environmentConfig,
             new ConfigProvenanceSnapshot(
                 configBeforePolicyDefaults,
                 policyConfig,

@@ -42,9 +42,10 @@ environments:
 
 For a command with `usesEnvironment: true`, environment `vars` and `settings` are
 deep-merged over repository values, and environment secret definitions overlay repository
-secrets by logical name. Environment-specific secrets are preflighted when a command
-declares them in `requiredSecrets` or a container file mount; globally required secrets
-retain their normal preflight behavior.
+secrets by logical name. Required environment secrets, secrets mapped to runtime environment
+variables, and secrets declared in `requiredSecrets` or container file mounts are preflighted
+before the command's first step; globally required secrets retain their normal preflight
+behavior.
 
 CLI `--set` overrides remain the final configuration layer, including over selected
 environment `vars` and `settings`. Environment selection and configuration are not an
@@ -66,11 +67,11 @@ match, Rexo fails with the matching names and patterns instead of choosing one. 
 mutually exclusive selectors or pass an explicit environment.
 
 Branch patterns are case-sensitive and ordered: `*` matches zero or more characters within
-one path segment, `**` spans `/`, `**/` also matches zero directory levels, `?` matches one
-character within a path segment, and `+` repeats the preceding literal or character class
-one or more times. Character classes such as `[0-9]` are supported. A leading `!` excludes
-a match, and a later positive pattern can re-include it. Escape supported metacharacters
-with `\`. Patterns are bounded to 512 characters and 128 entries per environment.
+one path segment, `**` spans `/`, `**/` also matches zero directory levels, `?` makes the
+preceding literal or character class optional, and `+` repeats it one or more times.
+Character classes such as `[0-9]` are supported. A leading `!` excludes a match, and a later
+positive pattern can re-include it. Escape supported metacharacters with `\`. Patterns are
+bounded to 512 characters and 128 entries per environment.
 
 Source-branch precedence is `--source-branch`, the configured source-branch environment
 variable (default `REXO_SOURCE_BRANCH`), then CI metadata and local Git. GitHub Actions,

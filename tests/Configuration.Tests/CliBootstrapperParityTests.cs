@@ -46,7 +46,7 @@ public sealed class CliBootstrapperParityTests
         }
         """);
 
-            var (_, _, effectiveConfig, _, _) = await CliBootstrapper.BuildServicesAsync(
+            var (_, _, effectiveConfig, _, _, _) = await CliBootstrapper.BuildServicesAsync(
                 dir, debug: false, setOverrides: null, CancellationToken.None);
 
             Assert.NotNull(effectiveConfig?.Secrets?.Defaults?.ProviderChain);
@@ -131,7 +131,7 @@ public sealed class CliBootstrapperParityTests
         }
         """);
 
-            var (_, executor, effectiveConfig, _, selection) = await CliBootstrapper.BuildServicesAsync(
+            var (_, executor, effectiveConfig, environmentConfig, _, selection) = await CliBootstrapper.BuildServicesAsync(
                 dir,
                 debug: false,
                 setOverrides: ["vars.deployTarget=cli"],
@@ -140,6 +140,7 @@ public sealed class CliBootstrapperParityTests
 
             Assert.Equal("staging", selection.EnvironmentName);
             Assert.Equal("cli", effectiveConfig?.Vars?["deployTarget"].GetString());
+            Assert.Equal("cli", environmentConfig?.Vars?["deployTarget"].GetString());
             var invocation = new CommandInvocation(
                 new Dictionary<string, string>(),
                 new Dictionary<string, string?>(),

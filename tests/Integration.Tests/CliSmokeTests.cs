@@ -205,6 +205,80 @@ public sealed class CliSmokeTests
     }
 
     [Fact]
+    public async Task SelectedEnvironmentConfigIsInspectableAndHashedInRunManifest()
+    {
+        var tempDir = Path.Join(Path.GetTempPath(), $"rexo-environment-config-audit-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDir);
+        var originalDirectory = Environment.CurrentDirectory;
+        var originalOut = Console.Out;
+        var originalError = Console.Error;
+
+        try
+        {
+            var configPath = Path.Join(tempDir, "rexo.json");
+            await File.WriteAllTextAsync(configPath, """
+                {
+                  "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+                  "schemaVersion": "1.0",
+                  "name": "environment-audit",
+                  "aliases": {},
+                  "vars": { "deploymentTarget": "repository" },
+                  "outputs": { "ci": { "emit": false } },
+                  "environments": {
+                    "qa": {
+                      "vars": { "deploymentTarget": "qa" }
+                    }
+                  },
+                  "commands": {
+                    "deploy": {
+                      "usesEnvironment": true,
+                      "steps": [
+                        { "id": "target", "run": "echo {{vars.deploymentTarget}}" }
+                      ]
+                    }
+                  }
+                }
+                """);
+            Environment.CurrentDirectory = tempDir;
+
+            var resolvedPath = Path.Join(tempDir, "resolved.json");
+            Assert.Equal(0, await Program.ExecuteAsync(
+                ["--environment", "qa", "--json-file", resolvedPath, "config", "resolved"],
+                CancellationToken.None));
+
+            using var resolved = JsonDocument.Parse(await File.ReadAllTextAsync(resolvedPath));
+            var resolvedOutputs = resolved.RootElement.GetProperty("Outputs");
+            Assert.Equal("qa", resolvedOutputs.GetProperty("environment").GetString());
+            Assert.Equal(
+                "qa",
+                resolvedOutputs.GetProperty("effectiveConfig").GetProperty("Vars").GetProperty("deploymentTarget").GetString());
+            Assert.Equal(
+                "repository",
+                resolvedOutputs.GetProperty("baseConfig").GetProperty("Vars").GetProperty("deploymentTarget").GetString());
+
+            var manifestInputPath = Path.Join(tempDir, "deploy.json");
+            Assert.Equal(0, await Program.ExecuteAsync(
+                ["--environment", "qa", "--json-file", manifestInputPath, "deploy"],
+                CancellationToken.None));
+
+            var loadedConfig = await RepoConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
+            var expectedEnvironmentHash = CanonicalConfigHasher.Compute(
+                RepoConfigurationLoader.ApplyEnvironment(loadedConfig, "qa"));
+            using var manifest = JsonDocument.Parse(
+                await File.ReadAllTextAsync(Path.Join(tempDir, "deploy-manifest.json")));
+            Assert.Equal(expectedEnvironmentHash, manifest.RootElement.GetProperty("ConfigHash").GetString());
+            Assert.Equal(expectedEnvironmentHash, manifest.RootElement.GetProperty("EnvironmentConfigHash").GetString());
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+            Console.SetError(originalError);
+            Environment.CurrentDirectory = originalDirectory;
+            if (Directory.Exists(tempDir)) Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Fact]
     public async Task ConfigExplainReturnsEffectiveValueAndRedactsNestedCredentials()
     {
         var tempDir = Path.Join(Path.GetTempPath(), $"rexo-config-explain-{Guid.NewGuid():N}");
@@ -237,6 +311,10 @@ public sealed class CliSmokeTests
                   fallback: 2.3.4
                 vars:
                   displayName: safe-value
+                environments:
+                  qa:
+                    vars:
+                      displayName: qa-value
                 """);
             var overlayPath = Path.Join(tempDir, ".rexo", "overlay.yaml");
             await File.WriteAllTextAsync(
@@ -271,6 +349,39 @@ public sealed class CliSmokeTests
             Assert.Contains(sourceLayers, layer => layer?.Contains(Path.Join(".rexo", "rexo.yaml"), StringComparison.Ordinal) == true);
             Assert.Contains(sourceLayers, layer => layer?.Contains("overlay.yaml", StringComparison.Ordinal) == true);
             Assert.Contains("CLI --set override", sourceLayers);
+
+            var environmentExplainPath = Path.Join(tempDir, "environment-explain.json");
+            Assert.Equal(0, await Program.ExecuteAsync(
+                ["--environment", "qa", "--json-file", environmentExplainPath, "config", "explain", "vars.displayName"],
+                CancellationToken.None));
+
+            using var environmentExplain = JsonDocument.Parse(await File.ReadAllTextAsync(environmentExplainPath));
+            var environmentExplainOutputs = environmentExplain.RootElement.GetProperty("Outputs");
+            Assert.Equal("qa-value", environmentExplainOutputs.GetProperty("value").GetString());
+            Assert.Contains(
+                environmentExplainOutputs.GetProperty("sourceLayers").EnumerateArray()
+                    .Select(layer => layer.GetString()),
+                layer => layer == "environment overlay: qa");
+
+            var environmentOverrideExplainPath = Path.Join(tempDir, "environment-override-explain.json");
+            Assert.Equal(0, await Program.ExecuteAsync(
+                [
+                    "--environment", "qa",
+                    "--set", "vars.displayName=cli-value",
+                    "--json-file", environmentOverrideExplainPath,
+                    "config", "explain", "vars.displayName",
+                ],
+                CancellationToken.None));
+
+            using var environmentOverrideExplain = JsonDocument.Parse(
+                await File.ReadAllTextAsync(environmentOverrideExplainPath));
+            var environmentOverrideOutputs = environmentOverrideExplain.RootElement.GetProperty("Outputs");
+            Assert.Equal("cli-value", environmentOverrideOutputs.GetProperty("value").GetString());
+            var environmentOverrideLayers = environmentOverrideOutputs.GetProperty("sourceLayers").EnumerateArray()
+                .Select(layer => layer.GetString())
+                .ToArray();
+            Assert.DoesNotContain("environment overlay: qa", environmentOverrideLayers);
+            Assert.Equal("CLI --set override", environmentOverrideLayers[^1]);
 
             var resolvedJsonPath = Path.Join(tempDir, "resolved-with-provenance.json");
             Assert.Equal(0, await Program.ExecuteAsync(
@@ -441,7 +552,8 @@ public sealed class CliSmokeTests
                   fallback: 1.0.0
                 environments:
                   staging:
-                    path: deployments/staging
+                    promotion:
+                      path: deployments/staging
                 """;
             await File.WriteAllTextAsync(configPath, configYaml);
 
@@ -470,12 +582,12 @@ public sealed class CliSmokeTests
 
             var outputPath = Path.Join(tempDir, "promotion.json");
             Assert.Equal(0, await Program.ExecuteAsync(
-                ["--dry-run", "--json-file", outputPath, "promote", manifestArgument, "staging"],
+                ["--dry-run", "--json-file", outputPath, "--environment", "staging", "promote", manifestArgument],
                 CancellationToken.None));
             Assert.False(Directory.Exists(Path.Join(tempDir, "deployments")));
 
             Assert.Equal(0, await Program.ExecuteAsync(
-                ["--json-file", outputPath, "promote", manifestArgument, "staging"],
+                ["--json-file", outputPath, "--environment", "staging", "promote", manifestArgument],
                 CancellationToken.None));
 
             var destination = Path.Join(tempDir, "deployments", "staging", "objects", contentHash, "sample.nupkg");
@@ -489,13 +601,13 @@ public sealed class CliSmokeTests
                 configPath,
                 configYaml.Replace("path: deployments/staging", "path: ../outside", StringComparison.Ordinal));
             Assert.Equal(9, await Program.ExecuteAsync(
-                ["promote", manifestArgument, "staging"],
+                ["--environment", "staging", "promote", manifestArgument],
                 CancellationToken.None));
             Assert.False(Directory.Exists(Path.Join(tempDir, "outside")));
             await File.WriteAllTextAsync(configPath, configYaml);
 
             Assert.Equal(0, await Program.ExecuteAsync(
-                ["promote", manifestArgument, "staging"],
+                ["--environment", "staging", "promote", manifestArgument],
                 CancellationToken.None));
             Assert.Single(Directory.GetFiles(Path.Join(tempDir, "deployments", "staging", "promotions"), "*.json"));
 
@@ -505,14 +617,14 @@ public sealed class CliSmokeTests
             };
             await File.WriteAllTextAsync(sourceManifestPath, JsonSerializer.Serialize(alteredManifest));
             Assert.Equal(9, await Program.ExecuteAsync(
-                ["promote", manifestArgument, "staging"],
+                ["--environment", "staging", "promote", manifestArgument],
                 CancellationToken.None));
             Assert.Single(Directory.GetFiles(Path.Join(tempDir, "deployments", "staging", "promotions"), "*.json"));
 
             await File.WriteAllTextAsync(sourceManifestPath, originalManifestJson);
             await File.WriteAllTextAsync(sourceArtifact, "modified package bytes");
             Assert.Equal(9, await Program.ExecuteAsync(
-                ["--dry-run", "promote", manifestArgument, "staging"],
+                ["--dry-run", "--environment", "staging", "promote", manifestArgument],
                 CancellationToken.None));
         }
         finally

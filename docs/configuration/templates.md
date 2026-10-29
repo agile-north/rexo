@@ -36,6 +36,13 @@ Available in any `run` step string:
 | `{{settings.<path>}}` | Resolved `settings` values |
 | `{{vars.<path>}}` | Resolved `vars` values |
 | `{{secrets.<name>}}` | Resolved secret values for template-exposed items |
+| `{{environment.name}}` | Selected environment name |
+| `{{environment.sourceBranch}}` | Normalized source branch used for automatic selection, when available |
+| `{{environment.selectionSource}}` | Selection source: `cli`, `environment-variable`, `branch`, or `unresolved` |
+| `{{environment.branchSource}}` | Source of branch metadata, such as `github-actions` or `local-git` |
+| `{{environment.matchedPattern}}` | Branch pattern that selected the environment, when applicable |
+| `{{environment.isExplicit}}` | Whether the environment was explicitly selected |
+| `{{environment.isResolved}}` | Whether an environment was selected |
 | `{{version.<field>}}` | Resolved version after `builtin:resolve-version` |
 | `{{steps.<id>.outputs.<key>}}` | Raw output from a completed step |
 | `{{steps.<id>.success}}` | Step success (`true`/`false`) |

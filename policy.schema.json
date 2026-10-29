@@ -169,6 +169,22 @@
           "type": "boolean",
           "description": "When true, omit this command from default discovery surfaces like list/help while keeping it callable by name."
         },
+        "requiresEnvironment": {
+          "type": "boolean",
+          "description": "When true, this command fails unless an execution environment is selected."
+        },
+        "usesEnvironment": {
+          "type": "boolean",
+          "description": "When true, apply the selected environment's vars, settings, and secrets to this command."
+        },
+        "requiredSecrets": {
+          "type": "array",
+          "description": "Logical secret names that must resolve before this command starts executing steps.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
         "before": {
           "$ref": "#/$defs/commandHook",
           "description": "Optional hook executed before this command's steps. Supports a command name string or an explicit step array."
@@ -516,6 +532,22 @@
         }
       ]
     },
+    "containerMount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target"],
+      "properties": {
+        "source": { "type": "string", "minLength": 1 },
+        "secret": { "type": "string", "minLength": 1 },
+        "target": { "type": "string", "minLength": 1, "pattern": "^/" },
+        "readOnly": { "type": "boolean", "default": true },
+        "allowOutsideRepository": { "type": "boolean", "default": false }
+      },
+      "oneOf": [
+        { "required": ["source"], "not": { "required": ["secret"] } },
+        { "required": ["secret"], "not": { "required": ["source"] } }
+      ]
+    },
     "stepContainerSpec": {
       "type": "object",
       "description": "Container execution spec. Either an inline definition (image/dockerfile/...) or a reference to a named entry in the top-level 'containers' registry via 'use', optionally with inline overrides.",
@@ -548,6 +580,16 @@
           "default": "error",
           "description": "Behavior when the container runtime is unavailable. Defaults to error; host explicitly allows native execution.",
           "markdownDescription": "Behavior when the container runtime is unavailable. Defaults to `error`; set to `host` only to explicitly permit native execution."
+        },
+        "network": {
+          "type": "string",
+          "enum": ["bridge", "host"],
+          "description": "Container network mode. Host mode is opt-in and fails if unsupported by the Docker runtime."
+        },
+        "mounts": {
+          "type": "array",
+          "description": "Explicit read-only-by-default file and directory mounts.",
+          "items": { "$ref": "#/$defs/containerMount" }
         },
         "env": {
           "type": "object",

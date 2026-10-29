@@ -20,6 +20,13 @@ public sealed record RunManifest
     public string? CiTag { get; init; }
     public string? CiBuildUrl { get; init; }
     public string? CommandExecuted { get; init; }
+    public string? Environment { get; init; }
+    public string? EnvironmentSelectionSource { get; init; }
+    public string? SourceBranch { get; init; }
+    public string? SourceBranchOrigin { get; init; }
+    public string? MatchedBranchPattern { get; init; }
+    public bool? EnvironmentSelectionExplicit { get; init; }
+    public bool? EnvironmentSelectionOverrodeAutomaticMatches { get; init; }
     public bool Success { get; init; }
     public int ExitCode { get; init; }
     public DateTimeOffset StartedAt { get; init; }
@@ -37,6 +44,9 @@ public sealed record RunManifest
 
     /// <summary>Deterministic SHA-256 hash of the effective, secret-redacted rexo configuration.</summary>
     public string? ConfigHash { get; init; }
+
+    /// <summary>Deterministic SHA-256 hash of the selected environment's effective configuration, when selected.</summary>
+    public string? EnvironmentConfigHash { get; init; }
 
     /// <summary>SHA-256 of the verified local policy lockfile, when one is present.</summary>
     public string? PolicyLockHash { get; init; }

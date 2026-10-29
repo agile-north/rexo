@@ -28,9 +28,14 @@ internal static class ArtifactPromotionService
             throw new InvalidOperationException($"Promotion environment '{environmentName}' is not configured.");
         }
 
-        var environmentPath = environment.Value.Value.Path;
-        if (string.IsNullOrWhiteSpace(environmentPath) ||
-            Path.IsPathRooted(environmentPath) ||
+        var environmentPath = environment.Value.Value.Promotion?.Path;
+        if (string.IsNullOrWhiteSpace(environmentPath))
+        {
+            throw new InvalidOperationException(
+                $"Promotion path is not configured for environment '{environmentName}'. Set environments.{environmentName}.promotion.path.");
+        }
+
+        if (Path.IsPathRooted(environmentPath) ||
             environmentPath.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar])
                 .Any(segment => segment == ".."))
         {

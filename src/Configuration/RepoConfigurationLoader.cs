@@ -307,6 +307,38 @@ public sealed partial class RepoConfigurationLoader
         };
     }
 
+    public static RepoConfig ApplyEnvironment(RepoConfig config, string? environmentName)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        if (environmentName is null || config.Environments is null)
+        {
+            return config;
+        }
+
+        var environment = config.Environments.FirstOrDefault(entry =>
+            entry.Key.Equals(environmentName, StringComparison.OrdinalIgnoreCase));
+        if (environment.Value is null)
+        {
+            throw new InvalidOperationException($"Environment '{environmentName}' is not configured.");
+        }
+
+        return config with
+        {
+            Vars = DeepMergeJsonMaps(config.Vars, environment.Value.Vars),
+            Settings = DeepMergeJsonMaps(config.Settings, environment.Value.Settings),
+            Secrets = MergeEnvironmentSecrets(config.Secrets, environment.Value.Secrets),
+            EnvironmentSpecificSecretNames = environment.Value.Secrets?.Items is { } environmentSecrets
+                ? new HashSet<string>(environmentSecrets.Keys, StringComparer.OrdinalIgnoreCase)
+                : new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+            BaseRequiredSecretNames = config.BaseRequiredSecretNames ??
+                new HashSet<string>(
+                    config.Secrets?.Items?
+                        .Where(entry => entry.Value.Required ?? config.Secrets.Defaults?.Required ?? true)
+                        .Select(entry => entry.Key) ?? [],
+                    StringComparer.OrdinalIgnoreCase),
+        };
+    }
+
     public static async Task<string> ReadEmbeddedRexoSchemaJsonAsync(CancellationToken cancellationToken)
     {
         var asm = typeof(RepoConfigurationLoader).Assembly;
@@ -349,7 +381,8 @@ public sealed partial class RepoConfigurationLoader
             PolicySources = MergeLists(@base.PolicySources, child.PolicySources, child.MergeStrategy),
             Versioning = child.Versioning ?? @base.Versioning,
             Artifacts = MergeLists(@base.Artifacts, child.Artifacts, child.MergeStrategy),
-            Environments = MergeDictionaries(@base.Environments, child.Environments),
+            Environments = MergeEnvironments(@base.Environments, child.Environments),
+            EnvironmentSelection = MergeEnvironmentSelection(@base.EnvironmentSelection, child.EnvironmentSelection),
             Runtime = MergeRuntimeConfig(@base.Runtime, child.Runtime),
             Outputs = MergeOutputsConfig(@base.Outputs, child.Outputs),
             Settings = DeepMergeJsonMaps(@base.Settings, child.Settings),
@@ -359,6 +392,116 @@ public sealed partial class RepoConfigurationLoader
             Capabilities = MergeCapabilities(@base.Capabilities, child.Capabilities, child.MergeStrategy),
             MergeStrategy = child.MergeStrategy ?? @base.MergeStrategy,
         };
+
+    private static RepoEnvironmentSelectionConfig? MergeEnvironmentSelection(
+        RepoEnvironmentSelectionConfig? @base,
+        RepoEnvironmentSelectionConfig? child)
+    {
+        if (@base is null) return child;
+        if (child is null) return @base;
+        if (@base.SourceBranch is null) return child;
+        if (child.SourceBranch is null) return @base;
+
+        return new RepoEnvironmentSelectionConfig
+        {
+            SourceBranch = new RepoSourceBranchConfig
+            {
+                Variable = child.SourceBranch.Variable ?? @base.SourceBranch.Variable,
+                Fallback = child.SourceBranch.Fallback ?? @base.SourceBranch.Fallback,
+            },
+        };
+    }
+
+    private static Dictionary<string, RepoEnvironmentConfig>? MergeEnvironments(
+        Dictionary<string, RepoEnvironmentConfig>? @base,
+        Dictionary<string, RepoEnvironmentConfig>? child)
+    {
+        if (@base is null or { Count: 0 }) return child;
+        if (child is null or { Count: 0 }) return @base;
+
+        var result = new Dictionary<string, RepoEnvironmentConfig>(@base, StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, environment) in child)
+        {
+            result[name] = result.TryGetValue(name, out var existing)
+                ? MergeEnvironmentConfig(existing, environment)
+                : environment;
+        }
+
+        return result;
+    }
+
+    private static RepoEnvironmentConfig MergeEnvironmentConfig(
+        RepoEnvironmentConfig @base,
+        RepoEnvironmentConfig child) =>
+        new()
+        {
+            Description = child.Description ?? @base.Description,
+            Selection = child.Selection is null
+                ? @base.Selection
+                : new RepoEnvironmentBranchSelectionConfig
+                {
+                    Branches = child.Selection.Branches ?? @base.Selection?.Branches,
+                },
+            Vars = DeepMergeJsonMaps(@base.Vars, child.Vars),
+            Settings = DeepMergeJsonMaps(@base.Settings, child.Settings),
+            Secrets = MergeEnvironmentSecrets(@base.Secrets, child.Secrets),
+            Promotion = child.Promotion ?? @base.Promotion,
+        };
+
+    private static RepoSecretsConfig? MergeEnvironmentSecrets(
+        RepoSecretsConfig? @base,
+        RepoSecretsConfig? child)
+    {
+        if (@base is null) return child;
+        if (child is null) return @base;
+
+        var merged = MergeSecretsConfig(@base, child)!;
+        var defaults = merged.Defaults;
+        if (child.Defaults?.ProviderChain is not null)
+        {
+            defaults = (defaults ?? new RepoSecretDefaultsConfig()) with
+            {
+                Provider = child.Defaults.Provider,
+                ProviderChain = child.Defaults.ProviderChain,
+            };
+        }
+        else if (child.Defaults?.Provider is not null)
+        {
+            defaults = defaults! with { ProviderChain = null };
+        }
+
+        var items = merged.Items;
+        if (items is not null && child.Items is not null && @base.Items is not null)
+        {
+            items = new Dictionary<string, RepoSecretConfig>(items, StringComparer.OrdinalIgnoreCase);
+            foreach (var (name, environmentSecret) in child.Items)
+            {
+                if (!@base.Items.TryGetValue(name, out _) ||
+                    !items.TryGetValue(name, out var mergedSecret))
+                {
+                    continue;
+                }
+
+                if (environmentSecret.ProviderChain is not null)
+                {
+                    mergedSecret = mergedSecret with
+                    {
+                        Provider = environmentSecret.Provider,
+                        ProviderRef = environmentSecret.ProviderRef,
+                        ProviderChain = environmentSecret.ProviderChain,
+                    };
+                }
+                else if (environmentSecret.Provider is not null || environmentSecret.ProviderRef is not null)
+                {
+                    mergedSecret = mergedSecret with { ProviderChain = null };
+                }
+
+                items[name] = mergedSecret;
+            }
+        }
+
+        return merged with { Defaults = defaults, Items = items };
+    }
 
     private static RepoSecretsConfig? MergeSecretsConfig(RepoSecretsConfig? @base, RepoSecretsConfig? child)
     {
@@ -802,6 +945,9 @@ public sealed partial class RepoConfigurationLoader
             User = childCmd.User,
             Domain = childCmd.Domain,
             PasswordSecret = childCmd.PasswordSecret,
+            RequiresEnvironment = childCmd.RequiresEnvironment ?? baseCmd.RequiresEnvironment,
+            UsesEnvironment = childCmd.UsesEnvironment ?? baseCmd.UsesEnvironment,
+            RequiredSecrets = MergeRequiredSecrets(baseCmd.RequiredSecrets, childCmd.RequiredSecrets),
         };
     }
 
@@ -1067,7 +1213,25 @@ public sealed partial class RepoConfigurationLoader
             Args = MergeDictionaries(primary.Args, secondary.Args),
             MaxParallel = preferFirstMetadata ? primary.MaxParallel ?? secondary.MaxParallel : secondary.MaxParallel ?? primary.MaxParallel,
             MaxDepth = preferFirstMetadata ? primary.MaxDepth ?? secondary.MaxDepth : secondary.MaxDepth ?? primary.MaxDepth,
+            RequiresEnvironment = preferFirstMetadata
+                ? primary.RequiresEnvironment ?? secondary.RequiresEnvironment
+                : secondary.RequiresEnvironment ?? primary.RequiresEnvironment,
+            UsesEnvironment = preferFirstMetadata
+                ? primary.UsesEnvironment ?? secondary.UsesEnvironment
+                : secondary.UsesEnvironment ?? primary.UsesEnvironment,
+            RequiredSecrets = MergeRequiredSecrets(primary.RequiredSecrets, secondary.RequiredSecrets),
         };
+    }
+
+    private static string[]? MergeRequiredSecrets(string[]? baseline, string[]? overrideSecrets)
+    {
+        if (baseline is null or { Length: 0 }) return overrideSecrets;
+        if (overrideSecrets is null or { Length: 0 }) return baseline;
+        return baseline
+            .Concat(overrideSecrets)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     private static Dictionary<TKey, TValue> MergeDictionaries<TKey, TValue>(

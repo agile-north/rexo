@@ -3,6 +3,7 @@ namespace Rexo.Execution.Tests;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using Rexo.Core.Abstractions;
 using Rexo.Core.Models;
 using Rexo.Templating;
 
@@ -18,13 +19,13 @@ public sealed class StepExecutorWhenConditionTests
     // Helpers
     // ──────────────────────────────────────────────────────────────────────────
 
-    private static StepExecutor CreateExecutor(BuiltinRegistry? registry = null)
+    private static StepExecutor CreateExecutor(BuiltinRegistry? registry = null, ISecretResolver? secretResolver = null)
     {
         var builtins = registry ?? new BuiltinRegistry();
         var cmdRegistry = BuiltinCommandRegistration.CreateDefault();
         var executor = new DefaultCommandExecutor(cmdRegistry);
         var renderer = new TemplateRenderer();
-        return new StepExecutor(executor, renderer, builtins);
+        return new StepExecutor(executor, renderer, builtins, secretResolver);
     }
 
     private static ExecutionContext EmptyContext() =>
@@ -73,6 +74,39 @@ public sealed class StepExecutorWhenConditionTests
                         """);
 
         return (toolsDir, logPath);
+    }
+
+    private static async Task<(string ToolsDir, string CommandPath, string LogPath)> CreateCrossPlatformFakeDockerAsync()
+    {
+        var toolsDir = Path.Join(Path.GetTempPath(), $"rexo-fake-docker-mounts-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(toolsDir);
+        var logPath = Path.Join(toolsDir, "docker.log");
+        var commandPath = Path.Join(toolsDir, OperatingSystem.IsWindows() ? "docker.cmd" : "docker");
+
+        if (OperatingSystem.IsWindows())
+        {
+            await File.WriteAllTextAsync(commandPath, """
+                @echo off
+                if /I "%~1"=="run" (
+                    echo %*>>"%REXO_FAKE_DOCKER_LOG%"
+                    echo container-run-ok
+                )
+                exit /b 0
+                """);
+        }
+        else
+        {
+            await File.WriteAllTextAsync(commandPath, """
+                #!/bin/sh
+                printf '%s\n' "$*" >>"$REXO_FAKE_DOCKER_LOG"
+                exit 0
+                """);
+            File.SetUnixFileMode(
+                commandPath,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        return (toolsDir, commandPath, logPath);
     }
 
     private static async Task<string> ComputeExpectedContainerHashAsync(string dockerfilePath, string buildContextPath)
@@ -721,6 +755,189 @@ public sealed class StepExecutorWhenConditionTests
             if (Directory.Exists(repositoryRoot)) Directory.Delete(repositoryRoot, true);
             ContainerEnvMutationGate.Release();
         }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ContainerRunDoesNotFallBackToHostWhenMountsAreConfigured(bool secretMount)
+    {
+        await ContainerEnvMutationGate.WaitAsync();
+        var originalDockerCommand = Environment.GetEnvironmentVariable("REXO_DOCKER_COMMAND");
+        var repositoryRoot = Path.Join(Path.GetTempPath(), $"rexo-mounted-fallback-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(repositoryRoot);
+
+        try
+        {
+            Environment.SetEnvironmentVariable(
+                "REXO_DOCKER_COMMAND",
+                Path.Join(repositoryRoot, "missing-docker.exe"));
+            await File.WriteAllTextAsync(Path.Join(repositoryRoot, "config.json"), "{}");
+            var mount = new StepContainerMountDefinition(
+                secretMount ? null : "config.json",
+                secretMount ? "deployToken" : null,
+                "/run/rexo/config");
+            var step = new StepDefinition(
+                Id: "mounted-container",
+                Run: "echo must-not-run-on-host",
+                Uses: null,
+                Command: null,
+                When: null)
+            {
+                Container = new StepContainerDefinition(
+                    "rexo/test:latest",
+                    Fallback: "host",
+                    Mounts: [mount]),
+            };
+
+            using var executor = CreateExecutor(
+                secretResolver: secretMount ? new StaticSecretResolver() : null);
+            var result = await executor.ExecuteAsync(
+                step,
+                ExecutionContext.Empty(repositoryRoot),
+                CancellationToken.None);
+
+            Assert.False(result.Success);
+            Assert.Equal(127, result.ExitCode);
+            Assert.Contains("cannot fall back to host execution", result.Outputs["stderr"]?.ToString(), StringComparison.Ordinal);
+            Assert.DoesNotContain("must-not-run-on-host", result.Outputs["stdout"]?.ToString(), StringComparison.Ordinal);
+            Assert.Equal("False", result.Outputs["__containerFallbackAllowed"]?.ToString());
+            Assert.Equal("False", result.Outputs["__containerFallbackUsed"]?.ToString());
+        }
+
+        finally
+        {
+            Environment.SetEnvironmentVariable("REXO_DOCKER_COMMAND", originalDockerCommand);
+            if (Directory.Exists(repositoryRoot)) Directory.Delete(repositoryRoot, true);
+            ContainerEnvMutationGate.Release();
+        }
+    }
+
+    [Theory]
+    [InlineData("bridge")]
+    [InlineData("host")]
+    public async Task ContainerRunUsesReadOnlyMountsAndNetworkAndCleansSecretFile(string network)
+    {
+        await ContainerEnvMutationGate.WaitAsync();
+        var originalDockerCommand = Environment.GetEnvironmentVariable("REXO_DOCKER_COMMAND");
+        var originalFakeDockerLog = Environment.GetEnvironmentVariable("REXO_FAKE_DOCKER_LOG");
+        var repoDir = Path.Join(Path.GetTempPath(), $"rexo-container-mount-execution-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(repoDir);
+        var (toolsDir, dockerCommandPath, logPath) = await CreateCrossPlatformFakeDockerAsync();
+
+        try
+        {
+            Environment.SetEnvironmentVariable("REXO_DOCKER_COMMAND", dockerCommandPath);
+            Environment.SetEnvironmentVariable("REXO_FAKE_DOCKER_LOG", logPath);
+            var sourcePath = Path.Join(repoDir, "config.json");
+            await File.WriteAllTextAsync(sourcePath, "{}");
+            var step = new StepDefinition(
+                Id: "mounted-container",
+                Run: "echo container-run",
+                Uses: null,
+                Command: null,
+                When: null)
+            {
+                Container = new StepContainerDefinition(
+                    "rexo/test:latest",
+                    Network: network,
+                    Mounts:
+                    [
+                        new StepContainerMountDefinition("config.json", null, "/run/rexo/config"),
+                        new StepContainerMountDefinition(null, "deployToken", "/run/secrets/deploy"),
+                    ]),
+            };
+
+            using var executor = CreateExecutor(secretResolver: new StaticSecretResolver());
+            var result = await executor.ExecuteAsync(
+                step,
+                ExecutionContext.Empty(repoDir),
+                CancellationToken.None);
+
+            Assert.True(result.Success, result.Outputs["stderr"]?.ToString());
+            var dockerArgs = await File.ReadAllTextAsync(logPath);
+            Assert.Contains($"--network {network}", dockerArgs, StringComparison.Ordinal);
+            Assert.Contains(
+                $"type=bind,source={Path.GetFullPath(sourcePath)},target=/run/rexo/config,readonly",
+                dockerArgs,
+                StringComparison.Ordinal);
+
+            var secretTargetIndex = dockerArgs.IndexOf(
+                ",target=/run/secrets/deploy,readonly",
+                StringComparison.Ordinal);
+            Assert.True(secretTargetIndex > 0);
+            var secretSourceMarker = "type=bind,source=";
+            var secretSourceIndex = dockerArgs.LastIndexOf(
+                secretSourceMarker,
+                secretTargetIndex,
+                StringComparison.Ordinal);
+            Assert.True(secretSourceIndex >= 0);
+            var secretPath = dockerArgs[
+                (secretSourceIndex + secretSourceMarker.Length)..secretTargetIndex];
+            Assert.True(Path.IsPathRooted(secretPath));
+            Assert.False(File.Exists(secretPath));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("REXO_DOCKER_COMMAND", originalDockerCommand);
+            Environment.SetEnvironmentVariable("REXO_FAKE_DOCKER_LOG", originalFakeDockerLog);
+            if (Directory.Exists(repoDir)) Directory.Delete(repoDir, true);
+            if (Directory.Exists(toolsDir)) Directory.Delete(toolsDir, true);
+            ContainerEnvMutationGate.Release();
+        }
+    }
+
+    [Fact]
+    public async Task ContainerRunFailsWhenHostMountSourceIsMissing()
+    {
+        var repositoryRoot = Path.Join(Path.GetTempPath(), $"rexo-missing-container-mount-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(repositoryRoot);
+
+        try
+        {
+            var step = new StepDefinition(
+                Id: "missing-mount",
+                Run: "echo must-not-run",
+                Uses: null,
+                Command: null,
+                When: null)
+            {
+                Container = new StepContainerDefinition(
+                    "rexo/test:latest",
+                    Fallback: "host",
+                    Mounts: [new StepContainerMountDefinition("missing.json", null, "/run/config")]),
+            };
+
+            var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                CreateExecutor().ExecuteAsync(
+                    step,
+                    ExecutionContext.Empty(repositoryRoot),
+                    CancellationToken.None));
+
+            Assert.Contains("does not exist", exception.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(repositoryRoot)) Directory.Delete(repositoryRoot, true);
+        }
+    }
+
+    private sealed class StaticSecretResolver : ISecretResolver
+    {
+        public IReadOnlyDictionary<string, string> ResolvedValues { get; } =
+            new Dictionary<string, string>();
+
+        public IReadOnlyDictionary<string, SecretResolutionMetadata> Metadata { get; } =
+            new Dictionary<string, SecretResolutionMetadata>();
+
+        public IReadOnlyDictionary<string, string> MappedEnvironment { get; } =
+            new Dictionary<string, string>();
+
+        public Task<SecretPreflightResult> PreflightRequiredAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(new SecretPreflightResult(true, [], ResolvedValues, Metadata, MappedEnvironment));
+
+        public Task<string?> GetSecretValueAsync(string name, CancellationToken cancellationToken) =>
+            Task.FromResult<string?>("test-secret");
     }
 
     [Theory]

@@ -167,8 +167,8 @@ push eligibility. This is a repository-specific override, not the standard polic
 provides it) reports release-flow push eligibility without publishing. `rx update` refreshes remote
 policy content hashes in `.rexo/rexo.lock.yaml`; `rx restore` verifies the lock without updating it.
 
-For local promotion, configure an `environments.<name>.path`, build with `--json-file`, then run
-`rx promote <run-manifest.json> <environment>`. This currently supports exactly one locally
+For local promotion, configure `environments.<name>.promotion.path`, build with `--json-file`, then run
+`rx --environment <name> promote <run-manifest.json>`. This currently supports exactly one locally
 available file artifact with a verified SHA-256. It does not deploy remotely or promote mutable
 registry tags. `--dry-run` validates the promotion request without writing promotion objects.
 

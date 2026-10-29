@@ -39,7 +39,16 @@ public sealed record StepContainerDefinition(
     StepContainerBuildDefinition? Build = null,
     string Fallback = "error",
     string? InlineDockerfile = null,
-    string? User = null);
+    string? User = null,
+    string? Network = null,
+    IReadOnlyList<StepContainerMountDefinition>? Mounts = null);
+
+public sealed record StepContainerMountDefinition(
+    string? Source,
+    string? Secret,
+    string Target,
+    bool ReadOnly = true,
+    bool AllowOutsideRepository = false);
 
 public sealed record StepContainerBuildDefinition(
     string? Target = null,

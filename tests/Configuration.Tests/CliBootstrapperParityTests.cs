@@ -1,6 +1,7 @@
 namespace Rexo.Configuration.Tests;
 
 using Rexo.Cli;
+using Rexo.Core.Models;
 
 [Collection("EnvironmentVariableSensitive")]
 public sealed class CliBootstrapperParityTests
@@ -45,7 +46,7 @@ public sealed class CliBootstrapperParityTests
         }
         """);
 
-            var (_, _, effectiveConfig, _) = await CliBootstrapper.BuildServicesAsync(
+            var (_, _, effectiveConfig, _, _, _) = await CliBootstrapper.BuildServicesAsync(
                 dir, debug: false, setOverrides: null, CancellationToken.None);
 
             Assert.NotNull(effectiveConfig?.Secrets?.Defaults?.ProviderChain);
@@ -90,6 +91,72 @@ public sealed class CliBootstrapperParityTests
 
             Assert.Contains("ART-005", ex.Message, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("not-a-real-provider", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task BuildServicesAsyncKeepsSetOverridesAboveEnvironmentOverlays()
+    {
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-parity-environment-{Guid.NewGuid():N}");
+        var rexoDir = Path.Join(dir, ".rexo");
+        Directory.CreateDirectory(rexoDir);
+        var configPath = Path.Join(rexoDir, "rexo.json");
+
+        try
+        {
+            await File.WriteAllTextAsync(configPath, """
+        {
+          "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+          "schemaVersion": "1.0",
+          "name": "sample",
+          "commands": {
+            "deploy": {
+              "usesEnvironment": true,
+              "steps": [
+                { "id": "run", "run": "echo {{vars.deployTarget}}" }
+              ]
+            }
+          },
+          "aliases": {},
+          "vars": { "deployTarget": "base" },
+          "environments": {
+            "staging": {
+              "vars": { "deployTarget": "staging" }
+            }
+          }
+        }
+        """);
+
+            var (_, executor, effectiveConfig, environmentConfig, _, selection) = await CliBootstrapper.BuildServicesAsync(
+                dir,
+                debug: false,
+                setOverrides: ["vars.deployTarget=cli"],
+                CancellationToken.None,
+                explicitEnvironmentName: "staging");
+
+            Assert.Equal("staging", selection.EnvironmentName);
+            Assert.Equal("cli", effectiveConfig?.Vars?["deployTarget"].GetString());
+            Assert.Equal("cli", environmentConfig?.Vars?["deployTarget"].GetString());
+            var invocation = new CommandInvocation(
+                new Dictionary<string, string>(),
+                new Dictionary<string, string?>(),
+                false,
+                null,
+                dir)
+            {
+                EnvironmentSelection = selection,
+            };
+            var commandResult = await executor.ExecuteAsync("deploy", invocation, CancellationToken.None);
+
+            Assert.True(commandResult.Success, commandResult.Message);
+            Assert.Contains(
+                "cli",
+                Assert.IsType<string>(Assert.Single(commandResult.Steps).Outputs["stdout"]),
+                StringComparison.Ordinal);
         }
         finally
         {

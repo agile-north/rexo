@@ -31,7 +31,7 @@ public static class Program
         var workingDir = Environment.CurrentDirectory;
 
         // Parse global flags
-        var (cleanArgs, json, jsonFile, echoMode, echoOptionOccurrences, verbose, debug, quiet, dryRunFlag, nonInteractive, color, setOverrides) = ParseGlobalFlags(args);
+        var (cleanArgs, json, jsonFile, echoMode, echoOptionOccurrences, verbose, debug, quiet, dryRunFlag, nonInteractive, color, setOverrides, explicitEnvironmentName, explicitSourceBranch) = ParseGlobalFlags(args);
         ConsoleRenderer.ConfigureColors(color);
 
         // No args (or only global flags) — show help
@@ -54,10 +54,12 @@ public static class Program
         CommandRegistry registry;
         DefaultCommandExecutor executor;
         RepoConfig? config;
+        RepoConfig? environmentConfig;
         ConfigProvenanceSnapshot provenance;
+        EnvironmentSelectionResult environmentSelection;
         try
         {
-            (registry, executor, config, provenance) = await CliBootstrapper.BuildServicesAsync(
+            (registry, executor, config, environmentConfig, provenance, environmentSelection) = await CliBootstrapper.BuildServicesAsync(
                 workingDir,
                 debug,
                 setOverrides,
@@ -71,7 +73,9 @@ public static class Program
                      cleanArgs[1].Equals("resolved", StringComparison.OrdinalIgnoreCase) &&
                      cleanArgs.Skip(2).Any(argument =>
                          argument.Equals("--provenance", StringComparison.OrdinalIgnoreCase))),
-                registerConfigCommands: command is not ("doctor" or "check"));
+                registerConfigCommands: command is not ("doctor" or "check"),
+                explicitEnvironmentName: explicitEnvironmentName,
+                explicitSourceBranch: explicitSourceBranch);
         }
         catch (Exception ex) when ((command is "restore" or "update") && ex is not OperationCanceledException)
         {
@@ -121,8 +125,38 @@ public static class Program
             return 2;
         }
 
-        var outputSettings = ResolveCommandOutputSettings(config, json, jsonFile, echoMode, quiet);
+        var outputSettings = ResolveCommandOutputSettings(
+            config,
+            json,
+            jsonFile,
+            echoMode,
+            quiet,
+            environmentSelection,
+            environmentConfig);
         var dryRun = ResolveDryRun(config, dryRunFlag);
+
+        if (environmentSelection.Error is not null &&
+            !(command.Equals("environment", StringComparison.OrdinalIgnoreCase) &&
+              cleanArgs.Count > 1 &&
+              cleanArgs[1].Equals("resolve", StringComparison.OrdinalIgnoreCase)))
+        {
+            var failure = new CommandResult(
+                "environment",
+                false,
+                9,
+                environmentSelection.Error,
+                new Dictionary<string, object?>
+                {
+                    ["error"] = environmentSelection.Error,
+                    ["environmentSelection"] = environmentSelection,
+                });
+            return await WriteResultAsync(
+                failure,
+                EmptyInvocation(workingDir, outputSettings, dryRun, debug),
+                verbose,
+                quiet,
+                cancellationToken);
+        }
 
         return command switch
         {
@@ -141,6 +175,7 @@ public static class Program
             "update" => await RunPolicyLockCommandAsync(
                 update: true, workingDir, config, outputSettings, verbose, quiet, dryRun, cancellationToken),
             "promote" => await RunPromoteAsync(cleanArgs, workingDir, config, outputSettings, verbose, quiet, dryRun, debug, cancellationToken),
+            "environment" => await RunEnvironmentSubcommandAsync(cleanArgs, workingDir, config, outputSettings, verbose, quiet, dryRun, debug, cancellationToken),
             "config" when cleanArgs.Count > 1 && cleanArgs[1].Equals("explain", StringComparison.OrdinalIgnoreCase) =>
                 await RunConfigExplainAsync(cleanArgs, workingDir, config, provenance, outputSettings, verbose, quiet, cancellationToken),
             "config" => await RunConfigSubcommandAsync(cleanArgs, executor, workingDir, config, outputSettings, verbose, quiet, dryRun, debug, provenance, cancellationToken),
@@ -349,12 +384,13 @@ public static class Program
     {
         var startedAt = DateTimeOffset.UtcNow;
         CommandResult result;
-        if (args.Count < 3 || config is null)
+        var selectedEnvironment = outputSettings.EnvironmentSelection.EnvironmentName;
+        if (args.Count < 2 || config is null || selectedEnvironment is null)
         {
             result = CommandResult.Fail(
                 "promote",
                 1,
-                "Usage: rx promote <run-manifest.json> <environment>; define environments.<name>.path in configuration.");
+                "Usage: rx --environment <name> promote <run-manifest.json>; define environments.<name>.promotion.path in configuration.");
         }
         else
         {
@@ -362,7 +398,7 @@ public static class Program
             {
                 var message = await ArtifactPromotionService.PromoteAsync(
                     args[1],
-                    args[2],
+                    selectedEnvironment,
                     config,
                     workingDir,
                     dryRun,
@@ -381,6 +417,77 @@ public static class Program
         await WriteRunManifestAsync(
             result,
             "promote",
+            workingDir,
+            startedAt,
+            completedAt,
+            invocation.JsonFile,
+            config,
+            outputSettings,
+            cancellationToken);
+        return exitCode;
+    }
+
+    private static async Task<int> RunEnvironmentSubcommandAsync(
+        IReadOnlyList<string> args,
+        string workingDir,
+        RepoConfig? config,
+        CommandOutputSettings outputSettings,
+        bool verbose,
+        bool quiet,
+        bool dryRun,
+        bool debug,
+        CancellationToken cancellationToken)
+    {
+        var startedAt = DateTimeOffset.UtcNow;
+        var selection = outputSettings.EnvironmentSelection;
+        CommandResult result;
+        if (args.Count < 2 || !args[1].Equals("resolve", StringComparison.OrdinalIgnoreCase))
+        {
+            result = CommandResult.Fail("environment", 1, "Usage: rx environment resolve [--json]");
+        }
+        else
+        {
+            var outputs = new Dictionary<string, object?>
+            {
+                ["environment"] = selection.EnvironmentName,
+                ["selectionSource"] = selection.SelectionSource,
+                ["sourceBranch"] = selection.SourceBranch,
+                ["branchSource"] = selection.BranchSource,
+                ["matchedPattern"] = selection.MatchedPattern,
+                ["isExplicit"] = selection.IsExplicit,
+                ["resolved"] = selection.IsResolved,
+                ["isPullRequest"] = selection.IsPullRequest,
+                ["overrodeAutomaticSelection"] = selection.OverrodeAutomaticSelection,
+                ["matchingEnvironments"] = selection.MatchingEnvironments
+                    .Select(match => new
+                    {
+                        environment = match.EnvironmentName,
+                        matchedPattern = match.MatchedPattern,
+                    })
+                    .ToArray(),
+            };
+            if (selection.Error is not null)
+            {
+                outputs["error"] = selection.Error;
+            }
+
+            var summary = selection.Error ?? (selection.IsResolved
+                ? $"Selected environment '{selection.EnvironmentName}' using {selection.SelectionSource}."
+                : "No environment matched the source branch.");
+            result = new CommandResult(
+                "environment resolve",
+                selection.Error is null,
+                selection.Error is null ? 0 : 9,
+                summary,
+                outputs);
+        }
+
+        var completedAt = DateTimeOffset.UtcNow;
+        var invocation = EmptyInvocation(workingDir, outputSettings, dryRun, debug);
+        var exitCode = await WriteResultAsync(result, invocation, verbose, quiet, cancellationToken);
+        await WriteRunManifestAsync(
+            result,
+            "environment resolve",
             workingDir,
             startedAt,
             completedAt,
@@ -472,9 +579,20 @@ public static class Program
         var startedAt = DateTimeOffset.UtcNow;
         var includeProvenance = subCommand == "config resolved" &&
             args.Skip(2).Any(argument => argument.Equals("--provenance", StringComparison.OrdinalIgnoreCase));
-        var result = includeProvenance
-            ? CreateConfigResolvedWithProvenance(config, provenance, workingDir)
-            : await ExecuteCommandAsync(executor, subCommand, invocation, cancellationToken);
+        var inspectionConfig = outputSettings.EnvironmentConfig ?? config;
+        var result = subCommand == "config resolved" && includeProvenance
+            ? CreateConfigResolvedWithProvenance(
+                inspectionConfig,
+                config,
+                provenance,
+                workingDir,
+                outputSettings.EnvironmentSelection)
+            : subCommand == "config resolved" && outputSettings.EnvironmentSelection.EnvironmentName is not null
+                ? CreateConfigResolvedForEnvironment(
+                    inspectionConfig,
+                    config,
+                    outputSettings.EnvironmentSelection.EnvironmentName)
+                : await ExecuteCommandAsync(executor, subCommand, invocation, cancellationToken);
         var completedAt = DateTimeOffset.UtcNow;
         var exitCode = await WriteResultAsync(result, invocation, verbose, quiet, cancellationToken);
 
@@ -485,8 +603,10 @@ public static class Program
 
     private static CommandResult CreateConfigResolvedWithProvenance(
         RepoConfig? config,
+        RepoConfig? baseConfig,
         ConfigProvenanceSnapshot provenance,
-        string workingDirectory)
+        string workingDirectory,
+        EnvironmentSelectionResult environmentSelection)
     {
         if (config is null)
         {
@@ -506,6 +626,11 @@ public static class Program
         }
 
         sourceLayers.AddRange(repositoryFiles.Select(path => $"repository file: {path}"));
+        if (environmentSelection.EnvironmentName is { } selectedEnvironment)
+        {
+            sourceLayers.Add($"environment overlay: {selectedEnvironment}");
+        }
+
         sourceLayers.AddRange(provenance.SetOverrides.Select(overrideValue =>
         {
             var separator = overrideValue.IndexOf('=', StringComparison.Ordinal);
@@ -521,9 +646,23 @@ public static class Program
             ["policySourceAttributionAvailable"] = false,
             ["sensitiveValuesRedacted"] = true,
         };
+        if (environmentSelection.EnvironmentName is { } environmentName)
+        {
+            outputs["environment"] = environmentName;
+            outputs["environmentConfigHash"] = CanonicalConfigHasher.Compute(config);
+            outputs["baseConfig"] = RedactConfigNode(
+                System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(baseConfig)));
+        }
         var message = JsonSerializer.Serialize(new
         {
             effectiveConfig,
+            baseConfig = environmentSelection.EnvironmentName is not null
+                ? RedactConfigNode(System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(baseConfig)))
+                : null,
+            environment = environmentSelection.EnvironmentName,
+            environmentConfigHash = environmentSelection.EnvironmentName is not null
+                ? CanonicalConfigHasher.Compute(config)
+                : null,
             provenance = new
             {
                 sourceLayers,
@@ -536,10 +675,49 @@ public static class Program
                 mergedPolicySourceGroupAvailable = provenance.PolicyConfig is not null,
                 repositoryFileAttributionAvailable = provenance.RepositoryLayers.Count > 0,
                 policySourceAttributionAvailable = false,
-                note = "Repository files are listed as declaration sources; exact field-level merge ownership and individual policy-source attribution are not available.",
+                note = "Repository files are listed as declaration sources; exact field-level merge ownership and individual policy-source attribution are not available. The resolved configuration includes the selected environment overlay before final CLI --set overrides.",
             },
         }, JsonOptions);
         return new CommandResult("config resolved", true, 0, message, outputs);
+    }
+
+    private static CommandResult CreateConfigResolvedForEnvironment(
+        RepoConfig? environmentConfig,
+        RepoConfig? baseConfig,
+        string environmentName)
+    {
+        if (environmentConfig is null)
+        {
+            return CommandResult.Fail("config resolved", 1, "No rexo configuration loaded.");
+        }
+
+        var resolvedConfig = RedactConfigNode(
+            System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(environmentConfig)));
+        var redactedBaseConfig = baseConfig is null
+            ? null
+            : RedactConfigNode(System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(baseConfig)));
+        var configHash = CanonicalConfigHasher.Compute(environmentConfig);
+        var result = new
+        {
+            effectiveConfig = resolvedConfig,
+            baseConfig = redactedBaseConfig,
+            environment = environmentName,
+            environmentConfigHash = configHash,
+        };
+        var outputs = new Dictionary<string, object?>
+        {
+            ["effectiveConfig"] = resolvedConfig,
+            ["baseConfig"] = redactedBaseConfig,
+            ["environment"] = environmentName,
+            ["environmentConfigHash"] = configHash,
+            ["sensitiveValuesRedacted"] = true,
+        };
+        return new CommandResult(
+            "config resolved",
+            true,
+            0,
+            JsonSerializer.Serialize(result, JsonOptions),
+            outputs);
     }
 
     private static async Task<int> RunConfigExplainAsync(
@@ -559,7 +737,8 @@ public static class Program
         }
 
         var propertyPath = args[2];
-        using var document = JsonDocument.Parse(JsonSerializer.Serialize(config));
+        var inspectionConfig = outputSettings.EnvironmentConfig ?? config;
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(inspectionConfig));
         var value = ResolveConfigProperty(document.RootElement, propertyPath);
         var isSensitive = propertyPath
             .Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -572,7 +751,22 @@ public static class Program
         var valueJson = safeValue is null
             ? "<not found>"
             : JsonSerializer.Serialize(safeValue, JsonOptions);
-        var sourceLayers = GetConfigSourceLayers(propertyPath, provenance, workingDir);
+        var sourceLayers = GetConfigSourceLayers(propertyPath, provenance, workingDir).ToList();
+        if (outputSettings.EnvironmentConfig is { } environmentConfig &&
+            outputSettings.EnvironmentSelection.EnvironmentName is { } environmentName &&
+            ConfigPropertyDiffers(config, environmentConfig, propertyPath))
+        {
+            var cliOverrideIndex = sourceLayers.IndexOf("CLI --set override");
+            if (cliOverrideIndex < 0)
+            {
+                sourceLayers.Add($"environment overlay: {environmentName}");
+            }
+            else
+            {
+                sourceLayers.Insert(cliOverrideIndex, $"environment overlay: {environmentName}");
+            }
+        }
+
         var source = string.Join(" -> ", sourceLayers);
         var message = $"Property: {propertyPath}\nEffective value: {valueJson}\nApplicable declarations: {source}\n" +
             "Note: repository file contributors are listed; merged policy sources are reported as a group because exact per-source field attribution is not available.";
@@ -587,6 +781,18 @@ public static class Program
         });
         var invocation = EmptyInvocation(workingDir, outputSettings, dryRun: false, debug: false);
         return await WriteResultAsync(result, invocation, verbose, quiet, cancellationToken);
+    }
+
+    private static bool ConfigPropertyDiffers(RepoConfig? baseConfig, RepoConfig environmentConfig, string propertyPath)
+    {
+        if (baseConfig is null)
+        {
+            return ResolveSerializedProperty(environmentConfig, propertyPath) is not null;
+        }
+
+        var baseValue = ResolveSerializedProperty(baseConfig, propertyPath);
+        var environmentValue = ResolveSerializedProperty(environmentConfig, propertyPath);
+        return !string.Equals(baseValue?.GetRawText(), environmentValue?.GetRawText(), StringComparison.Ordinal);
     }
 
     private static IReadOnlyList<string> GetConfigSourceLayers(
@@ -1065,7 +1271,16 @@ public static class Program
             if (manifestPath == jsonFile) manifestPath = jsonFile + ".manifest.json";
         }
 
-        var configHash = config is null ? null : CanonicalConfigHasher.Compute(config);
+        var usesEnvironment = config?.Commands is { } commandConfigurations &&
+            commandConfigurations.TryGetValue(commandName, out var commandConfig) &&
+            commandConfig.UsesEnvironment == true;
+        var manifestConfig = usesEnvironment && outputSettings.EnvironmentConfig is not null
+            ? outputSettings.EnvironmentConfig
+            : config;
+        var configHash = manifestConfig is null ? null : CanonicalConfigHasher.Compute(manifestConfig);
+        var environmentConfigHash = outputSettings.EnvironmentConfig is null
+            ? null
+            : CanonicalConfigHasher.Compute(outputSettings.EnvironmentConfig);
         var policyLockPath = Path.Join(workingDir, ".rexo", "rexo.lock.yaml");
         string? policyLockHash = null;
         if (File.Exists(policyLockPath))
@@ -1085,11 +1300,19 @@ public static class Program
             CommitSha = gitInfo.CommitSha,
             RemoteUrl = gitInfo.RemoteUrl,
             CommandExecuted = commandName,
+            Environment = outputSettings.EnvironmentSelection?.EnvironmentName,
+            EnvironmentSelectionSource = outputSettings.EnvironmentSelection?.SelectionSource,
+            SourceBranch = outputSettings.EnvironmentSelection?.SourceBranch,
+            SourceBranchOrigin = outputSettings.EnvironmentSelection?.BranchSource,
+            MatchedBranchPattern = outputSettings.EnvironmentSelection?.MatchedPattern,
+            EnvironmentSelectionExplicit = outputSettings.EnvironmentSelection?.IsExplicit,
+            EnvironmentSelectionOverrodeAutomaticMatches = outputSettings.EnvironmentSelection?.OverrodeAutomaticSelection,
             Success = result.Success,
             ExitCode = result.ExitCode,
             StartedAt = startedAt,
             CompletedAt = completedAt,
             ConfigHash = configHash,
+            EnvironmentConfigHash = environmentConfigHash,
             PolicyLockHash = policyLockHash,
             Version = result.Version,
             AssemblyVersion = result.Version?.AssemblyVersion,
@@ -1305,7 +1528,7 @@ public static class Program
             .FirstOrDefault()?.InformationalVersion ?? "0.1.0-local";
     }
 
-    private static (IReadOnlyList<string> cleanArgs, bool json, string? jsonFile, string? echoMode, IReadOnlyList<EchoOptionOccurrence> echoOptionOccurrences, bool verbose, bool debug, bool quiet, bool? dryRun, bool nonInteractive, bool? color, IReadOnlyList<string> setOverrides) ParseGlobalFlags(string[] args)
+    private static (IReadOnlyList<string> cleanArgs, bool json, string? jsonFile, string? echoMode, IReadOnlyList<EchoOptionOccurrence> echoOptionOccurrences, bool verbose, bool debug, bool quiet, bool? dryRun, bool nonInteractive, bool? color, IReadOnlyList<string> setOverrides, string? explicitEnvironmentName, string? explicitSourceBranch) ParseGlobalFlags(string[] args)
     {
         var clean = new List<string>();
         var json = false;
@@ -1319,6 +1542,8 @@ public static class Program
         var nonInteractive = false;
         bool? color = null;
         var setOverrides = new List<string>();
+        string? explicitEnvironmentName = null;
+        string? explicitSourceBranch = null;
 
         for (var i = 0; i < args.Length; i++)
         {
@@ -1371,13 +1596,33 @@ public static class Program
                 case "--set" when i + 1 < args.Length:
                     setOverrides.Add(args[++i]);
                     break;
+                case "--environment" when i + 1 < args.Length &&
+                    !args[i + 1].StartsWith("--", StringComparison.Ordinal):
+                    explicitEnvironmentName = args[++i];
+                    break;
+                case "--environment":
+                    explicitEnvironmentName = string.Empty;
+                    break;
+                case var option when option.StartsWith("--environment=", StringComparison.Ordinal):
+                    explicitEnvironmentName = option["--environment=".Length..];
+                    break;
+                case "--source-branch" when i + 1 < args.Length &&
+                    !args[i + 1].StartsWith("--", StringComparison.Ordinal):
+                    explicitSourceBranch = args[++i];
+                    break;
+                case "--source-branch":
+                    explicitSourceBranch = string.Empty;
+                    break;
+                case var option when option.StartsWith("--source-branch=", StringComparison.Ordinal):
+                    explicitSourceBranch = option["--source-branch=".Length..];
+                    break;
                 default:
                     clean.Add(args[i]);
                     break;
             }
         }
 
-        return (clean, json, jsonFile, echoMode, echoOptionOccurrences, verbose, debug, quiet, dryRun, nonInteractive, color, setOverrides);
+        return (clean, json, jsonFile, echoMode, echoOptionOccurrences, verbose, debug, quiet, dryRun, nonInteractive, color, setOverrides, explicitEnvironmentName, explicitSourceBranch);
     }
 
     private static (IReadOnlyDictionary<string, string> args, IReadOnlyDictionary<string, string?> options)
@@ -1435,7 +1680,8 @@ public static class Program
         Console.WriteLine("  completion <shell>          Generate bash, zsh, fish, or PowerShell completions");
         Console.WriteLine("  restore                     Verify configured policy sources against the lockfile");
         Console.WriteLine("  update                      Resolve and refresh the policy lockfile");
-        Console.WriteLine("  promote <manifest> <env>    Promote a verified local file artifact without rebuilding");
+        Console.WriteLine("  promote <manifest>          Promote a verified local file artifact without rebuilding");
+        Console.WriteLine("  environment resolve        Explain explicit or branch-based environment selection");
         Console.WriteLine("  capabilities                Show runtime capability contract and supported features");
         Console.WriteLine("  init                        Create a starter rexo config");
         Console.WriteLine("  new                         Alias for init");
@@ -1477,6 +1723,8 @@ public static class Program
         Console.WriteLine("  --non-interactive           Disable interactive prompts");
         Console.WriteLine("  --color / --no-color        Force color output on or off (NO_COLOR disables by default)");
         Console.WriteLine("  --set <key.path=value>      Override a config value (repeatable; see docs/configuration/overrides.md)");
+        Console.WriteLine("  --environment <name>        Select an execution environment");
+        Console.WriteLine("  --source-branch <branch>    Override source branch for automatic environment selection");
     }
 
     private static CommandInvocation EmptyInvocation(string workingDir, CommandOutputSettings outputSettings, bool dryRun, bool debug) =>
@@ -1507,6 +1755,7 @@ public static class Program
             Stdout = outputSettings.Stdout,
             EchoMode = outputSettings.EchoMode,
             PresentationEchoMode = outputSettings.PresentationEchoMode,
+            EnvironmentSelection = outputSettings.EnvironmentSelection,
         };
     }
 
@@ -1525,7 +1774,9 @@ public static class Program
         bool jsonFlag,
         string? jsonFileFlag,
         string? echoMode,
-        bool quiet)
+        bool quiet,
+        EnvironmentSelectionResult environmentSelection,
+        RepoConfig? environmentConfig)
     {
         var commandOutputs = config?.Outputs?.Command;
         var json = jsonFlag || commandOutputs?.Json == true;
@@ -1545,7 +1796,9 @@ public static class Program
             string.IsNullOrWhiteSpace(jsonFile) ? null : jsonFile,
             stdout,
             echoMode,
-            normalizedEchoMode);
+            normalizedEchoMode,
+            environmentSelection,
+            environmentConfig);
     }
 
     private static string ResolvePresentationEchoMode(string? cliEcho, string? commandEcho, string? runtimeEcho)
@@ -1728,7 +1981,9 @@ public static class Program
         string? JsonFile,
         bool Stdout,
         string? EchoMode,
-        string PresentationEchoMode);
+        string PresentationEchoMode,
+        EnvironmentSelectionResult EnvironmentSelection,
+        RepoConfig? EnvironmentConfig);
 
     private static IReadOnlyList<string> DiscoverUiProjectRoots(string currentWorkingDir)
     {

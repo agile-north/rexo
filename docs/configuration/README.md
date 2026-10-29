@@ -25,6 +25,9 @@ fallback, and validation), see [Containerized Run Steps](./containerized-run.md)
 
 For CLI config overrides, see [CLI Overrides](./overrides.md).
 
+For branch-based environment selection, the `usesEnvironment`/`requiresEnvironment` command
+opt-ins, cross-CI examples, and promotion, see [Execution Environments](./environments.md).
+
 Default repository configuration file: **`.rexo/rexo.yaml`**
 
 YAML and JSON are equally supported: both formats are validated against the same JSON Schema
@@ -42,16 +45,21 @@ If more than one candidate exists, Rexo uses the first match and prints a warnin
 ignored files (also reported by `rx doctor` as `config-duplicates`).
 
 Use `rx config explain <property.path>` to inspect a value from the effective merged
-configuration. Sensitive property names and nested credentials are redacted. Its JSON output
+configuration; with `--environment <name>`, the selected environment overlay is included.
+Sensitive property names and nested credentials are redacted. Its JSON output
 identifies applicable merged policy, repository config files that declare the property (including
-resolved local `extends` and overlays), and CLI `--set` layers in precedence order. Policy source
-files remain grouped; the repository file list identifies declarations rather than resolving
-field-level merge behavior.
+resolved local `extends` and overlays), selected environment overlays that change the value, and
+CLI `--set` layers in precedence order. Policy source files remain grouped; the repository file
+list identifies declarations rather than resolving field-level merge behavior.
 
 Use `rx config resolved --provenance` to emit the effective configuration with sensitive values
 redacted alongside repository config files, the merged policy group, and CLI `--set` property paths
 (override values are omitted). Repository file paths indicate declarations rather than exact
 field-level merge ownership.
+
+With `--environment <name>`, `rx config resolved` reports the selected environment's effective
+configuration and its base configuration separately. This inspection shows the overlay regardless
+of whether an individual command opts in with `usesEnvironment: true`.
 
 ## Remote policy lockfile
 
@@ -82,25 +90,6 @@ reports direct process/environment-file presence only; warnings may not account 
 secrets. Use `rx plan --push` when the configured lifecycle provides it to inspect policy and
 credential eligibility without publishing.
 
-## Local artifact promotion
-
-Named environments currently identify repository-relative local artifact directories:
-
-```yaml
-environments:
-  staging:
-    path: deployments/staging
-```
-
-Run a build with `--json-file` to create its sidecar manifest, then promote its single verified
-file artifact with `rx promote <run-manifest.json> staging`. Promotion verifies the recorded
-SHA-256 and copies the same bytes into an immutable content-addressed directory; it never rebuilds.
-`--dry-run` validates the source and reports the destination without writing files. This initial
-contract supports one local file artifact at a time; providers that only report remote references
-(such as container image tags) are rejected rather than treated as immutable identities. A JSON
-record is written beside the promoted object with the source commit, version, config hash, lockfile
-hash, target environment, and timestamp. This is local file promotion, not a remote deploy workflow.
-
 ## CLI workflow and safety
 
 - `rx doctor` performs lightweight runtime/tool availability checks. `rx check [--strict]` inspects
@@ -118,9 +107,9 @@ hash, target environment, and timestamp. This is local file promotion, not a rem
 - `rx update` refreshes `.rexo/rexo.lock.yaml`; `rx restore` verifies every configured remote policy
   source against it without updating the lock. `REXO_POLICY_REQUIRE_LOCKED=true` requires lock
   coverage during ordinary commands.
-- `rx promote <run-manifest.json> <environment>` copies exactly one local file artifact after
-  verifying its recorded SHA-256. `--dry-run` performs validation without writing promotion files.
-  This does not deploy to a remote environment or promote a mutable registry tag.
+- `rx environment resolve --json` explains explicit and automatic environment selection.
+- `rx --environment <name> promote <run-manifest.json>` copies exactly one local file artifact
+  after verifying its recorded SHA-256. See [Execution Environments](./environments.md).
 
 ---
 

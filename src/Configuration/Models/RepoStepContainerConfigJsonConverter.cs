@@ -47,6 +47,8 @@ internal sealed class RepoStepContainerConfigJsonConverter : JsonConverter<RepoS
             Fallback = dto.Fallback,
             InlineDockerfile = inlineDockerfile,
             User = dto.User,
+            Network = dto.Network,
+            Mounts = dto.Mounts,
         };
     }
 
@@ -69,6 +71,8 @@ internal sealed class RepoStepContainerConfigJsonConverter : JsonConverter<RepoS
             Context = value.Context,
             Build = value.Build,
             Fallback = value.Fallback,
+            Network = value.Network,
+            Mounts = value.Mounts,
         };
 
         JsonSerializer.Serialize(writer, dto, options);
@@ -168,6 +172,14 @@ internal sealed class RepoStepContainerConfigJsonConverter : JsonConverter<RepoS
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         [JsonPropertyName("fallback")]
         public string? Fallback { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("network")]
+        public string? Network { get; set; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        [JsonPropertyName("mounts")]
+        public IReadOnlyList<RepoStepContainerMountConfig>? Mounts { get; set; }
     }
 
     private sealed class DockerfileObject

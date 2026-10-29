@@ -110,6 +110,30 @@ public sealed class CiOutputEmitterTests
     }
 
     [Fact]
+    public void SafePayloadIncludesEnvironmentSelectionMetadata()
+    {
+        var manifest = new RunManifest
+        {
+            Environment = "production",
+            EnvironmentSelectionSource = "branch",
+            SourceBranch = "main",
+            SourceBranchOrigin = "github-actions",
+            MatchedBranchPattern = "main",
+            EnvironmentSelectionExplicit = false,
+            EnvironmentSelectionOverrodeAutomaticMatches = false,
+        };
+
+        var payload = CiOutputEmitter.BuildPayload(manifest);
+
+        Assert.Equal("production", payload.Variables["REXO_ENVIRONMENT"]);
+        Assert.Equal("branch", payload.Variables["REXO_ENVIRONMENT_SELECTION_SOURCE"]);
+        Assert.Equal("main", payload.Variables["REXO_SOURCE_BRANCH"]);
+        Assert.Equal("github-actions", payload.Variables["REXO_SOURCE_BRANCH_ORIGIN"]);
+        Assert.Equal("main", payload.Variables["REXO_MATCHED_BRANCH_PATTERN"]);
+        Assert.Equal("false", payload.Variables["REXO_ENVIRONMENT_SELECTION_EXPLICIT"]);
+    }
+
+    [Fact]
     public void BuildPayloadSupportsLowerSnakeAndCollisionSuffixing()
     {
         var manifest = new RunManifest

@@ -37,6 +37,11 @@ This keeps builtins and delegated commands in their native execution model.
   "container": {
     "image": "mcr.microsoft.com/dotnet/sdk:10.0",
     "workingDirectory": "/work",
+    "network": "bridge",
+    "mounts": [
+      { "source": "config", "target": "/run/config", "readOnly": true },
+      { "secret": "deployToken", "target": "/run/secrets/deploy-token" }
+    ],
     "entrypoint": "dotnet",
     "dockerfile": "Dockerfile",
     "context": ".",
@@ -73,6 +78,16 @@ Optional container fields:
 - `container.context`: docker build context directory (default: repository root).
 - `container.build.target`: optional docker build stage passed as `--target`.
 - `container.build.args`: optional docker build args map passed as repeated `--build-arg key=value`.
+- `container.network`: optional Docker network mode, currently `bridge` or `host`.
+- `container.mounts`: explicit host-path or secret-file mounts. Targets must be absolute
+  container paths. Host sources must exist and resolve inside the repository unless
+  `allowOutsideRepository: true` is set. Mounts are read-only by default.
+
+Secret mounts use `{ secret: <logical-name>, target: <absolute-path> }`. Rexo preflights
+secrets referenced by container mounts before any command step runs, writes each secret to a
+temporary file with owner-only permissions where supported, mounts it read-only, and removes
+the temporary file after the step completes. A missing or unresolved secret fails the command
+before its first step or Docker is invoked.
 
 When `container.dockerfile` is set, Rexo performs an image preflight:
 
@@ -197,7 +212,10 @@ steps:
 ```
 
 Host fallback must be explicitly enabled on the inline container spec or inherited registry
-definition:
+definition. A configured explicit mount (host path or secret file) always disables host
+fallback, even when `fallback: host` is set: those files and credentials are only available
+inside the container, so Rexo fails closed rather than changing the command's execution
+assumptions.
 
 ```yaml
 containers:

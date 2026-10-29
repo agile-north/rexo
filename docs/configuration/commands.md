@@ -14,6 +14,9 @@ Each key is a command name (spaces allowed for multi-word commands).
     "description": "Build the project",
     "echo": "summary",            // optional: none | summary | full
     "hidden": false,              // optional: omit from default discovery when true
+    "requiresEnvironment": true,  // optional: require a selected execution environment
+    "usesEnvironment": true,       // optional: apply selected environment vars/settings/secrets
+    "requiredSecrets": ["apiKey"], // optional: preflight logical secrets before any step
     "before": "gh",                // optional hook: string command alias
     "options": {
       "configuration": { "type": "string", "default": "Release" }
@@ -62,6 +65,17 @@ Example:
 ```
 
 `hidden` is a discovery-only feature, not an access-control boundary.
+
+### Environment and secret requirements
+
+Commands are environment-optional by default. Set `requiresEnvironment: true` for a
+command that must have a resolved environment selection; it fails before secret resolution
+or step execution when none is selected. Independently, set `usesEnvironment: true` to apply
+the selected environment's `vars`, `settings`, and secrets to that command. Keep
+environment-independent build and release commands unmarked. `requiredSecrets` names logical
+secrets that must resolve before any command step runs, even if those secret definitions are
+optional. Secrets referenced by container file mounts are also preflighted before any step
+runs. See [Execution Environments](environments.md) for selection and overlay behavior.
 
 ### Command hooks (`before` / `after`)
 

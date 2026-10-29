@@ -242,21 +242,26 @@ Example shape:
   "Warnings": [],
   "Errors": [],
   "ConfigHash": "sha256...",
+  "EnvironmentConfigHash": "sha256...",
   "AssemblyVersion": "1.2.3.0",
   "InformationalVersion": "1.2.3",
   "NuGetVersion": "1.2.3"
 }
 ```
 
-`ConfigHash` is calculated from the effective configuration using canonical JSON ordering, so
-equivalent YAML and JSON configurations produce the same value. Credential-like fields are
-omitted recursively before hashing; secret declarations and provider references remain part of
-the identity, but the hash does not attest to resolved secret values.
+`ConfigHash` is calculated from the configuration used by the command, using canonical JSON
+ordering, so equivalent YAML and JSON configurations produce the same value. For a command
+marked `usesEnvironment: true`, this includes the selected environment overlay and final CLI
+`--set` overrides. `EnvironmentConfigHash` identifies the selected environment overlay when
+one is resolved. Credential-like fields are omitted recursively before hashing; secret
+declarations and provider references remain part of the identity, but neither hash attests to
+resolved secret values.
 
 `PolicyLockHash` is the SHA-256 of `.rexo/rexo.lock.yaml` when present. Build-artifact entries
 include `Location` and `ContentSha256` when the provider produced a local file that Rexo can hash.
-`rx promote <run-manifest.json> <environment>` uses this exact local artifact identity and refuses
-to rebuild, overwrite different bytes, or promote provider outputs without a verified file hash.
+`rx --environment <name> promote <run-manifest.json>` uses this exact local artifact identity and
+the selected environment's `promotion.path`. It refuses to rebuild, overwrite different bytes, or
+promote provider outputs without a verified file hash.
 The manifest does not currently generate SBOMs or cryptographic provenance attestations; registry
 outputs without a provider-reported immutable digest are not promoted as if they were verified.
 

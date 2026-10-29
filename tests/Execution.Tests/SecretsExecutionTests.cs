@@ -438,6 +438,9 @@ public sealed class SecretsExecutionTests
         var originalTargetValue = Environment.GetEnvironmentVariable(targetVariable);
         Environment.SetEnvironmentVariable(sourceVariable, null);
         Environment.SetEnvironmentVariable(targetVariable, null);
+        var verifyMissingMapping = OperatingSystem.IsWindows()
+            ? $"pwsh -NoProfile -Command \"if ([Environment]::GetEnvironmentVariable('{targetVariable}') -eq $null) {{ Write-Output missing-optional }} else {{ Write-Output unexpectedly-injected; exit 7 }}\""
+            : $"test -z \"${targetVariable}\" && printf missing-optional";
         var config = CreateConfig(
             runCommand: "echo should-not-run",
             secrets: new RepoSecretsConfig())
@@ -448,7 +451,7 @@ public sealed class SecretsExecutionTests
                     ["run"] = new RepoCommandConfig(
                         "run",
                         new Dictionary<string, RepoOptionConfig>(),
-                        [new RepoStepConfig(Id: "run", Run: $"pwsh -NoProfile -Command \"if ([Environment]::GetEnvironmentVariable('{targetVariable}') -eq $null) {{ Write-Output missing-optional }} else {{ Write-Output unexpectedly-injected; exit 7 }}\"")])
+                        [new RepoStepConfig(Id: "run", Run: verifyMissingMapping)])
                     {
                         UsesEnvironment = true,
                         RequiresEnvironment = true,

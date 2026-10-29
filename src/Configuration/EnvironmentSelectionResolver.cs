@@ -2,6 +2,7 @@ namespace Rexo.Configuration;
 
 using Rexo.Configuration.Models;
 using Rexo.Core.Models;
+using System.Text.RegularExpressions;
 
 public static class BranchRefNormalizer
 {
@@ -56,24 +57,22 @@ public static class EnvironmentSelectionResolver
         bool isPullRequest)
     {
         ArgumentNullException.ThrowIfNull(config);
-        var branchMatches = ResolveBranchMatches(config.Environments, sourceBranch, isPullRequest);
-        if (explicitEnvironment is not null)
+        if (explicitEnvironment is not null || !string.IsNullOrWhiteSpace(environmentVariableEnvironment))
         {
-            return ResolveExplicit(config.Environments, explicitEnvironment, "cli", sourceBranch, branchSource, branchMatches, isPullRequest);
-        }
-
-        if (!string.IsNullOrWhiteSpace(environmentVariableEnvironment))
-        {
+            var selectionSource = explicitEnvironment is not null ? "cli" : "environment-variable";
+            var requestedEnvironment = explicitEnvironment ?? environmentVariableEnvironment!;
+            var branchMatches = ResolveBranchMatchesForDiagnostics(config.Environments, sourceBranch, isPullRequest);
             return ResolveExplicit(
                 config.Environments,
-                environmentVariableEnvironment,
-                "environment-variable",
+                requestedEnvironment,
+                selectionSource,
                 sourceBranch,
                 branchSource,
                 branchMatches,
                 isPullRequest);
         }
 
+        var automaticMatches = ResolveBranchMatches(config.Environments, sourceBranch, isPullRequest);
         if (isPullRequest || sourceBranch is null)
         {
             return new EnvironmentSelectionResult
@@ -85,18 +84,18 @@ public static class EnvironmentSelectionResolver
             };
         }
 
-        if (branchMatches.Count > 1)
+        if (automaticMatches.Count > 1)
         {
             var details = string.Join(
                 Environment.NewLine,
-                branchMatches.Select(match => $"  {match.EnvironmentName,-12} {match.MatchedPattern}"));
+                automaticMatches.Select(match => $"  {match.EnvironmentName,-12} {match.MatchedPattern}"));
             return new EnvironmentSelectionResult
             {
                 SourceBranch = sourceBranch,
                 BranchSource = branchSource,
                 SelectionSource = "branch",
                 IsPullRequest = false,
-                MatchingEnvironments = branchMatches,
+                MatchingEnvironments = automaticMatches,
                 Error = "Automatic environment selection failed." + Environment.NewLine + Environment.NewLine +
                     $"Source branch: {sourceBranch}" + Environment.NewLine + Environment.NewLine +
                     "Matching environments:" + Environment.NewLine + details + Environment.NewLine + Environment.NewLine +
@@ -104,7 +103,7 @@ public static class EnvironmentSelectionResolver
             };
         }
 
-        if (branchMatches.Count == 0)
+        if (automaticMatches.Count == 0)
         {
             return new EnvironmentSelectionResult
             {
@@ -114,7 +113,7 @@ public static class EnvironmentSelectionResolver
             };
         }
 
-        var selectedMatch = branchMatches[0];
+        var selectedMatch = automaticMatches[0];
         return new EnvironmentSelectionResult
         {
             EnvironmentName = selectedMatch.EnvironmentName,
@@ -123,8 +122,28 @@ public static class EnvironmentSelectionResolver
             BranchSource = branchSource,
             MatchedPattern = selectedMatch.MatchedPattern,
             IsResolved = true,
-            MatchingEnvironments = branchMatches,
+            MatchingEnvironments = automaticMatches,
         };
+    }
+
+    private static IReadOnlyList<EnvironmentBranchMatch> ResolveBranchMatchesForDiagnostics(
+        IReadOnlyDictionary<string, RepoEnvironmentConfig>? environments,
+        string? sourceBranch,
+        bool isPullRequest)
+    {
+        if (sourceBranch is { Length: > BranchGlobMatcher.MaximumBranchLength })
+        {
+            return [];
+        }
+
+        try
+        {
+            return ResolveBranchMatches(environments, sourceBranch, isPullRequest);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return [];
+        }
     }
 
     private static EnvironmentSelectionResult ResolveExplicit(

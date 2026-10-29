@@ -83,10 +83,11 @@ Optional container fields:
   container paths. Host sources must exist and resolve inside the repository unless
   `allowOutsideRepository: true` is set. Mounts are read-only by default.
 
-Secret mounts use `{ secret: <logical-name>, target: <absolute-path> }`. Rexo resolves the
-secret before starting the container, writes it to a temporary file with owner-only
-permissions where supported, mounts it read-only, and removes the temporary file after the
-step completes. A missing or unresolved secret fails the step before Docker is invoked.
+Secret mounts use `{ secret: <logical-name>, target: <absolute-path> }`. Rexo preflights
+secrets referenced by container mounts before any command step runs, writes each secret to a
+temporary file with owner-only permissions where supported, mounts it read-only, and removes
+the temporary file after the step completes. A missing or unresolved secret fails the command
+before its first step or Docker is invoked.
 
 When `container.dockerfile` is set, Rexo performs an image preflight:
 
@@ -211,7 +212,10 @@ steps:
 ```
 
 Host fallback must be explicitly enabled on the inline container spec or inherited registry
-definition:
+definition. A configured explicit mount (host path or secret file) always disables host
+fallback, even when `fallback: host` is set: those files and credentials are only available
+inside the container, so Rexo fails closed rather than changing the command's execution
+assumptions.
 
 ```yaml
 containers:

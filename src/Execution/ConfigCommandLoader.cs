@@ -49,17 +49,23 @@ public sealed class ConfigCommandLoader
         CommandRegistry registry,
         RepoConfig config,
         string repositoryRoot,
-        ICommandExecutor commandExecutor)
+        ICommandExecutor commandExecutor,
+        RepoConfig? environmentConfig = null)
     {
         RegisterBuiltins(config, repositoryRoot);
 
         foreach (var (commandName, commandConfig) in config.Commands ?? [])
         {
             var name = commandName;
-            var cmd = commandConfig;
+            var executionConfig = commandConfig.UsesEnvironment == true && environmentConfig is not null
+                ? environmentConfig
+                : config;
+            var cmd = executionConfig.Commands?.TryGetValue(name, out var environmentCommand) == true
+                ? environmentCommand
+                : commandConfig;
 
             registry.Register(name, (invocation, ct) =>
-                ExecuteConfigCommandAsync(name, cmd, config, invocation, repositoryRoot, commandExecutor, ct));
+                ExecuteConfigCommandAsync(name, cmd, executionConfig, invocation, repositoryRoot, commandExecutor, ct));
         }
 
         foreach (var (alias, target) in config.Aliases ?? [])
@@ -84,7 +90,8 @@ public sealed class ConfigCommandLoader
         PolicyConfig policy,
         RepoConfig config,
         string repositoryRoot,
-        ICommandExecutor commandExecutor)
+        ICommandExecutor commandExecutor,
+        RepoConfig? environmentConfig = null)
     {
         if (policy.Commands is { Count: > 0 })
         {
@@ -93,9 +100,14 @@ public sealed class ConfigCommandLoader
                 if (registry.TryResolve(commandName, out _)) continue; // repo.json wins
 
                 var name = commandName;
-                var cmd = commandConfig;
+                var executionConfig = commandConfig.UsesEnvironment == true && environmentConfig is not null
+                    ? environmentConfig
+                    : config;
+                var cmd = executionConfig.Commands?.TryGetValue(name, out var environmentCommand) == true
+                    ? environmentCommand
+                    : commandConfig;
                 registry.Register(name, (invocation, ct) =>
-                    ExecuteConfigCommandAsync(name, cmd, config, invocation, repositoryRoot, commandExecutor, ct));
+                    ExecuteConfigCommandAsync(name, cmd, executionConfig, invocation, repositoryRoot, commandExecutor, ct));
             }
         }
 
@@ -172,34 +184,7 @@ public sealed class ConfigCommandLoader
             : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var baseRequiredSecretNames = config.BaseRequiredSecretNames
             ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var requiredSecrets = (normalizedCommandConfig.RequiredSecrets ?? [])
-            .Concat(baseRequiredSecretNames)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
         deferredEnvironmentSecretNames.ExceptWith(baseRequiredSecretNames);
-        var secretPreflight = await secretResolver.PreflightRequiredAsync(
-            requiredSecrets,
-            deferredEnvironmentSecretNames,
-            cancellationToken);
-        if (!secretPreflight.Success)
-        {
-            var firstError = secretPreflight.Errors.Count > 0
-                ? secretPreflight.Errors[0]
-                : null;
-            return new CommandResult(
-                commandName,
-                false,
-                9,
-                firstError?.Message ?? "Secret preflight failed.",
-                new Dictionary<string, object?>
-                {
-                    ["error"] = firstError?.Message ?? "Secret preflight failed.",
-                    ["errorCode"] = firstError?.Code ?? ErrorCodes.ConfigSchemaInvalid,
-                })
-            {
-                StructuredErrors = secretPreflight.Errors,
-            };
-        }
 
         IReadOnlyList<string> createdOutputDirectories = [];
 
@@ -226,9 +211,9 @@ public sealed class ConfigCommandLoader
                 Args = invocation.Args,
                 Options = BuildOptionsWithDefaults(invocation.Options, normalizedCommandConfig),
                 FileEnvironment = fileEnvironment,
-                ResolvedSecrets = new Dictionary<string, string>(secretPreflight.ResolvedValues, StringComparer.OrdinalIgnoreCase),
-                SecretMetadata = new Dictionary<string, SecretResolutionMetadata>(secretPreflight.Metadata, StringComparer.OrdinalIgnoreCase),
-                MappedSecretEnvironment = new Dictionary<string, string>(secretPreflight.MappedEnvironment, StringComparer.Ordinal),
+                ResolvedSecrets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
+                SecretMetadata = new Dictionary<string, SecretResolutionMetadata>(StringComparer.OrdinalIgnoreCase),
+                MappedSecretEnvironment = new Dictionary<string, string>(StringComparer.Ordinal),
                 CiVariablePrefix = ciVariablePrefix,
                 IsDryRun = TryGetOptionBoolean(invocation.Options, "dry-run") == true,
                 CliEchoMode = invocation.EchoMode,
@@ -243,16 +228,8 @@ public sealed class ConfigCommandLoader
                 ArtifactDiscoveryCache = invocation.ArtifactDiscoveryCache,
             };
 
-            var resolvedOutputs = BuildOutputsContext(config, context);
-            context = context with { ResolvedOutputs = resolvedOutputs };
-            var outputRoot = ResolveOutputRoot(config, context);
-            createdOutputDirectories = emitRuntimeFiles && config.Outputs?.PrecreateDirectories == true
-                ? EnsureConfiguredOutputDirectories(repositoryRoot, resolvedOutputs)
-                : [];
-
             using var stepExecutor = new StepExecutor(commandExecutor, _templateRenderer, _builtinRegistry, secretResolver);
             var stepResults = new List<StepResult>();
-            var currentContext = context;
             var artifactEntries = new List<Core.Models.ArtifactManifestEntry>();
             var pushDecisionEntries = new List<Core.Models.PushDecision>();
             var hardFailureSeen = false;
@@ -290,6 +267,55 @@ public sealed class ConfigCommandLoader
                         ["errorCode"] = ErrorCodes.ConfigSchemaInvalid,
                     });
             }
+
+            var mountedSecrets = resolvedSteps
+                .SelectMany(step => BuildStepDefinition(step, context, _templateRenderer).Container?.Mounts ?? [])
+                .Select(mount => mount.Secret)
+                .Where(secret => !string.IsNullOrWhiteSpace(secret))
+                .Select(secret => secret!)
+                .ToArray();
+            var requiredSecrets = (normalizedCommandConfig.RequiredSecrets ?? [])
+                .Concat(baseRequiredSecretNames)
+                .Concat(mountedSecrets)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            var secretPreflight = await secretResolver.PreflightRequiredAsync(
+                requiredSecrets,
+                deferredEnvironmentSecretNames,
+                cancellationToken);
+            if (!secretPreflight.Success)
+            {
+                var firstError = secretPreflight.Errors.Count > 0
+                    ? secretPreflight.Errors[0]
+                    : null;
+                return new CommandResult(
+                    commandName,
+                    false,
+                    9,
+                    firstError?.Message ?? "Secret preflight failed.",
+                    new Dictionary<string, object?>
+                    {
+                        ["error"] = firstError?.Message ?? "Secret preflight failed.",
+                        ["errorCode"] = firstError?.Code ?? ErrorCodes.ConfigSchemaInvalid,
+                    })
+                {
+                    StructuredErrors = secretPreflight.Errors,
+                };
+            }
+
+            context = context with
+            {
+                ResolvedSecrets = new Dictionary<string, string>(secretPreflight.ResolvedValues, StringComparer.OrdinalIgnoreCase),
+                SecretMetadata = new Dictionary<string, SecretResolutionMetadata>(secretPreflight.Metadata, StringComparer.OrdinalIgnoreCase),
+                MappedSecretEnvironment = new Dictionary<string, string>(secretPreflight.MappedEnvironment, StringComparer.Ordinal),
+            };
+            var resolvedOutputs = BuildOutputsContext(config, context);
+            context = context with { ResolvedOutputs = resolvedOutputs };
+            var currentContext = context;
+            var outputRoot = ResolveOutputRoot(config, context);
+            createdOutputDirectories = emitRuntimeFiles && config.Outputs?.PrecreateDirectories == true
+                ? EnsureConfiguredOutputDirectories(repositoryRoot, resolvedOutputs)
+                : [];
 
             // Group consecutive parallel steps; sequential steps are singleton groups
             var stepGroups = GroupSteps(resolvedSteps);
@@ -1491,6 +1517,7 @@ public sealed class ConfigCommandLoader
             Domain = commandConfig.Domain,
             PasswordSecret = commandConfig.PasswordSecret,
             RequiresEnvironment = commandConfig.RequiresEnvironment,
+            UsesEnvironment = commandConfig.UsesEnvironment,
             RequiredSecrets = commandConfig.RequiredSecrets,
         };
 

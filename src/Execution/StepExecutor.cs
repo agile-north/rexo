@@ -464,6 +464,25 @@ public sealed class StepExecutor : IStepExecutor, IDisposable
     {
         Console.Error.WriteLine("[container] Docker runtime unavailable.");
         Console.Error.WriteLine($"[container] fallback policy: {container.Fallback}");
+        if (container.Mounts is { Count: > 0 })
+        {
+            var message =
+                $"Container step '{stepId}' cannot fall back to host execution because its configured mounts " +
+                $"are only available inside container '{container.Image}'. {SecretMasker.Mask(runtimeError, secrets)}";
+            Console.Error.WriteLine($"[error] {message}");
+            return new ContainerRunResult(
+                new ShellRunResult(127, string.Empty, message),
+                new RunExecutionMetadata(
+                    "container",
+                    "container",
+                    container.Image,
+                    containerWorkingDirectory,
+                    false,
+                    container.Fallback,
+                    false,
+                    reason));
+        }
+
         if (container.Fallback != "host")
         {
             var message =

@@ -117,16 +117,14 @@ internal static class CliBootstrapper
             environmentSelection = environmentSelection with { Error = sourceBranch.Error };
         }
 
-        if (environmentSelection.IsResolved && environmentSelection.EnvironmentName is { } selectedEnvironment)
+        var environmentConfig = environmentSelection.IsResolved &&
+            environmentSelection.EnvironmentName is { } selectedEnvironment &&
+            effectiveConfig is not null
+                ? RepoConfigurationLoader.ApplyEnvironment(effectiveConfig, selectedEnvironment)
+                : null;
+        if (environmentConfig is not null && setOverrides is { Count: > 0 })
         {
-            config = RepoConfigurationLoader.ApplyEnvironment(config!, selectedEnvironment);
-            effectiveConfig = RepoConfigurationLoader.ApplyEnvironment(effectiveConfig!, selectedEnvironment);
-
-            // Environment overlays are a config layer; CLI overrides remain the final layer.
-            if (setOverrides is { Count: > 0 })
-            {
-                effectiveConfig = ConfigBuilder.ApplySetOverridesWithWarnings(effectiveConfig, setOverrides).config;
-            }
+            environmentConfig = ConfigBuilder.ApplySetOverridesWithWarnings(environmentConfig, setOverrides).config;
         }
 
         // Create command registry
@@ -141,7 +139,13 @@ internal static class CliBootstrapper
         // Register config commands if config is present
         if (config is not null && registerConfigCommands)
         {
-            RegisterConfigCommands(registry, config, workingDir, executor, policyConfig ?? new PolicyConfig());
+            RegisterConfigCommands(
+                registry,
+                effectiveConfig ?? config,
+                environmentConfig,
+                workingDir,
+                executor,
+                policyConfig ?? new PolicyConfig());
         }
 
         return (
@@ -160,6 +164,7 @@ internal static class CliBootstrapper
     private static void RegisterConfigCommands(
         CommandRegistry registry,
         RepoConfig config,
+        RepoConfig? environmentConfig,
         string workingDir,
         DefaultCommandExecutor executor,
         PolicyConfig policyConfig)
@@ -190,8 +195,8 @@ internal static class CliBootstrapper
             versionProviders,
             artifactProviders);
 
-        configLoader.LoadInto(registry, config, workingDir, executor);
-        configLoader.LoadPolicyCommandsInto(registry, policyConfig, config, workingDir, executor);
+        configLoader.LoadInto(registry, config, workingDir, executor, environmentConfig);
+        configLoader.LoadPolicyCommandsInto(registry, policyConfig, config, workingDir, executor, environmentConfig);
     }
 }
 

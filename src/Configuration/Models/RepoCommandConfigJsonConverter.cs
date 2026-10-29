@@ -29,6 +29,7 @@ internal sealed class RepoCommandConfigJsonConverter : JsonConverter<RepoCommand
             Domain = ReadOptionalString(root, "domain"),
             PasswordSecret = ReadOptionalString(root, "passwordSecret"),
             RequiresEnvironment = ReadOptionalBool(root, "requiresEnvironment"),
+            UsesEnvironment = ReadOptionalBool(root, "usesEnvironment"),
             RequiredSecrets = ReadOptionalObject<string[]>(root, "requiredSecrets", options),
         };
 
@@ -72,6 +73,7 @@ internal sealed class RepoCommandConfigJsonConverter : JsonConverter<RepoCommand
         if (value.Domain is not null) writer.WriteString("domain", value.Domain);
         if (value.PasswordSecret is not null) writer.WriteString("passwordSecret", value.PasswordSecret);
         if (value.RequiresEnvironment.HasValue) writer.WriteBoolean("requiresEnvironment", value.RequiresEnvironment.Value);
+        if (value.UsesEnvironment.HasValue) writer.WriteBoolean("usesEnvironment", value.UsesEnvironment.Value);
         if (value.RequiredSecrets is { Length: > 0 })
         {
             writer.WritePropertyName("requiredSecrets");

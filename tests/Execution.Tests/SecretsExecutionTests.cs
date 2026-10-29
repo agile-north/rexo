@@ -237,6 +237,124 @@ public sealed class SecretsExecutionTests
     }
 
     [Fact]
+    public async Task SecretMountsArePreflightedBeforeAnyCommandStepRuns()
+    {
+        var config = CreateConfig(
+            runCommand: "echo should-not-run",
+            secrets: new RepoSecretsConfig())
+            with
+            {
+                Commands = new Dictionary<string, RepoCommandConfig>
+                {
+                    ["run"] = new RepoCommandConfig(
+                        "run",
+                        new Dictionary<string, RepoOptionConfig>(),
+                        [
+                            new RepoStepConfig(Id: "side-effect", Run: "echo side-effect"),
+                            new RepoStepConfig(
+                                Id: "container",
+                                Run: "echo container-step",
+                                Container: new RepoStepContainerConfig(Image: "example/deployer:latest")
+                                {
+                                    Mounts =
+                                    [
+                                        new RepoStepContainerMountConfig
+                                        {
+                                            Secret = "missingMountSecret",
+                                            Target = "/run/secrets/deploy",
+                                        },
+                                    ],
+                                }),
+                        ]),
+                },
+            };
+        var tempRoot = Path.Join(Path.GetTempPath(), $"rexo-secret-mount-preflight-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+
+        try
+        {
+            var result = await ExecuteConfigCommandAsync(config, tempRoot);
+
+            Assert.False(result.Success);
+            Assert.Equal(9, result.ExitCode);
+            Assert.Contains("missingMountSecret", result.Message ?? string.Empty, StringComparison.Ordinal);
+            Assert.Empty(result.Steps);
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, true);
+        }
+    }
+
+    [Fact]
+    public async Task EnvironmentOverlayIsAppliedOnlyToCommandsThatUseIt()
+    {
+        var baseConfig = CreateConfig(
+            runCommand: "echo {{vars.deployTarget}}",
+            secrets: new RepoSecretsConfig())
+            with
+            {
+                Vars = ParseSettings("""{"deployTarget":"repository"}"""),
+                Commands = new Dictionary<string, RepoCommandConfig>
+                {
+                    ["build"] = new RepoCommandConfig(
+                        "build",
+                        new Dictionary<string, RepoOptionConfig>(),
+                        [new RepoStepConfig(Id: "run", Run: "echo {{vars.deployTarget}}")]),
+                    ["deploy"] = new RepoCommandConfig(
+                        "deploy",
+                        new Dictionary<string, RepoOptionConfig>(),
+                        [new RepoStepConfig(Id: "run", Run: "echo {{vars.deployTarget}}")])
+                    {
+                        UsesEnvironment = true,
+                    },
+                },
+                Environments = new Dictionary<string, RepoEnvironmentConfig>
+                {
+                    ["qa"] = new()
+                    {
+                        Vars = ParseSettings("""{"deployTarget":"qa"}"""),
+                    },
+                },
+            };
+        var environmentConfig = RepoConfigurationLoader.ApplyEnvironment(baseConfig, "qa");
+        var selection = new EnvironmentSelectionResult
+        {
+            EnvironmentName = "qa",
+            SelectionSource = "cli",
+            IsExplicit = true,
+            IsResolved = true,
+        };
+        var tempRoot = Path.Join(Path.GetTempPath(), $"rexo-environment-overlay-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+
+        try
+        {
+            var buildResult = await ExecuteConfigCommandAsync(
+                baseConfig,
+                tempRoot,
+                commandName: "build",
+                environmentSelection: selection,
+                environmentConfig: environmentConfig);
+            var deployResult = await ExecuteConfigCommandAsync(
+                baseConfig,
+                tempRoot,
+                commandName: "deploy",
+                environmentSelection: selection,
+                environmentConfig: environmentConfig);
+
+            Assert.True(buildResult.Success, buildResult.Message);
+            Assert.True(deployResult.Success, deployResult.Message);
+            Assert.Contains("repository", buildResult.Steps[0].Outputs["stdout"]?.ToString(), StringComparison.Ordinal);
+            Assert.Contains("qa", deployResult.Steps[0].Outputs["stdout"]?.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, true);
+        }
+    }
+
+    [Fact]
     public async Task ExecProviderResolvesSecretViaCommand()
     {
         var config = CreateConfig(
@@ -950,7 +1068,8 @@ public sealed class SecretsExecutionTests
         RepoConfig config,
         string repositoryRoot,
         string commandName = "run",
-        EnvironmentSelectionResult? environmentSelection = null)
+        EnvironmentSelectionResult? environmentSelection = null,
+        RepoConfig? environmentConfig = null)
     {
         var builtins = new BuiltinRegistry();
         var artifactProviders = new Artifacts.ArtifactProviderRegistry();
@@ -962,7 +1081,7 @@ public sealed class SecretsExecutionTests
 
         var registry = new CommandRegistry();
         var executor = new DefaultCommandExecutor(registry);
-        loader.LoadInto(registry, config, repositoryRoot, executor);
+        loader.LoadInto(registry, config, repositoryRoot, executor, environmentConfig);
 
         var invocation = new CommandInvocation(
             new Dictionary<string, string>(),

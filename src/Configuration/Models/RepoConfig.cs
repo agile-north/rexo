@@ -124,6 +124,9 @@ public sealed record RepoCommandConfig(
     /// <summary>When true, this command fails unless an execution environment is selected.</summary>
     public bool? RequiresEnvironment { get; init; }
 
+    /// <summary>When true, this command receives the selected environment's vars, settings, and secrets.</summary>
+    public bool? UsesEnvironment { get; init; }
+
     /// <summary>Logical secrets that must resolve before this command starts executing steps.</summary>
     public string[]? RequiredSecrets { get; init; }
 }

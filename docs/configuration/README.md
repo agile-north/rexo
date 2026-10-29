@@ -25,8 +25,8 @@ fallback, and validation), see [Containerized Run Steps](./containerized-run.md)
 
 For CLI config overrides, see [CLI Overrides](./overrides.md).
 
-For environment-specific configuration, branch-based selection, command requirements,
-and promotion, see [Execution Environments](./environments.md).
+For branch-based environment selection, the `usesEnvironment`/`requiresEnvironment` command
+opt-ins, cross-CI examples, and promotion, see [Execution Environments](./environments.md).
 
 Default repository configuration file: **`.rexo/rexo.yaml`**
 

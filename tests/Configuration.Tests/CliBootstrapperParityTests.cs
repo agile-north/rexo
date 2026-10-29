@@ -1,6 +1,7 @@
 namespace Rexo.Configuration.Tests;
 
 using Rexo.Cli;
+using Rexo.Core.Models;
 
 [Collection("EnvironmentVariableSensitive")]
 public sealed class CliBootstrapperParityTests
@@ -112,7 +113,14 @@ public sealed class CliBootstrapperParityTests
           "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
           "schemaVersion": "1.0",
           "name": "sample",
-          "commands": {},
+          "commands": {
+            "deploy": {
+              "usesEnvironment": true,
+              "steps": [
+                { "id": "run", "run": "echo {{vars.deployTarget}}" }
+              ]
+            }
+          },
           "aliases": {},
           "vars": { "deployTarget": "base" },
           "environments": {
@@ -123,7 +131,7 @@ public sealed class CliBootstrapperParityTests
         }
         """);
 
-            var (_, _, effectiveConfig, _, selection) = await CliBootstrapper.BuildServicesAsync(
+            var (_, executor, effectiveConfig, _, selection) = await CliBootstrapper.BuildServicesAsync(
                 dir,
                 debug: false,
                 setOverrides: ["vars.deployTarget=cli"],
@@ -132,6 +140,22 @@ public sealed class CliBootstrapperParityTests
 
             Assert.Equal("staging", selection.EnvironmentName);
             Assert.Equal("cli", effectiveConfig?.Vars?["deployTarget"].GetString());
+            var invocation = new CommandInvocation(
+                new Dictionary<string, string>(),
+                new Dictionary<string, string?>(),
+                false,
+                null,
+                dir)
+            {
+                EnvironmentSelection = selection,
+            };
+            var commandResult = await executor.ExecuteAsync("deploy", invocation, CancellationToken.None);
+
+            Assert.True(commandResult.Success, commandResult.Message);
+            Assert.Contains(
+                "cli",
+                Assert.IsType<string>(Assert.Single(commandResult.Steps).Outputs["stdout"]),
+                StringComparison.Ordinal);
         }
         finally
         {

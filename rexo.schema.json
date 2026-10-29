@@ -597,6 +597,10 @@
           "type": "boolean",
           "description": "When true, this command fails unless an execution environment is selected."
         },
+        "usesEnvironment": {
+          "type": "boolean",
+          "description": "When true, apply the selected environment's vars, settings, and secrets to this command."
+        },
         "requiredSecrets": {
           "type": "array",
           "description": "Logical secret names that must resolve before this command starts executing steps.",

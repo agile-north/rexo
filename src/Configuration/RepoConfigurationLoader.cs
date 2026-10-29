@@ -946,6 +946,7 @@ public sealed partial class RepoConfigurationLoader
             Domain = childCmd.Domain,
             PasswordSecret = childCmd.PasswordSecret,
             RequiresEnvironment = childCmd.RequiresEnvironment ?? baseCmd.RequiresEnvironment,
+            UsesEnvironment = childCmd.UsesEnvironment ?? baseCmd.UsesEnvironment,
             RequiredSecrets = MergeRequiredSecrets(baseCmd.RequiredSecrets, childCmd.RequiredSecrets),
         };
     }
@@ -1215,6 +1216,9 @@ public sealed partial class RepoConfigurationLoader
             RequiresEnvironment = preferFirstMetadata
                 ? primary.RequiresEnvironment ?? secondary.RequiresEnvironment
                 : secondary.RequiresEnvironment ?? primary.RequiresEnvironment,
+            UsesEnvironment = preferFirstMetadata
+                ? primary.UsesEnvironment ?? secondary.UsesEnvironment
+                : secondary.UsesEnvironment ?? primary.UsesEnvironment,
             RequiredSecrets = MergeRequiredSecrets(primary.RequiredSecrets, secondary.RequiredSecrets),
         };
     }

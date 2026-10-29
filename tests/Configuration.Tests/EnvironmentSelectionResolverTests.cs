@@ -95,6 +95,25 @@ public sealed class EnvironmentSelectionResolverTests
     }
 
     [Fact]
+    public void ResolveDoesNotEvaluateAutomaticMatchesForOverlongExplicitBranch()
+    {
+        var sourceBranch = new string('a', BranchGlobMatcher.MaximumBranchLength + 1);
+        var result = EnvironmentSelectionResolver.Resolve(
+            CreateConfig(),
+            explicitEnvironment: "production",
+            environmentVariableEnvironment: null,
+            sourceBranch,
+            branchSource: "configured-variable",
+            isPullRequest: false);
+
+        Assert.True(result.IsResolved);
+        Assert.Equal("production", result.EnvironmentName);
+        Assert.Empty(result.MatchingEnvironments);
+        Assert.False(result.OverrodeAutomaticSelection);
+        Assert.Null(result.Error);
+    }
+
+    [Fact]
     public void ResolveDoesNotAutomaticallySelectForPullRequest()
     {
         var automatic = EnvironmentSelectionResolver.Resolve(

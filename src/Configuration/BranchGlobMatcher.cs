@@ -137,7 +137,7 @@ public sealed class BranchGlobMatcher
                     throw new FormatException($"Branch pattern '{pattern}' contains an invalid escape sequence.");
                 }
 
-                atoms.Add(new PatternAtom(Regex.Escape(pattern[index].ToString()), false, true));
+                atoms.Add(new PatternAtom(Regex.Escape(pattern[index].ToString()), true));
                 continue;
             }
 
@@ -153,36 +153,41 @@ public sealed class BranchGlobMatcher
                     }
                 }
 
-                atoms.Add(new PatternAtom(doubleStar ? ".*" : "[^/]*", false, false));
+                if (doubleStar && index + 1 < pattern.Length && pattern[index + 1] == '/')
+                {
+                    index++;
+                    atoms.Add(new PatternAtom("(?:.*/)?", false));
+                }
+                else
+                {
+                    atoms.Add(new PatternAtom(doubleStar ? ".*" : "[^/]*", false));
+                }
+
                 continue;
             }
 
             if (character == '[')
             {
                 var (classPattern, endIndex) = ParseCharacterClass(pattern, index);
-                atoms.Add(new PatternAtom(classPattern, true, true));
+                atoms.Add(new PatternAtom(classPattern, true));
                 index = endIndex;
                 continue;
             }
 
             if (character == '?')
             {
-                if (atoms.Count == 0 || !atoms[^1].CanBeOptional || atoms[^1].Quantifier != PatternQuantifier.None)
-                {
-                    throw new FormatException(
-                        $"Branch pattern '{pattern}' uses '?' without one preceding literal or character class.");
-                }
-
-                atoms[^1] = atoms[^1] with { Quantifier = PatternQuantifier.Optional };
+                atoms.Add(new PatternAtom("[^/]", false));
                 continue;
             }
 
             if (character == '+')
             {
-                if (atoms.Count == 0 || !atoms[^1].IsCharacterClass || atoms[^1].Quantifier != PatternQuantifier.None)
+                if (atoms.Count == 0 ||
+                    !atoms[^1].CanBeRepeated ||
+                    atoms[^1].Quantifier != PatternQuantifier.None)
                 {
                     throw new FormatException(
-                        $"Branch pattern '{pattern}' uses '+' without one preceding character class.");
+                        $"Branch pattern '{pattern}' uses '+' without one preceding literal or character class.");
                 }
 
                 atoms[^1] = atoms[^1] with { Quantifier = PatternQuantifier.OneOrMore };
@@ -195,7 +200,7 @@ public sealed class BranchGlobMatcher
                     $"Branch pattern '{pattern}' contains unsupported syntax '{character}'.");
             }
 
-            atoms.Add(new PatternAtom(Regex.Escape(character.ToString()), false, true));
+            atoms.Add(new PatternAtom(Regex.Escape(character.ToString()), true));
         }
 
         var expression = new StringBuilder(@"\A");
@@ -204,7 +209,6 @@ public sealed class BranchGlobMatcher
             expression.Append(atom.Expression);
             expression.Append(atom.Quantifier switch
             {
-                PatternQuantifier.Optional => "?",
                 PatternQuantifier.OneOrMore => "+",
                 _ => string.Empty,
             });
@@ -306,8 +310,7 @@ public sealed class BranchGlobMatcher
 
     private sealed record PatternAtom(
         string Expression,
-        bool IsCharacterClass,
-        bool CanBeOptional)
+        bool CanBeRepeated)
     {
         public PatternQuantifier Quantifier { get; init; }
     }
@@ -315,7 +318,6 @@ public sealed class BranchGlobMatcher
     private enum PatternQuantifier
     {
         None,
-        Optional,
         OneOrMore,
     }
 }

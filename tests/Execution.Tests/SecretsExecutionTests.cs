@@ -1,6 +1,7 @@
 namespace Rexo.Execution.Tests;
 
 using System.Text.Json;
+using Rexo.Configuration;
 using Rexo.Configuration.Models;
 using Rexo.Core.Models;
 using Rexo.Templating;
@@ -42,6 +43,195 @@ public sealed class SecretsExecutionTests
         finally
         {
             Environment.SetEnvironmentVariable("REXO_TEST_REQUIRED_SECRET", original);
+            Directory.Delete(tempRoot, true);
+        }
+    }
+
+    [Fact]
+    public async Task CommandRequiredSecretsFailWhenUndefined()
+    {
+        var config = CreateConfig(
+            runCommand: "echo should-not-run",
+            secrets: new RepoSecretsConfig())
+            with
+            {
+                Commands = new Dictionary<string, RepoCommandConfig>
+                {
+                    ["run"] = new RepoCommandConfig(
+                        "run",
+                        new Dictionary<string, RepoOptionConfig>(),
+                        [new RepoStepConfig(Id: "run", Run: "echo should-not-run")])
+                    {
+                        RequiredSecrets = ["missingSecret"],
+                    },
+                },
+            };
+        var tempRoot = Path.Join(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+
+        try
+        {
+            var result = await ExecuteConfigCommandAsync(config, tempRoot);
+
+            Assert.False(result.Success);
+            Assert.Equal(9, result.ExitCode);
+            Assert.Contains("missingSecret", result.Message ?? string.Empty, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(tempRoot, true);
+        }
+    }
+
+    [Fact]
+    public async Task CommandRequiredSecretsResolveDefinitionsMarkedOptional()
+    {
+        var secretEnvironmentVariable = $"REXO_TEST_OPTIONAL_REQUIRED_{Guid.NewGuid():N}";
+        var original = Environment.GetEnvironmentVariable(secretEnvironmentVariable);
+        Environment.SetEnvironmentVariable(secretEnvironmentVariable, "required-secret-value");
+        var config = CreateConfig(
+            runCommand: "echo {{secrets.apiKey}}",
+            secrets: new RepoSecretsConfig
+            {
+                Defaults = new RepoSecretDefaultsConfig { Provider = "env", Required = false },
+                Items = new Dictionary<string, RepoSecretConfig>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["apiKey"] = new()
+                    {
+                        Env = secretEnvironmentVariable,
+                        Required = false,
+                    },
+                },
+            })
+            with
+            {
+                Commands = new Dictionary<string, RepoCommandConfig>
+                {
+                    ["run"] = new RepoCommandConfig(
+                        "run",
+                        new Dictionary<string, RepoOptionConfig>(),
+                        [new RepoStepConfig(Id: "run", Run: "echo {{secrets.apiKey}}")])
+                    {
+                        RequiredSecrets = ["apiKey"],
+                    },
+                },
+            };
+        var tempRoot = Path.Join(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+
+        try
+        {
+            var result = await ExecuteConfigCommandAsync(config, tempRoot);
+
+            Assert.True(result.Success, result.Message);
+            Assert.Contains("***", Assert.IsType<string>(result.Steps[0].Outputs["stdout"]), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(secretEnvironmentVariable, original);
+            Directory.Delete(tempRoot, true);
+        }
+    }
+
+    [Fact]
+    public async Task EnvironmentOverrideDoesNotSuppressGloballyRequiredSecret()
+    {
+        var secretEnvironmentVariable = $"REXO_TEST_GLOBAL_REQUIRED_{Guid.NewGuid():N}";
+        var original = Environment.GetEnvironmentVariable(secretEnvironmentVariable);
+        Environment.SetEnvironmentVariable(secretEnvironmentVariable, null);
+        var baseConfig = CreateConfig(
+            runCommand: "echo should-not-run",
+            secrets: new RepoSecretsConfig
+            {
+                Defaults = new RepoSecretDefaultsConfig { Provider = "env", Required = true },
+                Items = new Dictionary<string, RepoSecretConfig>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["apiKey"] = new()
+                    {
+                        Env = secretEnvironmentVariable,
+                        Required = true,
+                    },
+                },
+            })
+            with
+            {
+                Environments = new Dictionary<string, RepoEnvironmentConfig>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["qa"] = new()
+                    {
+                        Secrets = new RepoSecretsConfig
+                        {
+                            Items = new Dictionary<string, RepoSecretConfig>(StringComparer.OrdinalIgnoreCase)
+                            {
+                                ["apiKey"] = new()
+                                {
+                                    Env = secretEnvironmentVariable,
+                                    Required = false,
+                                },
+                            },
+                        },
+                    },
+                },
+            };
+        var config = RepoConfigurationLoader.ApplyEnvironment(baseConfig, "qa");
+        var selection = new EnvironmentSelectionResult
+        {
+            EnvironmentName = "qa",
+            SelectionSource = "cli",
+            IsExplicit = true,
+            IsResolved = true,
+        };
+        var tempRoot = Path.Join(Path.GetTempPath(), $"rexo-secrets-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+
+        try
+        {
+            var result = await ExecuteConfigCommandAsync(config, tempRoot, environmentSelection: selection);
+
+            Assert.False(result.Success);
+            Assert.Equal(9, result.ExitCode);
+            Assert.Contains("apiKey", result.Message ?? string.Empty, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(secretEnvironmentVariable, original);
+            Directory.Delete(tempRoot, true);
+        }
+    }
+
+    [Fact]
+    public async Task CommandCanRequireAnEnvironment()
+    {
+        var config = CreateConfig(
+            runCommand: "echo should-not-run",
+            secrets: new RepoSecretsConfig())
+            with
+            {
+                Commands = new Dictionary<string, RepoCommandConfig>
+                {
+                    ["run"] = new RepoCommandConfig(
+                        "run",
+                        new Dictionary<string, RepoOptionConfig>(),
+                        [new RepoStepConfig(Id: "run", Run: "echo should-not-run")])
+                    {
+                        RequiresEnvironment = true,
+                    },
+                },
+            };
+        var tempRoot = Path.Join(Path.GetTempPath(), $"rexo-environment-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+
+        try
+        {
+            var result = await ExecuteConfigCommandAsync(config, tempRoot);
+
+            Assert.False(result.Success);
+            Assert.Equal(9, result.ExitCode);
+            Assert.Contains("requires a selected execution environment", result.Message ?? string.Empty, StringComparison.Ordinal);
+            Assert.Empty(result.Steps);
+        }
+        finally
+        {
             Directory.Delete(tempRoot, true);
         }
     }
@@ -756,7 +946,11 @@ public sealed class SecretsExecutionTests
         }
     }
 
-    private static async Task<CommandResult> ExecuteConfigCommandAsync(RepoConfig config, string repositoryRoot, string commandName = "run")
+    private static async Task<CommandResult> ExecuteConfigCommandAsync(
+        RepoConfig config,
+        string repositoryRoot,
+        string commandName = "run",
+        EnvironmentSelectionResult? environmentSelection = null)
     {
         var builtins = new BuiltinRegistry();
         var artifactProviders = new Artifacts.ArtifactProviderRegistry();
@@ -775,7 +969,10 @@ public sealed class SecretsExecutionTests
             new Dictionary<string, string?>(),
             false,
             null,
-            repositoryRoot);
+            repositoryRoot)
+        {
+            EnvironmentSelection = environmentSelection,
+        };
 
         return await executor.ExecuteAsync(commandName, invocation, CancellationToken.None);
     }

@@ -93,20 +93,24 @@
     },
     "environments": {
       "type": "object",
-      "description": "Named local promotion targets. Each environment maps to a repository-relative destination directory.",
-      "markdownDescription": "Named local promotion targets. `rx promote <manifest.json> <environment>` copies verified file artifacts into the configured repository-relative `path` without rebuilding. This initial environment contract does not deploy to remote infrastructure.",
+      "description": "Named execution targets used for explicit or branch-based environment selection.",
+      "markdownDescription": "Named execution targets for configuration, secrets, and local artifact promotion. Branch selection is a convenience, not an authorization boundary.",
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["path"],
         "properties": {
-          "path": {
-            "type": "string",
-            "minLength": 1,
-            "description": "Repository-relative destination directory for promoted file artifacts."
-          }
+          "description": { "type": "string" },
+          "selection": { "$ref": "#/$defs/environmentBranchSelection" },
+          "vars": { "$ref": "#/$defs/vars" },
+          "settings": { "$ref": "#/$defs/settings" },
+          "secrets": { "$ref": "#/$defs/secretsConfig" },
+          "promotion": { "$ref": "#/$defs/environmentPromotion" }
         }
       }
+    },
+    "environmentSelection": {
+      "$ref": "#/$defs/environmentSelectionConfig",
+      "description": "Optional defaults for source-branch discovery during automatic environment selection."
     },
     "runtime": {
       "description": "Cross-cutting runtime policy configuration for output and push behavior.",
@@ -148,6 +152,75 @@
     }
   },
   "$defs": {
+    "containerMount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target"],
+      "properties": {
+        "source": { "type": "string", "minLength": 1, "description": "Existing host file or directory; relative paths resolve from the repository root." },
+        "secret": { "type": "string", "minLength": 1, "description": "Logical secret materialized as a temporary read-only file." },
+        "target": { "type": "string", "minLength": 1, "pattern": "^/", "description": "Absolute path inside the container." },
+        "readOnly": { "type": "boolean", "default": true },
+        "allowOutsideRepository": { "type": "boolean", "default": false, "description": "Explicitly allow a host source outside the repository." }
+      },
+      "oneOf": [
+        { "required": ["source"], "not": { "required": ["secret"] } },
+        { "required": ["secret"], "not": { "required": ["source"] } }
+      ]
+    },
+    "environmentSelectionConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sourceBranch": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Source branch discovery settings. Defaults to variable REXO_SOURCE_BRANCH and fallback auto.",
+          "properties": {
+            "variable": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+              "default": "REXO_SOURCE_BRANCH",
+              "description": "Environment variable that overrides CI or local Git branch detection."
+            },
+            "fallback": {
+              "type": "string",
+              "enum": ["auto", "none"],
+              "default": "auto",
+              "description": "Use CI/local Git detection when the configured variable is absent, or disable that fallback."
+            }
+          }
+        }
+      }
+    },
+    "environmentBranchSelection": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "branches": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Ordered GitHub Actions-compatible branch glob patterns. At least one positive pattern is required.",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        }
+      }
+    },
+    "environmentPromotion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repository-relative destination directory for verified local file artifact promotion."
+        }
+      }
+    },
     "settings": {
       "type": "object",
       "description": "Free-form toolchain settings bag available as {{settings.*}} in templates.",
@@ -519,6 +592,18 @@
         "hidden": {
           "type": "boolean",
           "description": "When true, omit this command from default discovery surfaces like list/help while keeping it callable by name."
+        },
+        "requiresEnvironment": {
+          "type": "boolean",
+          "description": "When true, this command fails unless an execution environment is selected."
+        },
+        "requiredSecrets": {
+          "type": "array",
+          "description": "Logical secret names that must resolve before this command starts executing steps.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         },
         "before": {
           "$ref": "#/$defs/commandHook",
@@ -904,6 +989,16 @@
           "description": "Version string used when the provider cannot resolve a version (e.g. no tags yet).",
           "markdownDescription": "Version string used when the provider cannot resolve a version. Default: `0.1.0-local`.",
           "default": "0.1.0-local"
+        },
+        "network": {
+          "type": "string",
+          "enum": ["bridge", "host"],
+          "description": "Container network mode. Host mode is opt-in and fails if unsupported by the Docker runtime."
+        },
+        "mounts": {
+          "type": "array",
+          "description": "Explicit read-only-by-default file and directory mounts.",
+          "items": { "$ref": "#/$defs/containerMount" }
         },
         "settings": {
           "type": "object",

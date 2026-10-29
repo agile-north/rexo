@@ -34,6 +34,7 @@ public sealed record ExecutionContext(
     public IReadOnlyDictionary<string, string> MappedSecretEnvironment { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
     public string CiVariablePrefix { get; init; } = "REXO_";
     public VersionResult? Version { get; init; }
+    public EnvironmentSelectionResult? EnvironmentSelection { get; init; }
     public IReadOnlyList<PreparedArtifact> PreparedArtifacts { get; init; } = [];
 
     /// <summary>Discovery snapshots shared with delegated commands, keyed by evaluation inputs.</summary>

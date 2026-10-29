@@ -145,6 +145,15 @@ public sealed class ConfigCommandLoader
         ICommandExecutor commandExecutor,
         CancellationToken cancellationToken)
     {
+        if (commandConfig.RequiresEnvironment == true &&
+            invocation.EnvironmentSelection?.IsResolved != true)
+        {
+            return CommandResult.Fail(
+                commandName,
+                9,
+                $"Command '{commandName}' requires a selected execution environment. Use --environment <name> or configure branch-based environment selection.");
+        }
+
         var emitRuntimeFiles = ShouldEmitRuntimeFiles(config);
         var emitCommandManifest = ShouldEmitAutomaticManifests(config);
         var ciVariablePrefix = ResolveCiVariablePrefix(config);
@@ -158,7 +167,20 @@ public sealed class ConfigCommandLoader
         var ciInfo = CiDetector.Detect();
         var fileEnvironment = RepositoryEnvironmentFiles.Load(repositoryRoot);
         var secretResolver = new ConfigSecretResolver(config, fileEnvironment, _secretProviders);
-        var secretPreflight = await secretResolver.PreflightRequiredAsync(cancellationToken);
+        var deferredEnvironmentSecretNames = config.EnvironmentSpecificSecretNames is { } environmentSecretNames
+            ? new HashSet<string>(environmentSecretNames, StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var baseRequiredSecretNames = config.BaseRequiredSecretNames
+            ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var requiredSecrets = (normalizedCommandConfig.RequiredSecrets ?? [])
+            .Concat(baseRequiredSecretNames)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        deferredEnvironmentSecretNames.ExceptWith(baseRequiredSecretNames);
+        var secretPreflight = await secretResolver.PreflightRequiredAsync(
+            requiredSecrets,
+            deferredEnvironmentSecretNames,
+            cancellationToken);
         if (!secretPreflight.Success)
         {
             var firstError = secretPreflight.Errors.Count > 0
@@ -216,6 +238,7 @@ public sealed class ConfigCommandLoader
                 ResolvedOutputs = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase),
                 ResolvedSettings = BuildSettingsContext(config),
                 ResolvedVars = BuildVarsContext(config),
+                EnvironmentSelection = invocation.EnvironmentSelection,
                 MaxCommandDepth = effectiveMaxDepth,
                 ArtifactDiscoveryCache = invocation.ArtifactDiscoveryCache,
             };
@@ -1467,6 +1490,8 @@ public sealed class ConfigCommandLoader
             User = commandConfig.User,
             Domain = commandConfig.Domain,
             PasswordSecret = commandConfig.PasswordSecret,
+            RequiresEnvironment = commandConfig.RequiresEnvironment,
+            RequiredSecrets = commandConfig.RequiredSecrets,
         };
 
     private static List<RepoStepConfig> BuildCommandSteps(RepoCommandConfig commandConfig)
@@ -2169,7 +2194,14 @@ public sealed class ConfigCommandLoader
                     RenderStringDictionary(container.Build.Args, context, templateRenderer)),
             container.Fallback is null ? "error" : templateRenderer.Render(container.Fallback, context),
             container.InlineDockerfile is null ? null : templateRenderer.Render(container.InlineDockerfile, context),
-            container.User is null ? null : templateRenderer.Render(container.User, context));
+            container.User is null ? null : templateRenderer.Render(container.User, context),
+            container.Network is null ? null : templateRenderer.Render(container.Network, context),
+            container.Mounts?.Select(mount => new Core.Models.StepContainerMountDefinition(
+                mount.Source is null ? null : templateRenderer.Render(mount.Source, context),
+                mount.Secret is null ? null : templateRenderer.Render(mount.Secret, context),
+                templateRenderer.Render(mount.Target, context),
+                mount.ReadOnly ?? true,
+                mount.AllowOutsideRepository ?? false)).ToArray());
 
     private static IReadOnlyDictionary<string, string>? RenderStringDictionary(
         IReadOnlyDictionary<string, string>? source,

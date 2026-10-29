@@ -25,6 +25,9 @@ fallback, and validation), see [Containerized Run Steps](./containerized-run.md)
 
 For CLI config overrides, see [CLI Overrides](./overrides.md).
 
+For environment-specific configuration, branch-based selection, command requirements,
+and promotion, see [Execution Environments](./environments.md).
+
 Default repository configuration file: **`.rexo/rexo.yaml`**
 
 YAML and JSON are equally supported: both formats are validated against the same JSON Schema
@@ -82,25 +85,6 @@ reports direct process/environment-file presence only; warnings may not account 
 secrets. Use `rx plan --push` when the configured lifecycle provides it to inspect policy and
 credential eligibility without publishing.
 
-## Local artifact promotion
-
-Named environments currently identify repository-relative local artifact directories:
-
-```yaml
-environments:
-  staging:
-    path: deployments/staging
-```
-
-Run a build with `--json-file` to create its sidecar manifest, then promote its single verified
-file artifact with `rx promote <run-manifest.json> staging`. Promotion verifies the recorded
-SHA-256 and copies the same bytes into an immutable content-addressed directory; it never rebuilds.
-`--dry-run` validates the source and reports the destination without writing files. This initial
-contract supports one local file artifact at a time; providers that only report remote references
-(such as container image tags) are rejected rather than treated as immutable identities. A JSON
-record is written beside the promoted object with the source commit, version, config hash, lockfile
-hash, target environment, and timestamp. This is local file promotion, not a remote deploy workflow.
-
 ## CLI workflow and safety
 
 - `rx doctor` performs lightweight runtime/tool availability checks. `rx check [--strict]` inspects
@@ -118,9 +102,9 @@ hash, target environment, and timestamp. This is local file promotion, not a rem
 - `rx update` refreshes `.rexo/rexo.lock.yaml`; `rx restore` verifies every configured remote policy
   source against it without updating the lock. `REXO_POLICY_REQUIRE_LOCKED=true` requires lock
   coverage during ordinary commands.
-- `rx promote <run-manifest.json> <environment>` copies exactly one local file artifact after
-  verifying its recorded SHA-256. `--dry-run` performs validation without writing promotion files.
-  This does not deploy to a remote environment or promote a mutable registry tag.
+- `rx environment resolve --json` explains explicit and automatic environment selection.
+- `rx --environment <name> promote <run-manifest.json>` copies exactly one local file artifact
+  after verifying its recorded SHA-256. See [Execution Environments](./environments.md).
 
 ---
 

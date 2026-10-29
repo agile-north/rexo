@@ -25,6 +25,7 @@ public sealed record RepoConfig(
     public RepoVersioningConfig? Versioning { get; init; }
     public List<RepoArtifactConfig>? Artifacts { get; init; }
     public Dictionary<string, RepoEnvironmentConfig>? Environments { get; init; }
+    public RepoEnvironmentSelectionConfig? EnvironmentSelection { get; init; }
     public RepoRuntimeConfig? Runtime { get; init; }
 
     /// <summary>Output path contract resolved by Rexo. Defaults are applied when omitted.</summary>
@@ -47,6 +48,12 @@ public sealed record RepoConfig(
     /// during command execution.
     /// </summary>
     public RepoSecretsConfig? Secrets { get; init; }
+
+    [JsonIgnore]
+    public IReadOnlySet<string>? EnvironmentSpecificSecretNames { get; init; }
+
+    [JsonIgnore]
+    public IReadOnlySet<string>? BaseRequiredSecretNames { get; init; }
 
     /// <summary>Declares runtime capability requirements and contract compatibility expectations.</summary>
     public RepoCapabilityConfig? Capabilities { get; init; }
@@ -113,6 +120,12 @@ public sealed record RepoCommandConfig(
     public string? User { get; init; }
     public string? Domain { get; init; }
     public string? PasswordSecret { get; init; }
+
+    /// <summary>When true, this command fails unless an execution environment is selected.</summary>
+    public bool? RequiresEnvironment { get; init; }
+
+    /// <summary>Logical secrets that must resolve before this command starts executing steps.</summary>
+    public string[]? RequiredSecrets { get; init; }
 }
 
 public sealed record RepoArgConfig(
@@ -191,11 +204,24 @@ public sealed record RepoStepContainerConfig(
     /// <c>host</c> explicitly permits running the step on the host instead.
     /// </summary>
     public string? Fallback { get; init; }
+
+    public string? Network { get; init; }
+
+    public IReadOnlyList<RepoStepContainerMountConfig>? Mounts { get; init; }
 }
 
 public sealed record RepoStepContainerBuildConfig(
     string? Target = null,
     Dictionary<string, string>? Args = null);
+
+public sealed record RepoStepContainerMountConfig
+{
+    public string? Source { get; init; }
+    public string? Secret { get; init; }
+    public string Target { get; init; } = string.Empty;
+    public bool? ReadOnly { get; init; }
+    public bool? AllowOutsideRepository { get; init; }
+}
 
 public sealed record RepoCommandMergeConfig(
     string? Mode = null,
@@ -232,7 +258,36 @@ public sealed record RepoArtifactDiscoveryConfig(
     IReadOnlyList<string> Include,
     IReadOnlyList<string>? Exclude = null);
 
-public sealed record RepoEnvironmentConfig(string Path);
+public sealed record RepoEnvironmentConfig
+{
+    public string? Description { get; init; }
+    public RepoEnvironmentBranchSelectionConfig? Selection { get; init; }
+    public Dictionary<string, JsonElement>? Vars { get; init; }
+    public Dictionary<string, JsonElement>? Settings { get; init; }
+    public RepoSecretsConfig? Secrets { get; init; }
+    public RepoEnvironmentPromotionConfig? Promotion { get; init; }
+}
+
+public sealed record RepoEnvironmentSelectionConfig
+{
+    public RepoSourceBranchConfig? SourceBranch { get; init; }
+}
+
+public sealed record RepoSourceBranchConfig
+{
+    public string? Variable { get; init; }
+    public string? Fallback { get; init; }
+}
+
+public sealed record RepoEnvironmentBranchSelectionConfig
+{
+    public IReadOnlyList<string>? Branches { get; init; }
+}
+
+public sealed record RepoEnvironmentPromotionConfig
+{
+    public string Path { get; init; } = string.Empty;
+}
 
 public sealed record RepoOutputsConfig
 {

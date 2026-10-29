@@ -45,7 +45,7 @@ public sealed class CliBootstrapperParityTests
         }
         """);
 
-            var (_, _, effectiveConfig, _) = await CliBootstrapper.BuildServicesAsync(
+            var (_, _, effectiveConfig, _, _) = await CliBootstrapper.BuildServicesAsync(
                 dir, debug: false, setOverrides: null, CancellationToken.None);
 
             Assert.NotNull(effectiveConfig?.Secrets?.Defaults?.ProviderChain);
@@ -90,6 +90,48 @@ public sealed class CliBootstrapperParityTests
 
             Assert.Contains("ART-005", ex.Message, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("not-a-real-provider", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(dir)) Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task BuildServicesAsyncKeepsSetOverridesAboveEnvironmentOverlays()
+    {
+        var dir = Path.Join(Path.GetTempPath(), $"rexo-parity-environment-{Guid.NewGuid():N}");
+        var rexoDir = Path.Join(dir, ".rexo");
+        Directory.CreateDirectory(rexoDir);
+        var configPath = Path.Join(rexoDir, "rexo.json");
+
+        try
+        {
+            await File.WriteAllTextAsync(configPath, """
+        {
+          "$schema": "https://raw.githubusercontent.com/agile-north/rexo/schema/v1.0/rexo.schema.json",
+          "schemaVersion": "1.0",
+          "name": "sample",
+          "commands": {},
+          "aliases": {},
+          "vars": { "deployTarget": "base" },
+          "environments": {
+            "staging": {
+              "vars": { "deployTarget": "staging" }
+            }
+          }
+        }
+        """);
+
+            var (_, _, effectiveConfig, _, selection) = await CliBootstrapper.BuildServicesAsync(
+                dir,
+                debug: false,
+                setOverrides: ["vars.deployTarget=cli"],
+                CancellationToken.None,
+                explicitEnvironmentName: "staging");
+
+            Assert.Equal("staging", selection.EnvironmentName);
+            Assert.Equal("cli", effectiveConfig?.Vars?["deployTarget"].GetString());
         }
         finally
         {

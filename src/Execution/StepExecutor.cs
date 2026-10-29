@@ -3,6 +3,8 @@ namespace Rexo.Execution;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using Rexo.Ci;
 using Rexo.Core.Abstractions;
 using Rexo.Core.Models;
@@ -312,6 +314,14 @@ public sealed class StepExecutor : IStepExecutor, IDisposable
                 new RunExecutionMetadata("container", "container", container.Image, container.WorkingDirectory, false, container.Fallback, false, null));
         }
 
+        if (container.Network is not null &&
+            !container.Network.Equals("bridge", StringComparison.OrdinalIgnoreCase) &&
+            !container.Network.Equals("host", StringComparison.OrdinalIgnoreCase))
+        {
+            return InvalidContainerResult(container, containerWorkingDirectory: container.WorkingDirectory,
+                $"Unsupported container network '{container.Network}'. Supported values are 'bridge' and 'host'.");
+        }
+
         var containerWorkingDirectory = string.IsNullOrWhiteSpace(container.WorkingDirectory)
             ? "/work"
             : container.WorkingDirectory;
@@ -327,6 +337,7 @@ public sealed class StepExecutor : IStepExecutor, IDisposable
             Console.WriteLine($"  > [container:{SecretMasker.Mask(container.Image, secrets)}] {SecretMasker.Mask(command, secrets)}");
         }
 
+        string? temporaryMountDirectory = null;
         try
         {
             var prepareResult = await EnsureContainerImageAsync(
@@ -369,7 +380,9 @@ public sealed class StepExecutor : IStepExecutor, IDisposable
             }
 
             var containerEnvironment = BuildContainerEnvironment(context, container);
-            var dockerArgs = BuildContainerRunArgs(command, container, context, containerEnvironment);
+            var preparedMounts = await PrepareContainerMountsAsync(container, context, cancellationToken);
+            temporaryMountDirectory = preparedMounts.TemporaryDirectory;
+            var dockerArgs = BuildContainerRunArgs(command, container, context, containerEnvironment, preparedMounts.Mounts);
             if (debugEnabled)
             {
                 Console.WriteLine($"[debug] Container invocation: docker {string.Join(" ", dockerArgs.Select(arg => QuoteForDebug(SecretMasker.Mask(arg, secrets))))}");
@@ -380,6 +393,10 @@ public sealed class StepExecutor : IStepExecutor, IDisposable
                 ResolveDockerCommand(),
                 dockerArgs,
                 context.RepositoryRoot,
+                environment: containerEnvironment.ToDictionary(
+                    entry => entry.Key,
+                    entry => (string?)entry.Value,
+                    StringComparer.Ordinal),
                 onStdout: line => Console.WriteLine($"    {SecretMasker.Mask(line, secrets)}"),
                 cancellationToken: cancellationToken);
 
@@ -425,6 +442,10 @@ public sealed class StepExecutor : IStepExecutor, IDisposable
                 "Docker executable was not found.",
                 echoMode,
                 cancellationToken);
+        }
+        finally
+        {
+            CleanupTemporaryMountDirectory(temporaryMountDirectory, secrets);
         }
     }
 
@@ -504,7 +525,8 @@ public sealed class StepExecutor : IStepExecutor, IDisposable
         string command,
         StepContainerDefinition container,
         ExecutionContext context,
-        IReadOnlyDictionary<string, string> containerEnvironment)
+        IReadOnlyDictionary<string, string> containerEnvironment,
+        IReadOnlyList<ResolvedContainerMount> mounts)
     {
         var args = new List<string>
         {
@@ -522,6 +544,12 @@ public sealed class StepExecutor : IStepExecutor, IDisposable
             args.Add(container.User);
         }
 
+        if (container.Network is not null)
+        {
+            args.Add("--network");
+            args.Add(container.Network.ToLowerInvariant());
+        }
+
         if (!string.IsNullOrWhiteSpace(container.Entrypoint))
         {
             args.Add("--entrypoint");
@@ -530,8 +558,20 @@ public sealed class StepExecutor : IStepExecutor, IDisposable
 
         foreach (var envVar in containerEnvironment)
         {
-            args.Add("-e");
-            args.Add(envVar.Key + "=" + envVar.Value);
+            args.Add("--env");
+            args.Add(envVar.Key);
+        }
+
+        foreach (var mount in mounts)
+        {
+            var mountSpec = $"type=bind,source={mount.Source},target={mount.Target}";
+            if (mount.ReadOnly)
+            {
+                mountSpec += ",readonly";
+            }
+
+            args.Add("--mount");
+            args.Add(mountSpec);
         }
 
         args.Add(container.Image);
@@ -551,6 +591,247 @@ public sealed class StepExecutor : IStepExecutor, IDisposable
 
         return args;
     }
+
+    private async Task<PreparedContainerMounts> PrepareContainerMountsAsync(
+        StepContainerDefinition container,
+        ExecutionContext context,
+        CancellationToken cancellationToken)
+    {
+        var configuredMounts = container.Mounts ?? [];
+        if (configuredMounts.Count == 0)
+        {
+            return new PreparedContainerMounts([], null);
+        }
+
+        string? temporaryDirectory = null;
+        var preparedSuccessfully = false;
+        var prepared = new List<ResolvedContainerMount>(configuredMounts.Count);
+        try
+        {
+            for (var index = 0; index < configuredMounts.Count; index++)
+            {
+                var mount = configuredMounts[index];
+                ValidateContainerMountTarget(mount.Target);
+                if (mount.Secret is not null)
+                {
+                    if (mount.Source is not null)
+                    {
+                        throw new InvalidOperationException("A container mount cannot specify both source and secret.");
+                    }
+
+                    if (_secretResolver is null)
+                    {
+                        throw new InvalidOperationException(
+                            $"Secret mount '{mount.Secret}' cannot be resolved because secret resolution is unavailable.");
+                    }
+
+                    var secretValue = await _secretResolver.GetSecretValueAsync(mount.Secret, cancellationToken);
+                    if (secretValue is null)
+                    {
+                        throw new InvalidOperationException(
+                            $"Required secret '{mount.Secret}' for a container file mount could not be resolved.");
+                    }
+
+                    temporaryDirectory ??= CreateTemporaryMountDirectory();
+                    var secretPath = Path.Join(temporaryDirectory, $"secret-{index.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+                    var fileOptions = new FileStreamOptions
+                    {
+                        Mode = FileMode.CreateNew,
+                        Access = FileAccess.Write,
+                        Share = FileShare.None,
+                    };
+                    if (!OperatingSystem.IsWindows())
+                    {
+                        fileOptions.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+                    }
+
+                    await using (var stream = new FileStream(secretPath, fileOptions))
+                    await using (var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)))
+                    {
+                        await writer.WriteAsync(secretValue.AsMemory(), cancellationToken);
+                    }
+
+                    if (!OperatingSystem.IsWindows())
+                    {
+                        File.SetUnixFileMode(secretPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                    }
+
+                    prepared.Add(new ResolvedContainerMount(secretPath, mount.Target, ReadOnly: true));
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(mount.Source))
+                {
+                    throw new InvalidOperationException("A host container mount requires a source path.");
+                }
+
+                var source = ResolveContainerMountSource(context.RepositoryRoot, mount.Source, mount.AllowOutsideRepository);
+                prepared.Add(new ResolvedContainerMount(source, mount.Target, mount.ReadOnly));
+            }
+
+            preparedSuccessfully = true;
+            return new PreparedContainerMounts(prepared, temporaryDirectory);
+        }
+        finally
+        {
+            if (!preparedSuccessfully)
+            {
+                CleanupTemporaryMountDirectory(
+                    temporaryDirectory,
+                    new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+            }
+        }
+    }
+
+    private static void ValidateContainerMountTarget(string target)
+    {
+        if (string.IsNullOrWhiteSpace(target) ||
+            !target.StartsWith('/') ||
+            target.Split('/').Any(segment => segment is "." or "..") ||
+            target.Contains(',') ||
+            target.Contains('\0'))
+        {
+            throw new InvalidOperationException(
+                $"Container mount target '{target}' must be an absolute path without traversal or comma characters.");
+        }
+    }
+
+    private static string ResolveContainerMountSource(
+        string repositoryRoot,
+        string source,
+        bool allowOutsideRepository)
+    {
+        if (!allowOutsideRepository &&
+            source.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar])
+            .Any(segment => segment == ".."))
+        {
+            throw new InvalidOperationException($"Container mount source '{source}' must not contain parent traversal.");
+        }
+
+        var resolvedRoot = ResolveExistingPath(Path.GetFullPath(repositoryRoot))
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var resolvedSource = Path.GetFullPath(Path.IsPathRooted(source) ? source : Path.Join(resolvedRoot, source));
+        if (!File.Exists(resolvedSource) && !Directory.Exists(resolvedSource))
+        {
+            throw new InvalidOperationException($"Container mount source '{source}' does not exist.");
+        }
+
+        var canonicalSource = ResolveExistingPath(resolvedSource);
+        if (!allowOutsideRepository && !IsPathWithin(resolvedRoot, canonicalSource))
+        {
+            throw new InvalidOperationException(
+                $"Container mount source '{source}' resolves outside the repository. Set allowOutsideRepository: true to allow it explicitly.");
+        }
+
+        if (canonicalSource.Contains(','))
+        {
+            throw new InvalidOperationException($"Container mount source '{source}' contains a comma unsupported by Docker mount syntax.");
+        }
+
+        return Path.GetFullPath(canonicalSource);
+    }
+
+    private static string ResolveExistingPath(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var pathRoot = Path.GetPathRoot(fullPath)
+            ?? throw new InvalidOperationException($"Path '{path}' does not have a filesystem root.");
+        var current = pathRoot;
+        foreach (var segment in fullPath[pathRoot.Length..]
+            .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Join(current, segment);
+            FileSystemInfo fileSystemInfo = Directory.Exists(current)
+                ? new DirectoryInfo(current)
+                : new FileInfo(current);
+            if (!fileSystemInfo.Exists)
+            {
+                throw new FileNotFoundException($"Path '{path}' does not exist.", path);
+            }
+
+            var linkTarget = fileSystemInfo.ResolveLinkTarget(returnFinalTarget: true);
+            if (linkTarget is not null)
+            {
+                current = Path.GetFullPath(linkTarget.FullName);
+            }
+        }
+
+        return Path.GetFullPath(current);
+    }
+
+    private static bool IsPathWithin(string root, string path)
+    {
+        var relative = Path.GetRelativePath(root, path);
+        return relative.Equals(".", StringComparison.Ordinal) ||
+            !Path.IsPathRooted(relative) &&
+            relative != ".." &&
+            !relative.StartsWith($"..{Path.DirectorySeparatorChar}", OperatingSystem.IsWindows()
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal);
+    }
+
+    private static string CreateTemporaryMountDirectory()
+    {
+        var directory = Path.Join(Path.GetTempPath(), $"rexo-container-{Guid.NewGuid():N}");
+        if (OperatingSystem.IsWindows())
+        {
+            try
+            {
+                var security = new DirectorySecurity();
+                security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+                var currentUser = WindowsIdentity.GetCurrent().User
+                    ?? throw new InvalidOperationException("The current Windows user SID could not be resolved.");
+                security.AddAccessRule(new FileSystemAccessRule(
+                    currentUser,
+                    FileSystemRights.FullControl,
+                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                    PropagationFlags.None,
+                    AccessControlType.Allow));
+                new DirectoryInfo(directory).Create(security);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+            {
+                throw new InvalidOperationException(
+                    "Could not restrict access to the temporary container secret directory.",
+                    exception);
+            }
+        }
+        else
+        {
+            Directory.CreateDirectory(directory);
+            File.SetUnixFileMode(
+                directory,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        return directory;
+    }
+
+    private static void CleanupTemporaryMountDirectory(string? directory, IReadOnlySet<string> secrets)
+    {
+        if (directory is null || !Directory.Exists(directory))
+        {
+            return;
+        }
+
+        try
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine(
+                $"[warn] Could not remove temporary secret mount directory '{directory}': {SecretMasker.Mask(exception.Message, secrets)}");
+        }
+    }
+
+    private static ContainerRunResult InvalidContainerResult(
+        StepContainerDefinition container,
+        string? containerWorkingDirectory,
+        string error) =>
+        new(
+            new ShellRunResult(1, string.Empty, error),
+            new RunExecutionMetadata("container", "container", container.Image, containerWorkingDirectory, false, container.Fallback, false, "invalid-container-configuration"));
 
     private static async Task<ShellRunResult?> EnsureContainerImageAsync(
         StepContainerDefinition container,
@@ -875,6 +1156,13 @@ public sealed class StepExecutor : IStepExecutor, IDisposable
             CiTag = context.CiTag,
             CiBuildUrl = context.CiBuildUrl,
             CommandExecuted = commandName,
+            Environment = context.EnvironmentSelection?.EnvironmentName,
+            EnvironmentSelectionSource = context.EnvironmentSelection?.SelectionSource,
+            SourceBranch = context.EnvironmentSelection?.SourceBranch,
+            SourceBranchOrigin = context.EnvironmentSelection?.BranchSource,
+            MatchedBranchPattern = context.EnvironmentSelection?.MatchedPattern,
+            EnvironmentSelectionExplicit = context.EnvironmentSelection?.IsExplicit,
+            EnvironmentSelectionOverrodeAutomaticMatches = context.EnvironmentSelection?.OverrodeAutomaticSelection,
             Success = context.CompletedSteps.Values.All(step => step.Success),
             ExitCode = context.CompletedSteps.Values.LastOrDefault()?.ExitCode ?? 0,
             StartedAt = now,
@@ -1072,6 +1360,7 @@ public sealed class StepExecutor : IStepExecutor, IDisposable
         {
             CallStack = context.CommandCallStack,
             ArtifactDiscoveryCache = context.ArtifactDiscoveryCache,
+            EnvironmentSelection = context.EnvironmentSelection,
             MaxCommandDepth = context.MaxCommandDepth,
             EchoMode = context.CliEchoMode ?? stepDefinition.Echo,
         };
@@ -1263,6 +1552,12 @@ public sealed class StepExecutor : IStepExecutor, IDisposable
     }
 
     private sealed record ContainerRunResult(ShellRunResult Result, RunExecutionMetadata Metadata);
+
+    private sealed record PreparedContainerMounts(
+        IReadOnlyList<ResolvedContainerMount> Mounts,
+        string? TemporaryDirectory);
+
+    private sealed record ResolvedContainerMount(string Source, string Target, bool ReadOnly);
 
     private sealed record RunExecutionMetadata(
         string ExecutionMode,

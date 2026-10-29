@@ -13,6 +13,7 @@ using Rexo.Artifacts.NuGet;
 using Rexo.Artifacts.PyPi;
 using Rexo.Artifacts.RubyGems;
 using Rexo.Artifacts.Terraform;
+using Rexo.Ci;
 using Rexo.Configuration;
 using Rexo.Configuration.Models;
 using Rexo.Core.Models;
@@ -31,7 +32,8 @@ internal static class CliBootstrapper
         CommandRegistry registry,
         DefaultCommandExecutor executor,
         RepoConfig? config,
-        ConfigProvenanceSnapshot provenance)>
+        ConfigProvenanceSnapshot provenance,
+        EnvironmentSelectionResult environmentSelection)>
         BuildServicesAsync(
             string workingDir,
             bool debug,
@@ -40,7 +42,9 @@ internal static class CliBootstrapper
             bool updatePolicies = false,
             bool requirePolicyLock = false,
             bool captureConfigProvenance = false,
-            bool registerConfigCommands = true)
+            bool registerConfigCommands = true,
+            string? explicitEnvironmentName = null,
+            string? explicitSourceBranch = null)
     {
         if (debug) Console.WriteLine($"[debug] Loading configuration from {workingDir}");
 
@@ -89,6 +93,42 @@ internal static class CliBootstrapper
             }
         }
 
+        if (effectiveConfig is not null)
+        {
+            EnvironmentConfigurationValidator.Validate(effectiveConfig);
+        }
+
+        var selectionConfig = effectiveConfig ?? new RepoConfig(string.Empty, null, null);
+        var sourceBranch = await SourceBranchResolver.ResolveAsync(
+            selectionConfig,
+            explicitSourceBranch,
+            workingDir,
+            cancellationToken);
+        var ciInfo = CiDetector.Detect();
+        var environmentSelection = EnvironmentSelectionResolver.Resolve(
+            selectionConfig,
+            explicitEnvironmentName,
+            Environment.GetEnvironmentVariable("REXO_ENVIRONMENT"),
+            sourceBranch.Branch,
+            sourceBranch.Source,
+            ciInfo.IsPullRequest);
+        if (sourceBranch.Error is not null && environmentSelection.Error is null && !environmentSelection.IsExplicit)
+        {
+            environmentSelection = environmentSelection with { Error = sourceBranch.Error };
+        }
+
+        if (environmentSelection.IsResolved && environmentSelection.EnvironmentName is { } selectedEnvironment)
+        {
+            config = RepoConfigurationLoader.ApplyEnvironment(config!, selectedEnvironment);
+            effectiveConfig = RepoConfigurationLoader.ApplyEnvironment(effectiveConfig!, selectedEnvironment);
+
+            // Environment overlays are a config layer; CLI overrides remain the final layer.
+            if (setOverrides is { Count: > 0 })
+            {
+                effectiveConfig = ConfigBuilder.ApplySetOverridesWithWarnings(effectiveConfig, setOverrides).config;
+            }
+        }
+
         // Create command registry
         var configPath = ConfigFileLocator.FindConfigPath(workingDir)
             ?? ConfigFileLocator.GetDefaultConfigPath(workingDir);
@@ -113,7 +153,8 @@ internal static class CliBootstrapper
                 policyConfig,
                 setOverrides ?? [],
                 File.Exists(configPath) ? configPath : null,
-                repositoryLayers));
+                repositoryLayers),
+            environmentSelection);
     }
 
     private static void RegisterConfigCommands(

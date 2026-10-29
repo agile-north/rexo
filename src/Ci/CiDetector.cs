@@ -19,13 +19,16 @@ public static class CiDetector
             var refType = Environment.GetEnvironmentVariable("GITHUB_REF_TYPE");
             var refName = Environment.GetEnvironmentVariable("GITHUB_REF_NAME");
             var tag = string.Equals(refType, "tag", StringComparison.OrdinalIgnoreCase) ? refName : null;
+            var eventName = Environment.GetEnvironmentVariable("GITHUB_EVENT_NAME");
+            var isPullRequest = eventName?.StartsWith("pull_request", StringComparison.OrdinalIgnoreCase) == true ||
+                !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("GITHUB_BASE_REF"));
 
             return new CiInfo(
                 IsCi: true,
                 Provider: "github-actions",
                 BuildId: runId,
                 Branch: Environment.GetEnvironmentVariable("GITHUB_REF_NAME"),
-                IsPullRequest: Environment.GetEnvironmentVariable("GITHUB_EVENT_NAME") == "pull_request")
+                IsPullRequest: isPullRequest)
             {
                 RunNumber = Environment.GetEnvironmentVariable("GITHUB_RUN_NUMBER"),
                 WorkflowName = Environment.GetEnvironmentVariable("GITHUB_WORKFLOW"),

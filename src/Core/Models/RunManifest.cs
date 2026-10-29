@@ -20,6 +20,13 @@ public sealed record RunManifest
     public string? CiTag { get; init; }
     public string? CiBuildUrl { get; init; }
     public string? CommandExecuted { get; init; }
+    public string? Environment { get; init; }
+    public string? EnvironmentSelectionSource { get; init; }
+    public string? SourceBranch { get; init; }
+    public string? SourceBranchOrigin { get; init; }
+    public string? MatchedBranchPattern { get; init; }
+    public bool? EnvironmentSelectionExplicit { get; init; }
+    public bool? EnvironmentSelectionOverrodeAutomaticMatches { get; init; }
     public bool Success { get; init; }
     public int ExitCode { get; init; }
     public DateTimeOffset StartedAt { get; init; }

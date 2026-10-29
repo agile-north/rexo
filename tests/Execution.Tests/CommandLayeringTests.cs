@@ -87,6 +87,7 @@ public sealed class CommandLayeringTests
 
                         if /I "%~1"=="run" (
                             echo run %*>>"%LOG%"
+                            echo APP_ENV=%APP_ENV%>>"%LOG%"
                             echo container-run-ok
                             exit /b 0
                         )
@@ -434,7 +435,8 @@ public sealed class CommandLayeringTests
                         Assert.Contains("--entrypoint custom-entry", log, StringComparison.Ordinal);
                         Assert.Contains("--user 1001:1002", log, StringComparison.Ordinal);
                         Assert.Contains("-w /workspace", log, StringComparison.Ordinal);
-                        Assert.Contains("-e APP_ENV=prod", log, StringComparison.Ordinal);
+                        Assert.Contains("--env APP_ENV", log, StringComparison.Ordinal);
+                        Assert.Contains("APP_ENV=prod", log, StringComparison.Ordinal);
                         Assert.Contains("hello-from-template", log, StringComparison.Ordinal);
                 }
                 finally

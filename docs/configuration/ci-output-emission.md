@@ -85,6 +85,13 @@ or excluded by the variable limit.
 | `ciTag` | `REXO_CI_TAG` | Provider tag, when supplied. |
 | `ciBuildUrl` | `REXO_CI_BUILD_URL` | Provider build URL. |
 | `commandExecuted` | `REXO_COMMAND_EXECUTED` | Command executed. |
+| `environment` | `REXO_ENVIRONMENT` | Selected execution environment. |
+| `environmentSelectionSource` | `REXO_ENVIRONMENT_SELECTION_SOURCE` | CLI, environment-variable, branch, or unresolved selection source. |
+| `sourceBranch` | `REXO_SOURCE_BRANCH` | Normalized source branch used for automatic selection. |
+| `sourceBranchOrigin` | `REXO_SOURCE_BRANCH_ORIGIN` | Source of branch metadata. |
+| `matchedBranchPattern` | `REXO_MATCHED_BRANCH_PATTERN` | Pattern that matched the selected environment. |
+| `environmentSelectionExplicit` | `REXO_ENVIRONMENT_SELECTION_EXPLICIT` | Whether the environment was explicitly selected. |
+| `environmentSelectionOverrodeAutomaticMatches` | `REXO_ENVIRONMENT_SELECTION_OVERRODE_AUTOMATIC_MATCHES` | Whether an explicit choice overrode another automatic match. |
 | `success` | `REXO_SUCCESS` | Overall command success, including successful no-ops. |
 | `exitCode` | `REXO_EXIT_CODE` | Command exit code. |
 | `startedAt` | `REXO_STARTED_AT` | Round-trip timestamp. |

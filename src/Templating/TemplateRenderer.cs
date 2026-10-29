@@ -692,6 +692,16 @@ public sealed class TemplateRenderer : ITemplateRenderer
             ["settings"] = context.ResolvedSettings,
             ["vars"] = context.ResolvedVars,
             ["secrets"] = context.ResolvedSecrets,
+            ["environment"] = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["name"] = context.EnvironmentSelection?.EnvironmentName,
+                ["sourceBranch"] = context.EnvironmentSelection?.SourceBranch,
+                ["selectionSource"] = context.EnvironmentSelection?.SelectionSource,
+                ["branchSource"] = context.EnvironmentSelection?.BranchSource,
+                ["matchedPattern"] = context.EnvironmentSelection?.MatchedPattern,
+                ["isExplicit"] = context.EnvironmentSelection?.IsExplicit.ToString().ToLowerInvariant(),
+                ["isResolved"] = context.EnvironmentSelection?.IsResolved.ToString().ToLowerInvariant(),
+            },
             ["push"] = BuildPushContext(context),
         };
 

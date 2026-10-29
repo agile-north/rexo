@@ -441,7 +441,8 @@ public sealed class CliSmokeTests
                   fallback: 1.0.0
                 environments:
                   staging:
-                    path: deployments/staging
+                    promotion:
+                      path: deployments/staging
                 """;
             await File.WriteAllTextAsync(configPath, configYaml);
 
@@ -470,12 +471,12 @@ public sealed class CliSmokeTests
 
             var outputPath = Path.Join(tempDir, "promotion.json");
             Assert.Equal(0, await Program.ExecuteAsync(
-                ["--dry-run", "--json-file", outputPath, "promote", manifestArgument, "staging"],
+                ["--dry-run", "--json-file", outputPath, "--environment", "staging", "promote", manifestArgument],
                 CancellationToken.None));
             Assert.False(Directory.Exists(Path.Join(tempDir, "deployments")));
 
             Assert.Equal(0, await Program.ExecuteAsync(
-                ["--json-file", outputPath, "promote", manifestArgument, "staging"],
+                ["--json-file", outputPath, "--environment", "staging", "promote", manifestArgument],
                 CancellationToken.None));
 
             var destination = Path.Join(tempDir, "deployments", "staging", "objects", contentHash, "sample.nupkg");
@@ -489,13 +490,13 @@ public sealed class CliSmokeTests
                 configPath,
                 configYaml.Replace("path: deployments/staging", "path: ../outside", StringComparison.Ordinal));
             Assert.Equal(9, await Program.ExecuteAsync(
-                ["promote", manifestArgument, "staging"],
+                ["--environment", "staging", "promote", manifestArgument],
                 CancellationToken.None));
             Assert.False(Directory.Exists(Path.Join(tempDir, "outside")));
             await File.WriteAllTextAsync(configPath, configYaml);
 
             Assert.Equal(0, await Program.ExecuteAsync(
-                ["promote", manifestArgument, "staging"],
+                ["--environment", "staging", "promote", manifestArgument],
                 CancellationToken.None));
             Assert.Single(Directory.GetFiles(Path.Join(tempDir, "deployments", "staging", "promotions"), "*.json"));
 
@@ -505,14 +506,14 @@ public sealed class CliSmokeTests
             };
             await File.WriteAllTextAsync(sourceManifestPath, JsonSerializer.Serialize(alteredManifest));
             Assert.Equal(9, await Program.ExecuteAsync(
-                ["promote", manifestArgument, "staging"],
+                ["--environment", "staging", "promote", manifestArgument],
                 CancellationToken.None));
             Assert.Single(Directory.GetFiles(Path.Join(tempDir, "deployments", "staging", "promotions"), "*.json"));
 
             await File.WriteAllTextAsync(sourceManifestPath, originalManifestJson);
             await File.WriteAllTextAsync(sourceArtifact, "modified package bytes");
             Assert.Equal(9, await Program.ExecuteAsync(
-                ["--dry-run", "promote", manifestArgument, "staging"],
+                ["--dry-run", "--environment", "staging", "promote", manifestArgument],
                 CancellationToken.None));
         }
         finally

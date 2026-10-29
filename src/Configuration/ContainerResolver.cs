@@ -111,6 +111,8 @@ public static class ContainerResolver
             Extends = @override.Extends ?? @base.Extends,
             Fallback = @override.Fallback ?? @base.Fallback,
             User = @override.User ?? @base.User,
+            Network = @override.Network ?? @base.Network,
+            Mounts = @override.Mounts ?? @base.Mounts,
         };
     }
 

@@ -37,6 +37,12 @@ Use any existing provider/provider chain for the named secret. Rexo can retrieve
 a missing/empty password still fails that execution. Global required secrets continue to
 participate in normal preflight.
 
+Commands can declare `requiredSecrets: [name, ...]` to require and preflight logical
+secrets even when their definitions are optional. These references are checked before any
+command step runs. Environment-specific secret definitions are deferred for unrelated
+commands; a command that needs one should declare it in `requiredSecrets`. Globally required
+secrets retain the existing preflight behavior.
+
 Keep login secrets out of template exposure and environment mappings. Rexo supplies the
 resolved password directly to Windows process creation, masks it in captured output/errors,
 and does not put it in command arguments or config/run-manifest output. Existing inherited

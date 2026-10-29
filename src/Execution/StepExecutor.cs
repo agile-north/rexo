@@ -817,8 +817,7 @@ public sealed class StepExecutor : IStepExecutor, IDisposable
         }
         else
         {
-            Directory.CreateDirectory(directory);
-            File.SetUnixFileMode(
+            Directory.CreateDirectory(
                 directory,
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         }

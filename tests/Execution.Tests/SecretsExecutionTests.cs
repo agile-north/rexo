@@ -430,6 +430,85 @@ public sealed class SecretsExecutionTests
     }
 
     [Fact]
+    public async Task OptionalEnvironmentMappedSecretDoesNotFailWhenUnresolved()
+    {
+        var sourceVariable = $"REXO_TEST_OPTIONAL_SECRET_SOURCE_{Guid.NewGuid():N}";
+        var targetVariable = $"REXO_TEST_OPTIONAL_SECRET_TARGET_{Guid.NewGuid():N}";
+        var originalSourceValue = Environment.GetEnvironmentVariable(sourceVariable);
+        var originalTargetValue = Environment.GetEnvironmentVariable(targetVariable);
+        Environment.SetEnvironmentVariable(sourceVariable, null);
+        Environment.SetEnvironmentVariable(targetVariable, null);
+        var config = CreateConfig(
+            runCommand: "echo should-not-run",
+            secrets: new RepoSecretsConfig())
+            with
+            {
+                Commands = new Dictionary<string, RepoCommandConfig>
+                {
+                    ["run"] = new RepoCommandConfig(
+                        "run",
+                        new Dictionary<string, RepoOptionConfig>(),
+                        [new RepoStepConfig(Id: "run", Run: $"pwsh -NoProfile -Command \"if ([Environment]::GetEnvironmentVariable('{targetVariable}') -eq $null) {{ Write-Output missing-optional }} else {{ Write-Output unexpectedly-injected; exit 7 }}\"")])
+                    {
+                        UsesEnvironment = true,
+                        RequiresEnvironment = true,
+                    },
+                },
+                Environments = new Dictionary<string, RepoEnvironmentConfig>
+                {
+                    ["qa"] = new()
+                    {
+                        Secrets = new RepoSecretsConfig
+                        {
+                            Defaults = new RepoSecretDefaultsConfig { Provider = "env", Required = true },
+                            Items = new Dictionary<string, RepoSecretConfig>(StringComparer.OrdinalIgnoreCase)
+                            {
+                                ["optionalToken"] = new()
+                                {
+                                    Env = sourceVariable,
+                                    MapToEnv = targetVariable,
+                                    Required = false,
+                                    ExposeInTemplates = false,
+                                },
+                            },
+                        },
+                    },
+                },
+            };
+        var environmentConfig = RepoConfigurationLoader.ApplyEnvironment(config, "qa");
+        var selection = new EnvironmentSelectionResult
+        {
+            EnvironmentName = "qa",
+            SelectionSource = "cli",
+            IsExplicit = true,
+            IsResolved = true,
+        };
+        var tempRoot = Path.Join(Path.GetTempPath(), $"rexo-optional-environment-secret-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempRoot);
+
+        try
+        {
+            var result = await ExecuteConfigCommandAsync(
+                config,
+                tempRoot,
+                environmentSelection: selection,
+                environmentConfig: environmentConfig);
+
+            Assert.True(result.Success, result.Message);
+            Assert.Contains(
+                "missing-optional",
+                Assert.IsType<string>(result.Steps[0].Outputs["stdout"]),
+                StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(sourceVariable, originalSourceValue);
+            Environment.SetEnvironmentVariable(targetVariable, originalTargetValue);
+            Directory.Delete(tempRoot, true);
+        }
+    }
+
+    [Fact]
     public async Task ExecProviderResolvesSecretViaCommand()
     {
         var config = CreateConfig(

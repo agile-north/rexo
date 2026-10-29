@@ -311,6 +311,10 @@ public sealed class CliSmokeTests
                   fallback: 2.3.4
                 vars:
                   displayName: safe-value
+                environments:
+                  qa:
+                    vars:
+                      displayName: qa-value
                 """);
             var overlayPath = Path.Join(tempDir, ".rexo", "overlay.yaml");
             await File.WriteAllTextAsync(
@@ -345,6 +349,39 @@ public sealed class CliSmokeTests
             Assert.Contains(sourceLayers, layer => layer?.Contains(Path.Join(".rexo", "rexo.yaml"), StringComparison.Ordinal) == true);
             Assert.Contains(sourceLayers, layer => layer?.Contains("overlay.yaml", StringComparison.Ordinal) == true);
             Assert.Contains("CLI --set override", sourceLayers);
+
+            var environmentExplainPath = Path.Join(tempDir, "environment-explain.json");
+            Assert.Equal(0, await Program.ExecuteAsync(
+                ["--environment", "qa", "--json-file", environmentExplainPath, "config", "explain", "vars.displayName"],
+                CancellationToken.None));
+
+            using var environmentExplain = JsonDocument.Parse(await File.ReadAllTextAsync(environmentExplainPath));
+            var environmentExplainOutputs = environmentExplain.RootElement.GetProperty("Outputs");
+            Assert.Equal("qa-value", environmentExplainOutputs.GetProperty("value").GetString());
+            Assert.Contains(
+                environmentExplainOutputs.GetProperty("sourceLayers").EnumerateArray()
+                    .Select(layer => layer.GetString()),
+                layer => layer == "environment overlay: qa");
+
+            var environmentOverrideExplainPath = Path.Join(tempDir, "environment-override-explain.json");
+            Assert.Equal(0, await Program.ExecuteAsync(
+                [
+                    "--environment", "qa",
+                    "--set", "vars.displayName=cli-value",
+                    "--json-file", environmentOverrideExplainPath,
+                    "config", "explain", "vars.displayName",
+                ],
+                CancellationToken.None));
+
+            using var environmentOverrideExplain = JsonDocument.Parse(
+                await File.ReadAllTextAsync(environmentOverrideExplainPath));
+            var environmentOverrideOutputs = environmentOverrideExplain.RootElement.GetProperty("Outputs");
+            Assert.Equal("cli-value", environmentOverrideOutputs.GetProperty("value").GetString());
+            var environmentOverrideLayers = environmentOverrideOutputs.GetProperty("sourceLayers").EnumerateArray()
+                .Select(layer => layer.GetString())
+                .ToArray();
+            Assert.DoesNotContain("environment overlay: qa", environmentOverrideLayers);
+            Assert.Equal("CLI --set override", environmentOverrideLayers[^1]);
 
             var resolvedJsonPath = Path.Join(tempDir, "resolved-with-provenance.json");
             Assert.Equal(0, await Program.ExecuteAsync(

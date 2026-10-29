@@ -45,11 +45,12 @@ If more than one candidate exists, Rexo uses the first match and prints a warnin
 ignored files (also reported by `rx doctor` as `config-duplicates`).
 
 Use `rx config explain <property.path>` to inspect a value from the effective merged
-configuration. Sensitive property names and nested credentials are redacted. Its JSON output
+configuration; with `--environment <name>`, the selected environment overlay is included.
+Sensitive property names and nested credentials are redacted. Its JSON output
 identifies applicable merged policy, repository config files that declare the property (including
-resolved local `extends` and overlays), and CLI `--set` layers in precedence order. Policy source
-files remain grouped; the repository file list identifies declarations rather than resolving
-field-level merge behavior.
+resolved local `extends` and overlays), selected environment overlays that change the value, and
+CLI `--set` layers in precedence order. Policy source files remain grouped; the repository file
+list identifies declarations rather than resolving field-level merge behavior.
 
 Use `rx config resolved --provenance` to emit the effective configuration with sensitive values
 redacted alongside repository config files, the merged policy group, and CLI `--set` property paths

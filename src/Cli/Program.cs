@@ -737,7 +737,8 @@ public static class Program
         }
 
         var propertyPath = args[2];
-        using var document = JsonDocument.Parse(JsonSerializer.Serialize(config));
+        var inspectionConfig = outputSettings.EnvironmentConfig ?? config;
+        using var document = JsonDocument.Parse(JsonSerializer.Serialize(inspectionConfig));
         var value = ResolveConfigProperty(document.RootElement, propertyPath);
         var isSensitive = propertyPath
             .Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -750,7 +751,22 @@ public static class Program
         var valueJson = safeValue is null
             ? "<not found>"
             : JsonSerializer.Serialize(safeValue, JsonOptions);
-        var sourceLayers = GetConfigSourceLayers(propertyPath, provenance, workingDir);
+        var sourceLayers = GetConfigSourceLayers(propertyPath, provenance, workingDir).ToList();
+        if (outputSettings.EnvironmentConfig is { } environmentConfig &&
+            outputSettings.EnvironmentSelection.EnvironmentName is { } environmentName &&
+            ConfigPropertyDiffers(config, environmentConfig, propertyPath))
+        {
+            var cliOverrideIndex = sourceLayers.IndexOf("CLI --set override");
+            if (cliOverrideIndex < 0)
+            {
+                sourceLayers.Add($"environment overlay: {environmentName}");
+            }
+            else
+            {
+                sourceLayers.Insert(cliOverrideIndex, $"environment overlay: {environmentName}");
+            }
+        }
+
         var source = string.Join(" -> ", sourceLayers);
         var message = $"Property: {propertyPath}\nEffective value: {valueJson}\nApplicable declarations: {source}\n" +
             "Note: repository file contributors are listed; merged policy sources are reported as a group because exact per-source field attribution is not available.";
@@ -765,6 +781,18 @@ public static class Program
         });
         var invocation = EmptyInvocation(workingDir, outputSettings, dryRun: false, debug: false);
         return await WriteResultAsync(result, invocation, verbose, quiet, cancellationToken);
+    }
+
+    private static bool ConfigPropertyDiffers(RepoConfig? baseConfig, RepoConfig environmentConfig, string propertyPath)
+    {
+        if (baseConfig is null)
+        {
+            return ResolveSerializedProperty(environmentConfig, propertyPath) is not null;
+        }
+
+        var baseValue = ResolveSerializedProperty(baseConfig, propertyPath);
+        var environmentValue = ResolveSerializedProperty(environmentConfig, propertyPath);
+        return !string.Equals(baseValue?.GetRawText(), environmentValue?.GetRawText(), StringComparison.Ordinal);
     }
 
     private static IReadOnlyList<string> GetConfigSourceLayers(

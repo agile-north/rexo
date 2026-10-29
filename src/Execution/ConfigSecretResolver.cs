@@ -48,10 +48,22 @@ internal sealed class ConfigSecretResolver : ISecretResolver
         IReadOnlyCollection<string> requiredNames,
         IReadOnlySet<string> deferredEnvironmentNames,
         CancellationToken cancellationToken)
+        => await PreflightRequiredAsync(
+            requiredNames,
+            deferredEnvironmentNames,
+            Array.Empty<string>(),
+            cancellationToken);
+
+    public async Task<SecretPreflightResult> PreflightRequiredAsync(
+        IReadOnlyCollection<string> requiredNames,
+        IReadOnlySet<string> deferredEnvironmentNames,
+        IReadOnlyCollection<string> optionalNames,
+        CancellationToken cancellationToken)
     {
         var errors = new List<RexoError>();
         var items = _config.Secrets?.Items;
         var requiredNameSet = new HashSet<string>(requiredNames, StringComparer.OrdinalIgnoreCase);
+        var optionalNameSet = new HashSet<string>(optionalNames, StringComparer.OrdinalIgnoreCase);
         foreach (var requiredName in requiredNameSet)
         {
             if (items is null || !items.ContainsKey(requiredName))
@@ -78,14 +90,16 @@ internal sealed class ConfigSecretResolver : ISecretResolver
 
         foreach (var (name, definition) in items)
         {
-            if ((!IsRequired(definition) && !requiredNameSet.Contains(name)) ||
-                (deferredEnvironmentNames.Contains(name) && !requiredNameSet.Contains(name)))
+            var isRequired = IsRequired(definition) || requiredNameSet.Contains(name);
+            var isEagerOptional = optionalNameSet.Contains(name) && !isRequired;
+            if ((!isRequired && !isEagerOptional) ||
+                (deferredEnvironmentNames.Contains(name) && !requiredNameSet.Contains(name) && !isEagerOptional))
             {
                 continue;
             }
 
             var resolution = await ResolveInternalAsync(name, definition, cancellationToken);
-            if (!resolution.Success)
+            if (!resolution.Success && isRequired)
             {
                 errors.Add(new RexoError(ErrorCodes.SecretResolutionFailed, resolution.Error ?? $"Secret '{name}' could not be resolved.")
                 {
@@ -100,6 +114,7 @@ internal sealed class ConfigSecretResolver : ISecretResolver
         {
             if (IsRequired(definition) ||
                 definition.ExposeInTemplates == false ||
+                optionalNameSet.Contains(name) ||
                 deferredEnvironmentNames.Contains(name) && !requiredNameSet.Contains(name))
             {
                 continue;

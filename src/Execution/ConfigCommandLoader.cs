@@ -278,9 +278,7 @@ public sealed class ConfigCommandLoader
                 config.Secrets?.Items is { } secretItems
                     ? deferredEnvironmentSecretNames
                         .Where(name => secretItems.TryGetValue(name, out var definition) &&
-                            ((definition.Required ?? config.Secrets.Defaults?.Required ?? true) ||
-                             !string.IsNullOrWhiteSpace(definition.MapToEnv) ||
-                             definition.MapToEnvs is { Count: > 0 }))
+                            (definition.Required ?? config.Secrets.Defaults?.Required ?? true))
                         .ToArray()
                     : [];
             var requiredSecrets = (normalizedCommandConfig.RequiredSecrets ?? [])
@@ -289,9 +287,20 @@ public sealed class ConfigCommandLoader
                 .Concat(environmentSecretsToPreflight)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
+            var optionalEnvironmentSecretsToPreflight = commandConfig.UsesEnvironment == true &&
+                config.Secrets?.Items is { } environmentSecretItems
+                    ? deferredEnvironmentSecretNames
+                        .Where(name => environmentSecretItems.TryGetValue(name, out var definition) &&
+                            !(definition.Required ?? config.Secrets.Defaults?.Required ?? true) &&
+                            (!string.IsNullOrWhiteSpace(definition.MapToEnv) ||
+                             definition.MapToEnvs is { Count: > 0 }) &&
+                            !requiredSecrets.Contains(name, StringComparer.OrdinalIgnoreCase))
+                        .ToArray()
+                    : [];
             var secretPreflight = await secretResolver.PreflightRequiredAsync(
                 requiredSecrets,
                 deferredEnvironmentSecretNames,
+                optionalEnvironmentSecretsToPreflight,
                 cancellationToken);
             if (!secretPreflight.Success)
             {

@@ -25,8 +25,16 @@ internal static class ReportFiles
         return full;
     }
 
-    public static IReadOnlyList<string> Discover(string root, string patterns, string excludes, string outputDirectory)
+    public static IReadOnlyList<string> Discover(
+        string root,
+        string patterns,
+        string excludes,
+        string outputDirectory,
+        long maximumInputSizeBytes = ReportSizeLimits.DefaultBytes,
+        Action<string>? oversizedReport = null)
     {
+        if (maximumInputSizeBytes <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maximumInputSizeBytes), "Report input size limits must be positive.");
         var matches = new HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
         var exclusions = Split(excludes).Select(GlobRegex).ToArray();
         foreach (var normalized in Split(patterns).Select(pattern => pattern.Replace('\\', '/')))
@@ -52,8 +60,11 @@ internal static class ReportFiles
                 var full = Resolve(root, file);
                 if (full.StartsWith(outputDirectory + Path.DirectorySeparatorChar,
                     OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)) continue;
-                if (new FileInfo(full).Length > 64 * 1024 * 1024)
-                    throw new InvalidOperationException("An individual report exceeds the 64 MiB input limit.");
+                if (new FileInfo(full).Length > maximumInputSizeBytes)
+                {
+                    oversizedReport?.Invoke(Path.GetRelativePath(root, full).Replace('\\', '/'));
+                    continue;
+                }
                 matches.Add(full);
                 if (matches.Count > 10000) throw new InvalidOperationException("Report discovery exceeded 10,000 files.");
             }

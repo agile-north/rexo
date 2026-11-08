@@ -13,12 +13,16 @@ internal sealed record TestReportFailure(string Name, string Message, string? Fi
 /// <summary>Reads case-level results only; captured output is excluded unless explicitly requested.</summary>
 internal static partial class TestReportReader
 {
-    private const long MaximumDocumentSize = 16 * 1024 * 1024;
-
     internal static TestReportSummary Read(
-        IReadOnlyList<string> paths, string format = "auto", bool includeOutput = false)
+        IReadOnlyList<string> paths,
+        string format = "auto",
+        bool includeOutput = false,
+        long maximumDocumentSize = ReportSizeLimits.DefaultBytes,
+        Action<string>? oversizedReport = null)
     {
         ArgumentNullException.ThrowIfNull(paths);
+        if (maximumDocumentSize <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maximumDocumentSize), "Report document size limits must be positive.");
         var selected = NormalizeFormat(format);
         var passed = 0;
         var failed = 0;
@@ -27,35 +31,60 @@ internal static partial class TestReportReader
 
         foreach (var path in paths)
         {
-            var root = Load(path);
-            var detected = DetectFormat(root);
-            if (detected is null || (selected != "auto" && selected != detected))
+            try
             {
-                throw new InvalidDataException($"Unsupported test report '{path}' for format '{selected}'.");
-            }
-
-            var caseName = detected switch
-            {
-                "trx" => "UnitTestResult",
-                "junit" => "testcase",
-                "nunit" => "test-case",
-                _ => "test",
-            };
-            foreach (var test in root.DescendantsAndSelf().Where(e => e.Name.LocalName == caseName))
-            {
-                switch (Outcome(test, detected))
+                using var stream = OpenReport(path, maximumDocumentSize);
+                using var reader = CreateReader(stream, maximumDocumentSize);
+                var rootSeen = false;
+                string? detected = null;
+                string? caseName = null;
+                var compatible = true;
+                while (reader.Read())
                 {
-                    case "passed":
-                        passed++;
-                        break;
-                    case "skipped":
-                        skipped++;
-                        break;
-                    default:
-                        failed++;
-                        failures.Add(ReadFailure(test, detected, includeOutput));
-                        break;
+                    if (reader.NodeType != XmlNodeType.Element) continue;
+                    if (!rootSeen)
+                    {
+                        rootSeen = true;
+                        detected = DetectFormatFromRoot(reader.LocalName);
+                        compatible = detected is not null && (selected == "auto" || selected == detected);
+                        if (compatible)
+                        {
+                            caseName = detected switch
+                            {
+                                "trx" => "UnitTestResult",
+                                "junit" => "testcase",
+                                "nunit" => "test-case",
+                                _ => "test",
+                            };
+                        }
+                    }
+
+                    if (!compatible || reader.LocalName != caseName) continue;
+                    using var subtree = reader.ReadSubtree();
+                    var test = XElement.Load(subtree);
+                    switch (Outcome(test, detected!))
+                    {
+                        case "passed":
+                            passed++;
+                            break;
+                        case "skipped":
+                            skipped++;
+                            break;
+                        default:
+                            failed++;
+                            failures.Add(ReadFailure(test, detected!, includeOutput));
+                            break;
+                    }
                 }
+
+                if (!rootSeen)
+                    throw new InvalidDataException($"Test report '{path}' has no root element.");
+                if (detected is null || !compatible)
+                    throw new InvalidDataException($"Unsupported test report '{path}' for format '{selected}'.");
+            }
+            catch (ReportFileTooLargeException ex)
+            {
+                oversizedReport?.Invoke(ex.Path);
             }
         }
 
@@ -66,13 +95,31 @@ internal static partial class TestReportReader
     internal static bool IsSupported(string path) => TryDetectFormat(path, out _);
 
     /// <summary>Returns null for an unknown root; malformed or unreadable XML throws.</summary>
-    internal static string? DetectFormat(string path) => DetectFormat(Load(path));
+    internal static string? DetectFormat(string path, long maximumDocumentSize = ReportSizeLimits.DefaultBytes)
+    {
+        if (maximumDocumentSize <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maximumDocumentSize), "Report document size limits must be positive.");
+        using var stream = OpenReport(path, maximumDocumentSize);
+        using var reader = CreateReader(stream, maximumDocumentSize);
+        string? format = null;
+        while (reader.Read())
+        {
+            if (reader.NodeType == XmlNodeType.Element)
+            {
+                format = DetectFormatFromRoot(reader.LocalName);
+                break;
+            }
+        }
+
+        while (reader.Read()) { }
+        return format;
+    }
 
     internal static bool TryDetectFormat(string path, out string? format)
     {
         try
         {
-            format = DetectFormat(Load(path));
+            format = DetectFormat(path, ReportSizeLimits.DefaultBytes);
             return format is not null;
         }
         catch (Exception ex) when (ex is XmlException or IOException or InvalidDataException or UnauthorizedAccessException)
@@ -91,26 +138,28 @@ internal static partial class TestReportReader
             : throw new ArgumentException($"Unknown test report format '{format}'.", nameof(format));
     }
 
-    private static XElement Load(string path)
+    private static FileStream OpenReport(string path, long maximumDocumentSize)
     {
-        using var stream = File.OpenRead(path);
-        if (stream.Length > MaximumDocumentSize)
+        var stream = File.OpenRead(path);
+        if (stream.Length > maximumDocumentSize)
         {
-            throw new InvalidDataException($"Test report '{path}' exceeds the 16 MiB limit.");
+            stream.Dispose();
+            throw new ReportFileTooLargeException(path, maximumDocumentSize);
         }
 
-        using var reader = XmlReader.Create(stream, new XmlReaderSettings
+        return stream;
+    }
+
+    private static XmlReader CreateReader(Stream stream, long maximumDocumentSize) =>
+        XmlReader.Create(stream, new XmlReaderSettings
         {
             DtdProcessing = DtdProcessing.Prohibit,
             XmlResolver = null,
-            MaxCharactersInDocument = MaximumDocumentSize,
-            MaxCharactersFromEntities = MaximumDocumentSize,
+            MaxCharactersInDocument = maximumDocumentSize,
+            MaxCharactersFromEntities = maximumDocumentSize,
         });
-        return XDocument.Load(reader).Root
-            ?? throw new InvalidDataException($"Test report '{path}' has no root element.");
-    }
 
-    private static string? DetectFormat(XElement root) => root.Name.LocalName switch
+    private static string? DetectFormatFromRoot(string rootName) => rootName switch
     {
         "TestRun" => "trx",
         "testsuite" or "testsuites" => "junit",

@@ -36,8 +36,6 @@ internal static class CoverageReportGenerator
     private const string OutputMount = "/rexo/out";
     private const string SourceMountPrefix = "/rexo-source/";
     private const int MaxSourceDirectories = 64;
-    private const long MaxMarkdownBytes = 16L * 1024 * 1024;
-    private const long MaxJsonBytes = 64L * 1024 * 1024;
 
     private static readonly string[] SupportedReportTypes =
     [
@@ -73,13 +71,17 @@ internal static class CoverageReportGenerator
             " --tool-path /tmp/rg --configfile /tmp/rg-nuget.config >/dev/null",
         "exec /tmp/rg/reportgenerator \"$@\"");
 
-    internal static string? DetectFormat(string path)
+    internal static string? DetectFormat(string path, long maximumDocumentSize = ReportSizeLimits.DefaultBytes)
     {
+        if (maximumDocumentSize <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maximumDocumentSize), "Report document size limits must be positive.");
         using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        if (stream.Length > maximumDocumentSize)
+            throw new ReportFileTooLargeException(path, maximumDocumentSize);
         var first = FirstSignificantByte(stream);
         stream.Position = 0;
         if (first is null) return null;
-        return first == (byte)'<' ? DetectXml(stream, path) : DetectText(stream);
+        return first == (byte)'<' ? DetectXml(stream, path, maximumDocumentSize) : DetectText(stream);
     }
 
     internal static async Task<CoverageReportSummary> GenerateAsync(
@@ -87,11 +89,20 @@ internal static class CoverageReportGenerator
         string assemblyFilters, string classFilters, string fileFilters, string? reportTypes,
         CancellationToken cancellationToken,
         Func<GitHubReleaseCommand, CancellationToken, Task<ShellRunResult>>? run = null,
-        IReadOnlyList<string>? sourceDirectories = null)
+        IReadOnlyList<string>? sourceDirectories = null,
+        long maximumInputSizeBytes = ReportSizeLimits.DefaultBytes,
+        long maximumMarkdownSizeBytes = ReportSizeLimits.DefaultBytes,
+        long maximumJsonSizeBytes = ReportSizeLimits.DefaultBytes)
     {
         ArgumentNullException.ThrowIfNull(files);
         if (files.Count == 0) throw new InvalidOperationException("No coverage files were provided.");
         if (files.Count > 10000) throw new InvalidOperationException("Coverage generation accepts at most 10,000 files.");
+        if (maximumInputSizeBytes <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maximumInputSizeBytes), "Report size limits must be positive.");
+        if (maximumMarkdownSizeBytes <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maximumMarkdownSizeBytes), "Report size limits must be positive.");
+        if (maximumJsonSizeBytes <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maximumJsonSizeBytes), "Report size limits must be positive.");
         if (string.IsNullOrWhiteSpace(image) || !PinnedImage.IsMatch(image))
         {
             throw new InvalidOperationException(
@@ -114,7 +125,9 @@ internal static class CoverageReportGenerator
             var full = ReportFiles.Resolve(root, file);
             if (!File.Exists(full)) throw new InvalidOperationException($"Coverage file '{file}' does not exist.");
             if (!seen.Add(full)) continue;
-            if (DetectFormat(full) is null)
+            if (new FileInfo(full).Length > maximumInputSizeBytes)
+                throw new ReportFileTooLargeException(full, maximumInputSizeBytes);
+            if (DetectFormat(full, maximumInputSizeBytes) is null)
             {
                 throw new InvalidOperationException(
                     $"Coverage file '{file}' is not a supported Cobertura, OpenCover, LCOV, JaCoCo or Clover report.");
@@ -186,10 +199,10 @@ internal static class CoverageReportGenerator
         var markdownPath = RequireOutput(output, MarkdownFileName);
         var jsonPath = RequireOutput(output, JsonFileName);
         RequireOutput(output, HtmlFileName);
-        if (new FileInfo(markdownPath).Length > MaxMarkdownBytes)
-            throw new InvalidOperationException("The generated coverage Markdown summary exceeds 16 MiB.");
-        if (new FileInfo(jsonPath).Length > MaxJsonBytes)
-            throw new InvalidOperationException("The generated coverage JSON summary exceeds 64 MiB.");
+        if (new FileInfo(markdownPath).Length > maximumMarkdownSizeBytes)
+            throw new InvalidOperationException($"The generated coverage Markdown summary exceeds the configured {ReportSizeLimits.Describe(maximumMarkdownSizeBytes)} limit.");
+        if (new FileInfo(jsonPath).Length > maximumJsonSizeBytes)
+            throw new InvalidOperationException($"The generated coverage JSON summary exceeds the configured {ReportSizeLimits.Describe(maximumJsonSizeBytes)} limit.");
         var markdown = await File.ReadAllTextAsync(markdownPath, Encoding.UTF8, cancellationToken);
         var (line, branch) = ReadSummary(await File.ReadAllBytesAsync(jsonPath, cancellationToken));
         return new CoverageReportSummary(markdown, output, line, branch);
@@ -392,14 +405,14 @@ internal static class CoverageReportGenerator
         return null;
     }
 
-    private static string? DetectXml(Stream stream, string path)
+    private static string? DetectXml(Stream stream, string path, long maximumDocumentSize)
     {
         var settings = new XmlReaderSettings
         {
             DtdProcessing = DtdProcessing.Ignore,
             XmlResolver = null,
             MaxCharactersFromEntities = 1024,
-            MaxCharactersInDocument = 128L * 1024 * 1024,
+            MaxCharactersInDocument = maximumDocumentSize,
             IgnoreComments = true,
             IgnoreProcessingInstructions = true,
             IgnoreWhitespace = true,

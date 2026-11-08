@@ -62,7 +62,7 @@ separators, not shell syntax.
 | `exclude` | empty | Repository-relative exclusion globs separated by `;`. |
 | `format` | `auto` | Content detection, or one explicitly selected format from the policy's supported list. Mixed formats require `auto`. |
 | `outputDirectory` | policy-specific | Repository-contained generated report directory. Generated files here are excluded from input discovery. |
-| `missingReports` | `warn` | `warn`: visible diagnostic and neutral Check unless a configured coverage threshold requires the missing metric; `fail`: fail reporting. Never infer a passing test/coverage result. |
+| `missingReports` | `warn` | `warn`: visible diagnostic and neutral Check unless a configured coverage threshold requires the missing metric; `fail`: fail reporting when no reports were selected, except that reports skipped for the size limit remain warnings. Never infer a passing test/coverage result from missing report data. |
 | `publishErrors` | `fail` | Attempted publishing errors fail the step; `warn` explicitly opts into warnings. Processing errors and test/threshold failures are never downgraded. |
 | `checks` | `true` | Publish a commit Check, shown in commit/PR Checks. Requires explicit authorized token. |
 | `jobSummary` | `true` | Append Markdown to `GITHUB_STEP_SUMMARY` when publishing inside Actions. No job-summary file outside Actions. |
@@ -77,12 +77,29 @@ separators, not shell syntax.
 | `checkName` | policy-specific | Check display name; scope is appended. Combined length must be at most 100 characters. |
 | `scope` | `GITHUB_JOB`, else `default` | 1–100 letters/digits/`._-`. Set explicitly for matrix axes/shards. No automatic cross-job aggregation. |
 | `annotationLimit` | tests `50`, coverage `0` | Integer 0–1000; maximum test-failure details/annotations. Coverage currently publishes summaries, not source annotations. |
+| `maxInputSizeMiB` | `128` | Per-file input limit for both policies; integer 1–512. Oversized files are skipped with a warning and do not count as failed tests. |
+| `maxMarkdownSizeMiB` | coverage `128` | Maximum generated coverage Markdown summary size; integer 1–512. |
+| `maxJsonSizeMiB` | coverage `128` | Maximum generated coverage JSON summary size; integer 1–512. |
 
 Paths support `*`, `?`, and `**`. Discovery rejects paths outside the repository,
-symbolic-link traversal, more than 10,000 selected files, and individual files over 64 MiB
-(format parsers may impose stricter bounds). Automatic discovery skips valid unrelated
-formats; explicit selections reject unsupported formats. Malformed report data fails
-visibly. Keep generated output in its own directory.
+symbolic-link traversal, more than 10,000 selected files, and files over the configured
+`maxInputSizeMiB`. Test XML is parsed incrementally with DTD processing prohibited and
+external XML resolution disabled. Oversized files are skipped with a warning while other
+reports continue; size alone does not fail the report step or count as a failed test.
+Automatic discovery skips valid unrelated formats; explicit selections reject unsupported
+formats. Malformed report data fails visibly. Keep generated output in its own directory.
+
+The report pipeline also retains fixed operational/protocol limits: report discovery and
+coverage conversion each accept at most 10,000 input files; coverage mounts at most 64
+source directories. The Actions event JSON payload is capped at 8 MiB. Artifact uploads
+use 4 MiB blocks and at most 50,000 blocks (a 4 MiB × 50,000 archive ceiling); these are
+transport constraints, not report-input limits. Other GitHub reporting bounds remain
+unchanged: Check names are at most 100 characters, failure details in the local summary
+are capped at 8,000 characters, Check summaries and annotation messages at 60,000
+characters, annotation titles and artifact names at 255 characters, and Check annotations
+are sent in batches of 50. Check discovery stops after 10,000 Checks. The artifact uploader
+also bounds its runtime token and buffered service responses to 65,536 characters/bytes,
+respectively.
 
 Leave `outputs.emit` enabled (the default) for automatic path defaults. If deliberately
 disabled, configure explicit `paths` and `outputDirectory` for each reporting policy.

@@ -58,6 +58,10 @@ and masked for known secrets. Source annotations require a valid source path and
 that can map to an existing repository file; many TRX reports only provide test names,
 so their failures remain visible in the summary without fabricated source annotations.
 
-XML parsing prohibits DTDs and applies a 16 MiB document limit. Reports are summed by
-test case, not by suite aggregates. Separate input reports are separate executions;
-do not select copies of the same report unless you intend to count those executions twice.
+XML is parsed incrementally with DTD processing prohibited and external XML resolution
+disabled. The per-file input bound is `vars.githubTests.maxInputSizeMiB` (128 MiB by
+default; configurable from 1 to 512 MiB). Oversized reports are skipped with a warning;
+they are not converted into test failures, and other selected reports continue to be
+processed. Reports are summed by test case, not by suite aggregates. Separate input
+reports are separate executions; do not select copies of the same report unless you
+intend to count those executions twice.

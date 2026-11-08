@@ -55,6 +55,41 @@ public sealed class GitHubReportTests : IDisposable
         Assert.Contains("expected &lt;value&gt;", summary, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task OversizedReportsAreSkippedWithoutFailingPassingTests()
+    {
+        Write("results/large.trx",
+            $"<TestRun><Results><UnitTestResult testName='too-large' outcome='Passed'><Output><StdOut>{new string('x', 1024 * 1024 + 1)}</StdOut></Output></UnitTestResult></Results></TestRun>");
+        Write("results/valid.trx", "<TestRun><Results><UnitTestResult testName='passed' outcome='Passed' /></Results></TestRun>");
+        var result = await GitHubReportBuiltinModule.ExecuteAsync("github-tests",
+            Context(new() { ["maxInputSizeMiB"] = 1, ["missingReports"] = "fail" }), false, CancellationToken.None);
+
+        Assert.True(result.Success, result.Outputs.GetValueOrDefault("error")?.ToString());
+        Assert.Equal("success", result.Outputs["conclusion"]);
+        Assert.Equal(1, result.Outputs["total"]);
+        Assert.Equal(1, result.Outputs["passed"]);
+        Assert.Equal(0, result.Outputs["failed"]);
+        Assert.Contains("large.trx", Assert.IsType<string[]>(result.Outputs["warnings"])[0], StringComparison.Ordinal);
+        var summary = await File.ReadAllTextAsync(Path.Join(_root, "results", "github-report", "SummaryGithub.md"));
+        Assert.Contains("Warnings", summary, StringComparison.Ordinal);
+        Assert.DoesNotContain("too-large", summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task OversizedOnlyInputDoesNotFailTheReportStep()
+    {
+        Write("results/large.trx",
+            $"<TestRun><Results><UnitTestResult testName='too-large' outcome='Passed'><Output><StdOut>{new string('x', 1024 * 1024 + 1)}</StdOut></Output></UnitTestResult></Results></TestRun>");
+
+        var result = await GitHubReportBuiltinModule.ExecuteAsync("github-tests",
+            Context(new() { ["maxInputSizeMiB"] = 1, ["missingReports"] = "fail" }), false, CancellationToken.None);
+
+        Assert.True(result.Success, result.Outputs.GetValueOrDefault("error")?.ToString());
+        Assert.Equal("neutral", result.Outputs["conclusion"]);
+        Assert.Equal(0, result.Outputs["reportCount"]);
+        Assert.Contains("large.trx", Assert.IsType<string[]>(result.Outputs["warnings"])[0], StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -139,6 +174,7 @@ public sealed class GitHubReportTests : IDisposable
     [InlineData("checks", "yes")]
     [InlineData("scope", "bad/scope")]
     [InlineData("retentionDays", 0)]
+    [InlineData("maxInputSizeMiB", 0)]
     [InlineData("outputDirectory", "../escape")]
     public async Task InvalidOverridesFailExplicitly(string setting, object value)
     {
@@ -146,6 +182,29 @@ public sealed class GitHubReportTests : IDisposable
             Context(new() { [setting] = value }), false, CancellationToken.None);
         Assert.False(result.Success);
         Assert.Equal("failed", result.Outputs["status"]);
+    }
+
+    [Fact]
+    public async Task CoverageSizeOverridesAreBounded()
+    {
+        var result = await GitHubReportBuiltinModule.ExecuteAsync("github-coverage",
+            Context(new() { ["maxJsonSizeMiB"] = 513 }), true, CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Equal("failed", result.Outputs["status"]);
+        Assert.Contains("maxJsonSizeMiB", Assert.IsType<string>(result.Outputs["error"]), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReportSizeDefaultsAre128Mebibytes()
+    {
+        var testOptions = new GitHubReportOptions(Context(), false);
+        var coverageOptions = new GitHubReportOptions(Context(), true);
+
+        Assert.Equal(128L * 1024 * 1024, testOptions.MaximumInputSizeBytes);
+        Assert.Equal(128L * 1024 * 1024, coverageOptions.MaximumInputSizeBytes);
+        Assert.Equal(128L * 1024 * 1024, coverageOptions.MaximumMarkdownSizeBytes);
+        Assert.Equal(128L * 1024 * 1024, coverageOptions.MaximumJsonSizeBytes);
     }
 
     [Fact]

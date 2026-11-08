@@ -25,6 +25,15 @@ internal sealed class GitHubReportOptions(ExecutionContext context, bool coverag
             CultureInfo.InvariantCulture, out var value) && value >= minimum && value <= maximum
             ? value : throw new InvalidOperationException($"vars.{Section}.{name} must be between {minimum.ToString(CultureInfo.InvariantCulture)} and {maximum.ToString(CultureInfo.InvariantCulture)}.");
 
+    public long MaximumInputSizeBytes =>
+        ReportSizeLimits.ToBytes(Integer("maxInputSizeMiB", ReportSizeLimits.DefaultMiB, 1, ReportSizeLimits.MaximumMiB));
+
+    public long MaximumMarkdownSizeBytes =>
+        ReportSizeLimits.ToBytes(Integer("maxMarkdownSizeMiB", ReportSizeLimits.DefaultMiB, 1, ReportSizeLimits.MaximumMiB));
+
+    public long MaximumJsonSizeBytes =>
+        ReportSizeLimits.ToBytes(Integer("maxJsonSizeMiB", ReportSizeLimits.DefaultMiB, 1, ReportSizeLimits.MaximumMiB));
+
     public decimal? Threshold(string name)
     {
         var raw = Read(name);
@@ -80,6 +89,7 @@ internal sealed class GitHubReportOptions(ExecutionContext context, bool coverag
         if (!coverage) _ = Boolean("includeOutput", false);
         _ = Integer("retentionDays", 14, 1, 400);
         _ = Integer("annotationLimit", 50, 0, 1000);
+        _ = MaximumInputSizeBytes;
         _ = Scope;
         _ = OutputDirectory;
         if (string.Equals(OutputDirectory, Path.GetFullPath(context.RepositoryRoot),
@@ -90,6 +100,8 @@ internal sealed class GitHubReportOptions(ExecutionContext context, bool coverag
             : Choice("format", "auto", "auto", "trx", "junit", "nunit", "xunit");
         if (coverage)
         {
+            _ = MaximumMarkdownSizeBytes;
+            _ = MaximumJsonSizeBytes;
             _ = Threshold("minimumLineCoverage");
             _ = Threshold("minimumBranchCoverage");
         }

@@ -35,6 +35,9 @@ internal sealed class GitHubReportBuiltinModule : IConfigBuiltinModule
         var started = System.Diagnostics.Stopwatch.StartNew();
         var options = new GitHubReportOptions(context, coverage);
         var errors = new List<string>();
+        var warnings = new List<string>();
+        var warnedOversizedReports = new HashSet<string>(
+            OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
         var files = new List<string>();
         var detectedFiles = new List<object>();
         var annotations = new List<GitHubReportAnnotation>();
@@ -54,11 +57,13 @@ internal sealed class GitHubReportBuiltinModule : IConfigBuiltinModule
                 return Result();
             }
             var explicitPaths = options.Read("paths");
+            var maximumInputSizeBytes = options.MaximumInputSizeBytes;
             var paths = explicitPaths.Length > 0 ? explicitPaths : coverage
                 ? "{{outputs.tests.coverage}}/**/*;{{outputs.tests.results}}/**/coverage*.xml;{{outputs.tests.results}}/**/lcov.info"
                 : "{{outputs.tests.results}}/**/*.trx;{{outputs.tests.results}}/**/*.xml";
             paths = new Templating.TemplateRenderer().Render(paths, context);
-            var candidates = ReportFiles.Discover(context.RepositoryRoot, paths, options.Read("exclude"), options.OutputDirectory).ToList();
+            var candidates = ReportFiles.Discover(context.RepositoryRoot, paths, options.Read("exclude"),
+                options.OutputDirectory, maximumInputSizeBytes, WarnOversizedReport).ToList();
             if (explicitPaths.Length == 0)
             {
                 var outputKind = coverage ? "coverage" : "testResults";
@@ -71,7 +76,7 @@ internal sealed class GitHubReportBuiltinModule : IConfigBuiltinModule
                     foreach (var declaredFile in declared[outputKind])
                     {
                         foreach (var path in ReportFiles.Discover(context.RepositoryRoot, declaredFile,
-                            options.Read("exclude"), options.OutputDirectory)
+                            options.Read("exclude"), options.OutputDirectory, maximumInputSizeBytes, WarnOversizedReport)
                             .Where(path => !candidates.Contains(path, StringComparer.Ordinal)))
                         {
                             candidates.Add(path);
@@ -85,7 +90,18 @@ internal sealed class GitHubReportBuiltinModule : IConfigBuiltinModule
             foreach (var file in candidates)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var detected = coverage ? CoverageReportGenerator.DetectFormat(file) : TestReportReader.DetectFormat(file);
+                string? detected;
+                try
+                {
+                    detected = coverage
+                        ? CoverageReportGenerator.DetectFormat(file, maximumInputSizeBytes)
+                        : TestReportReader.DetectFormat(file, maximumInputSizeBytes);
+                }
+                catch (ReportFileTooLargeException ex)
+                {
+                    WarnOversizedReport(Path.GetRelativePath(context.RepositoryRoot, ex.Path).Replace('\\', '/'));
+                    continue;
+                }
                 detectedFiles.Add(new { path = Path.GetRelativePath(context.RepositoryRoot, file).Replace('\\', '/'), format = detected });
                 if (detected is null)
                 {
@@ -104,6 +120,7 @@ internal sealed class GitHubReportBuiltinModule : IConfigBuiltinModule
                 outputs["paths"] = paths;
                 outputs["exclude"] = options.Read("exclude");
                 outputs["detectedReports"] = detectedFiles;
+                if (warnings.Count > 0) outputs["warnings"] = warnings.ToArray();
                 Console.WriteLine(JsonSerializer.Serialize(outputs, ConfigCommandLoader.IndentedJsonOptions));
                 return Result();
             }
@@ -112,7 +129,8 @@ internal sealed class GitHubReportBuiltinModule : IConfigBuiltinModule
                 markdown = $"# {title}\n\nNo supported reports were found. No passing result is inferred.\n";
                 conclusion = "neutral";
                 Console.Error.WriteLine($"{title}: no supported reports found.");
-                if (options.Read("missingReports", "warn") == "fail") errors.Add("Expected reports were not found.");
+                if (options.Read("missingReports", "warn") == "fail" && warnings.Count == 0)
+                    errors.Add("Expected reports were not found.");
                 if (coverage)
                 {
                     outputs["lineCoverage"] = null;
@@ -127,7 +145,7 @@ internal sealed class GitHubReportBuiltinModule : IConfigBuiltinModule
                     options.Read("image", CoverageReportGenerator.DefaultImage), options.Read("assemblyFilters"),
                     options.Read("classFilters"), options.Read("fileFilters"),
                     options.Read("reportTypes", "Html;MarkdownSummaryGithub"), cancellationToken, run,
-                    SourceDirectories());
+                    SourceDirectories(), maximumInputSizeBytes, options.MaximumMarkdownSizeBytes, options.MaximumJsonSizeBytes);
                 markdown = report.Markdown;
                 outputs["lineCoverage"] = report.LineCoverage;
                 outputs["branchCoverage"] = report.BranchCoverage;
@@ -136,7 +154,8 @@ internal sealed class GitHubReportBuiltinModule : IConfigBuiltinModule
             }
             else
             {
-                var report = TestReportReader.Read(files, format, options.Boolean("includeOutput", false));
+                var report = TestReportReader.Read(files, format, options.Boolean("includeOutput", false),
+                    maximumInputSizeBytes, WarnOversizedReport);
                 outputs["total"] = report.Total;
                 outputs["passed"] = report.Passed;
                 outputs["failed"] = report.Failed;
@@ -154,6 +173,11 @@ internal sealed class GitHubReportBuiltinModule : IConfigBuiltinModule
                 if (report.Failed > 0) errors.Add("Test reports contain failing tests.");
                 if (context.CompletedSteps.Values.Any(step => !step.Success))
                     errors.Add("The test lifecycle reported a failure before report publication.");
+            }
+            if (warnings.Count > 0)
+            {
+                outputs["warnings"] = warnings.ToArray();
+                markdown += "\n\n### Warnings\n\n" + string.Join('\n', warnings.Select(warning => $"- {Escape(warning)}")) + "\n";
             }
         }
         catch (Exception ex) when (Expected(ex))
@@ -284,6 +308,18 @@ internal sealed class GitHubReportBuiltinModule : IConfigBuiltinModule
             Console.Error.WriteLine($"{title} publishing failed: {message}");
             if (options.Read("publishErrors", "fail") == "fail") errors.Add(message);
             outputs["publishWarning"] = message;
+        }
+
+        void WarnOversizedReport(string path)
+        {
+            var relativePath = Path.IsPathRooted(path)
+                ? Path.GetRelativePath(context.RepositoryRoot, path).Replace('\\', '/')
+                : path.Replace('\\', '/');
+            if (!warnedOversizedReports.Add(relativePath)) return;
+            var warning = $"Oversized report '{relativePath}' was skipped; the configured input limit is " +
+                $"{ReportSizeLimits.ToMiB(options.MaximumInputSizeBytes)} MiB.";
+            warnings.Add(warning);
+            Console.Error.WriteLine($"{title}: warning: {warning}");
         }
     }
 

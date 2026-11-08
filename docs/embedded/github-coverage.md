@@ -35,6 +35,9 @@ For downloadable HTML and raw reports from ordinary shell steps, use the documen
 | `image` | pinned built-in ReportGenerator image | Explicit container override; no native/global tool installation and no silent fallback. |
 | `sourceDirectories` | `src` when present | Optional `;`-separated repository-contained source directories mounted read-only for HTML source views. Empty uses automatic `src`; `none` disables source mounts. Set directories for other layouts. |
 | `reportTypes` | `Html;MarkdownSummaryGithub` | ReportGenerator output types; JSON totals are always generated internally. |
+| `maxInputSizeMiB` | `128` | Per-file input limit; integer 1–512. Oversized files are skipped with a warning while other reports continue. |
+| `maxMarkdownSizeMiB` | `128` | Maximum generated Markdown summary size; integer 1–512. |
+| `maxJsonSizeMiB` | `128` | Maximum generated JSON summary size; integer 1–512. |
 | `assemblyFilters` | empty | ReportGenerator semicolon-separated inclusion/exclusion filters. |
 | `classFilters` | empty | ReportGenerator class filters. |
 | `fileFilters` | empty | ReportGenerator source file filters. |
@@ -45,6 +48,9 @@ Docker is required when coverage inputs exist, including local-only reporting.
 Inputs are mounted read-only and generated output is writable; GitHub credentials
 are not passed to the converter. The helper has no host tool installation fallback.
 An overridden image is executable third-party code: trust and pin it deliberately.
+Coverage input size uses `vars.githubCoverage.maxInputSizeMiB`; generated Markdown and
+JSON summaries use `maxMarkdownSizeMiB` and `maxJsonSizeMiB`. Each defaults to 128 MiB
+and accepts an integer from 1 to 512 MiB.
 
 The built-in image is the Microsoft .NET SDK, pinned to
 `mcr.microsoft.com/dotnet/sdk:10.0.402@sha256:747cbade5bfd918a175ac32f8f1d931edec2c7d0d5397a3de72eaef1ac1f66d2`.

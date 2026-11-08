@@ -150,6 +150,7 @@ public sealed class TestReportReaderTests : IDisposable
 
     [Theory]
     [InlineData("<project><testcase name='not a report' /></project>")]
+    [InlineData("<project><TestRun /></project>")]
     [InlineData("<testsuite>")]
     [InlineData("")]
     [InlineData("<!DOCTYPE testsuite [<!ENTITY content 'no'>]><testsuite>&content;</testsuite>")]
@@ -285,16 +286,36 @@ public sealed class TestReportReaderTests : IDisposable
     }
 
     [Fact]
-    public void RejectsOversizedXml()
+    public void ReadsTrxLargerThanThePreviousSixteenMebibyteLimit()
     {
-        var path = Write("<testsuite />");
-        using (var stream = File.OpenWrite(path))
+        var xml = new System.Text.StringBuilder("<TestRun><Results>");
+        var output = new string('x', 1024);
+        for (var index = 0; index < 17_000; index++)
         {
-            stream.SetLength((16 * 1024 * 1024) + 1);
+            xml.Append("<UnitTestResult testName='ok' outcome='Passed'><Output><StdOut>")
+                .Append(output)
+                .Append("</StdOut></Output></UnitTestResult>");
         }
+        xml.Append("</Results></TestRun>");
+        var path = Write(xml.ToString());
+        Assert.True(new FileInfo(path).Length > 16L * 1024 * 1024);
+        var summary = TestReportReader.Read([path]);
+        AssertCounts(summary, 17_000, 17_000, 0, 0);
+    }
 
-        Assert.False(TestReportReader.IsSupported(path));
-        Assert.Throws<InvalidDataException>(() => TestReportReader.Read([path]));
+    [Fact]
+    public void SkipsOversizedXmlAndContinuesWithOtherReports()
+    {
+        var oversized = Write($"<testsuite><testcase name='too-large'><system-out>{new string('x', 1024)}</system-out></testcase></testsuite>");
+        var valid = Write("<TestRun><Results><UnitTestResult testName='ok' outcome='Passed' /></Results></TestRun>");
+        var warnings = new List<string>();
+        var maximumSize = new FileInfo(valid).Length;
+
+        var summary = TestReportReader.Read([oversized, valid], maximumDocumentSize: maximumSize, oversizedReport: warnings.Add);
+
+        AssertCounts(summary, 1, 1, 0, 0);
+        Assert.Equal(oversized, Assert.Single(warnings));
+        Assert.Throws<ReportFileTooLargeException>(() => TestReportReader.DetectFormat(oversized, maximumSize));
     }
 
     [Fact]

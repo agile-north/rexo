@@ -70,6 +70,14 @@ public sealed class CoverageReportGeneratorTests : IDisposable
     }
 
     [Fact]
+    public void DetectFormatEnforcesConfiguredInputLimit()
+    {
+        var path = Write("coverage.xml", Cobertura);
+
+        Assert.Throws<ReportFileTooLargeException>(() => CoverageReportGenerator.DetectFormat(path, 1));
+    }
+
+    [Fact]
     public async Task GenerateAsyncRunsPinnedContainerAndReadsSummary()
     {
         var input = Write(Path.Join("tests", "coverage.cobertura.xml"), Cobertura);
@@ -133,6 +141,38 @@ public sealed class CoverageReportGeneratorTests : IDisposable
         });
         Assert.Equal(200m / 3m, result.LineCoverage);
         Assert.Null(result.BranchCoverage);
+    }
+
+    [Fact]
+    public async Task GenerateAsyncEnforcesConfiguredMarkdownSummaryLimit()
+    {
+        var input = Write("coverage.xml", Cobertura);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => CoverageReportGenerator.GenerateAsync(
+            [input], _root, "out", CoverageReportGenerator.DefaultImage, "", "", "", null, CancellationToken.None,
+            (command, _) =>
+            {
+                WriteOutputs(Path.Join(_root, "out"), JsonSummary);
+                return Task.FromResult(new ShellRunResult(0, "", ""));
+            }, maximumMarkdownSizeBytes: 1));
+
+        Assert.Contains("Markdown summary exceeds the configured 1 byte limit", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GenerateAsyncEnforcesConfiguredJsonSummaryLimit()
+    {
+        var input = Write("coverage.xml", Cobertura);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => CoverageReportGenerator.GenerateAsync(
+            [input], _root, "out", CoverageReportGenerator.DefaultImage, "", "", "", null, CancellationToken.None,
+            (command, _) =>
+            {
+                WriteOutputs(Path.Join(_root, "out"), JsonSummary);
+                return Task.FromResult(new ShellRunResult(0, "", ""));
+            }, maximumMarkdownSizeBytes: 128, maximumJsonSizeBytes: 1));
+
+        Assert.Contains("JSON summary exceeds the configured 1 byte limit", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -326,4 +366,3 @@ public sealed class CoverageReportGeneratorTests : IDisposable
         File.WriteAllText(Path.Join(output, "index.html"), "<html></html>");
     }
 }
-

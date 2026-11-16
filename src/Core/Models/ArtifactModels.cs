@@ -10,7 +10,11 @@ public sealed record ArtifactConfig(
     public string? SourceProject { get; init; }
 }
 
-public sealed record ArtifactBuildResult(string Name, bool Success, string? Location);
+public sealed record ArtifactBuildResult(string Name, bool Success, string? Location)
+{
+    /// <summary>Complete immutable output inventory captured as part of this build, when available.</summary>
+    public IReadOnlyList<PreparedArtifactOutput>? HandoffOutputs { get; init; }
+}
 
 public sealed record ArtifactTagResult(string Name, bool Success, IReadOnlyList<string> Tags);
 

@@ -10,7 +10,7 @@ using Rexo.Core.Environment;
 using Rexo.Core.Models;
 using Rexo.Templating;
 
-public sealed class DockerArtifactProvider : IArtifactProvider, ILocalArtifactHandoffProvider
+public sealed class DockerArtifactProvider : IArtifactProvider, IPreparedArtifactProvider
 {
     public static void Register(ArtifactProviderRegistry registry) =>
         registry.Register("docker", new DockerArtifactProvider());

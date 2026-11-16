@@ -53,7 +53,12 @@ public sealed class VerifiedArtifactHandoffTests : IDisposable
             Version = _version,
             ConfigHash = CanonicalConfigHasher.Compute(config),
             Steps = [new StepManifestEntry("verify", true, 0, 1)],
-            Artifacts = [new ArtifactManifestEntry("nuget", "Contracts", true, false, [])],
+            Artifacts = [new ArtifactManifestEntry("nuget", "Contracts", true, false, [])
+            {
+                HandoffOutputs = (await new NuGetArtifactProvider().PrepareAsync(
+                    new ArtifactConfig("nuget", "Contracts", new Dictionary<string, JsonElement>()),
+                    Context(), CancellationToken.None)).Outputs,
+            }],
         };
         await File.WriteAllTextAsync(Path.Join(_root, "run.json"), JsonSerializer.Serialize(run));
 
@@ -104,7 +109,11 @@ public sealed class VerifiedArtifactHandoffTests : IDisposable
         run = run with
         {
             ConfigHash = CanonicalConfigHasher.Compute(config),
-            Artifacts = [run.Artifacts[0], new ArtifactManifestEntry("generic", "Bundle", true, false, [])],
+            Artifacts = [run.Artifacts[0], new ArtifactManifestEntry("generic", "Bundle", true, false, [])
+            {
+                HandoffOutputs = (await new GenericArtifactProvider().PrepareAsync(
+                    new ArtifactConfig("generic", "Bundle", generic.Settings!), Context(), CancellationToken.None)).Outputs,
+            }],
         };
         await File.WriteAllTextAsync(Path.Join(_root, "run.json"), JsonSerializer.Serialize(run));
         await VerifiedArtifactHandoff.SealAsync("run.json", "handoff.json", config, Context(), Providers(), CancellationToken.None);
@@ -130,7 +139,7 @@ public sealed class VerifiedArtifactHandoffTests : IDisposable
         }));
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             VerifiedArtifactHandoff.SealAsync("run.json", "handoff.json", config, Context(), Providers(), CancellationToken.None));
-        Assert.Contains("does not support prepared publication", error.Message, StringComparison.Ordinal);
+        Assert.Contains("does not support verified handoff", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -144,10 +153,11 @@ public sealed class VerifiedArtifactHandoffTests : IDisposable
         var artifact = new ArtifactConfig("nuget", "Example", settings);
         var prepared = await provider.PrepareAsync(artifact, Context(), CancellationToken.None);
         Assert.Equal(2, prepared.Outputs.Count);
-        await provider.ValidatePreparedAsync(artifact, prepared, Context(), CancellationToken.None);
+        var build = new ArtifactManifestEntry("nuget", "Example", true, false, []);
+        await provider.ValidatePreparedAsync(artifact, prepared, build, Context(), CancellationToken.None);
         await File.WriteAllTextAsync(Path.Join(_root, "artifacts", "packages", "Example.1.2.3.snupkg"), "changed symbols");
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            provider.ValidatePreparedAsync(artifact, prepared, Context(), CancellationToken.None));
+            provider.ValidatePreparedAsync(artifact, prepared, build, Context(), CancellationToken.None));
     }
 
     [Fact]
@@ -158,13 +168,116 @@ public sealed class VerifiedArtifactHandoffTests : IDisposable
         await File.WriteAllTextAsync(Path.Join(_root, "run.json"), JsonSerializer.Serialize(run with
         {
             ConfigHash = CanonicalConfigHasher.Compute(config),
-            Artifacts = [run.Artifacts[0] with { Type = "reference-test" }],
+            Artifacts = [run.Artifacts[0] with
+            {
+                Type = "reference-test",
+                HandoffOutputs = [new PreparedArtifactOutput("registry-reference", "registry/Example@sha256:immutable", "immutable")],
+            }],
         }));
         var registry = new ArtifactProviderRegistry();
         registry.Register("reference-test", new ReferenceProvider());
         await VerifiedArtifactHandoff.SealAsync("run.json", "handoff.json", config, Context(), registry, CancellationToken.None);
         var handoff = await VerifiedArtifactHandoff.VerifyAsync("handoff.json", config, Context(), registry, CancellationToken.None);
         Assert.Equal("registry-reference", Assert.Single(Assert.Single(handoff.Artifacts).Outputs).Kind);
+    }
+
+    [Fact]
+    public async Task VerificationOnlyProviderSealsButCannotPublish()
+    {
+        var run = await PrepareAsync();
+        var config = _config with { Artifacts = [new RepoArtifactConfig("reference-test", "Example")] };
+        var output = new PreparedArtifactOutput("registry-reference", "registry/Example@sha256:immutable", "immutable");
+        await File.WriteAllTextAsync(Path.Join(_root, "run.json"), JsonSerializer.Serialize(run with
+        {
+            ConfigHash = CanonicalConfigHasher.Compute(config),
+            Artifacts = [run.Artifacts[0] with { Type = "reference-test", HandoffOutputs = [output] }],
+        }));
+        var providers = new ArtifactProviderRegistry();
+        providers.Register("reference-test", new VerificationOnlyProvider());
+        await VerifiedArtifactHandoff.SealAsync("run.json", "handoff.json", config, Context(), providers, CancellationToken.None);
+        await VerifiedArtifactHandoff.VerifyAsync("handoff.json", config, Context(), providers, CancellationToken.None);
+
+        var builtins = new BuiltinRegistry();
+        var loader = new ConfigCommandLoader(builtins, new TemplateRenderer(), VersionProviderRegistry.CreateDefault(), providers);
+        var commands = new CommandRegistry();
+        loader.LoadInto(commands, config, _root, new DefaultCommandExecutor(commands));
+        Assert.True(builtins.TryResolve("builtin:push-artifact-handoff", out var push));
+        var result = await push!(new StepDefinition("push", null, "builtin:push-artifact-handoff", null, null)
+        {
+            With = new Dictionary<string, string> { ["path"] = "handoff.json" },
+        }, Context() with { Options = new Dictionary<string, string?> { ["confirm"] = "true" } }, CancellationToken.None);
+        Assert.False(result.Success);
+        Assert.Contains("does not support prepared publication", result.Outputs["error"]!.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("changed")]
+    [InlineData("missing-evidence")]
+    [InlineData("extra-output")]
+    public async Task SealRejectsOutputNotBoundToBuild(string change)
+    {
+        var run = await PrepareAsync();
+        if (change == "changed")
+        {
+            await File.WriteAllTextAsync(Path.Join(_root, "artifacts", "packages", "Example.1.2.3.nupkg"), "substituted");
+        }
+        else
+        {
+            var outputs = change == "missing-evidence" ? []
+                : run.Artifacts[0].HandoffOutputs!.Append(new PreparedArtifactOutput("file", "other", "hash")).ToArray();
+            await File.WriteAllTextAsync(Path.Join(_root, "run.json"), JsonSerializer.Serialize(run with
+            {
+                Artifacts = [run.Artifacts[0] with { HandoffOutputs = outputs }],
+            }));
+        }
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(SealAsync);
+        Assert.Contains("build evidence", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LegacySingleFileBuildHashRemainsVerifiable()
+    {
+        var run = await PrepareAsync();
+        var output = Assert.Single(run.Artifacts[0].HandoffOutputs!);
+        await File.WriteAllTextAsync(Path.Join(_root, "run.json"), JsonSerializer.Serialize(run with
+        {
+            RepoRoot = _root,
+            Artifacts = [run.Artifacts[0] with
+            {
+                HandoffOutputs = null,
+                Location = Path.Join(_root, "artifacts", "packages", "Example.1.2.3.nupkg"),
+                ContentSha256 = output.Identity,
+            }],
+        }));
+        await SealAsync();
+        await VerifiedArtifactHandoff.VerifyAsync("handoff.json", _config, Context(), Providers(), CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task GenericBuildEvidenceRejectsSubstitutionBeforeSeal()
+    {
+        Directory.CreateDirectory(Path.Join(_root, "input"));
+        await File.WriteAllTextAsync(Path.Join(_root, "input", "source.txt"), "source");
+        var settings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>("""{"target":{"source":"input"}}""")!;
+        var config = _config with { Artifacts = [new RepoArtifactConfig("generic", "Bundle", settings)] };
+        var loader = new ConfigCommandLoader(new BuiltinRegistry(), new TemplateRenderer(),
+            VersionProviderRegistry.CreateDefault(), Providers());
+        var built = await loader.BuildArtifactsAsync("build", config, Context(), static _ => true,
+            "built", "empty", CancellationToken.None);
+        Assert.True(built.Success);
+        var entry = Assert.Single(Assert.IsType<List<ArtifactManifestEntry>>(built.Outputs["__artifacts"]));
+        Assert.Single(entry.HandoffOutputs!);
+        await File.WriteAllTextAsync(entry.Location!, "substituted archive");
+        await File.WriteAllTextAsync(Path.Join(_root, "run.json"), JsonSerializer.Serialize(new RunManifest
+        {
+            Success = true, CommandExecuted = "release", CommitSha = "commit", Version = _version,
+            IsCi = true, CiBuildId = "run", ConfigHash = CanonicalConfigHasher.Compute(config),
+            Steps = [new StepManifestEntry("build", true, 0, 1)],
+            Artifacts = [entry],
+        }));
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            VerifiedArtifactHandoff.SealAsync("run.json", "handoff.json", config, Context(), Providers(), CancellationToken.None));
     }
 
     [Theory]
@@ -475,13 +588,18 @@ public sealed class VerifiedArtifactHandoffTests : IDisposable
             Version = _version,
             ConfigHash = CanonicalConfigHasher.Compute(_config),
             Steps = [new StepManifestEntry("verify", true, 0, 1)],
-            Artifacts = [new ArtifactManifestEntry("nuget", "Example", true, false, [])],
+            Artifacts = [new ArtifactManifestEntry("nuget", "Example", true, false, [])
+            {
+                HandoffOutputs = (await new NuGetArtifactProvider().PrepareAsync(
+                    new ArtifactConfig("nuget", "Example", new Dictionary<string, JsonElement>()),
+                    Context(), CancellationToken.None)).Outputs,
+            }],
         };
         await File.WriteAllTextAsync(Path.Join(_root, "run.json"), JsonSerializer.Serialize(run));
         return run;
     }
 
-    private sealed class PushOnlyProvider : IArtifactProvider, IPreparedArtifactProvider
+    private sealed class PushOnlyProvider : IArtifactProvider, IPreparedArtifactPublisher
     {
         public string Type => "nuget";
         public int PushCalls { get; private set; }
@@ -498,8 +616,8 @@ public sealed class VerifiedArtifactHandoffTests : IDisposable
         public Task<PreparedArtifact> PrepareAsync(ArtifactConfig artifact, ExecutionContext context, CancellationToken cancellationToken) =>
             new NuGetArtifactProvider().PrepareAsync(artifact, context, cancellationToken);
 
-        public Task ValidatePreparedAsync(ArtifactConfig artifact, PreparedArtifact prepared, ExecutionContext context, CancellationToken cancellationToken) =>
-            new NuGetArtifactProvider().ValidatePreparedAsync(artifact, prepared, context, cancellationToken);
+        public Task ValidatePreparedAsync(ArtifactConfig artifact, PreparedArtifact prepared, ArtifactManifestEntry build, ExecutionContext context, CancellationToken cancellationToken) =>
+            new NuGetArtifactProvider().ValidatePreparedAsync(artifact, prepared, build, context, cancellationToken);
 
         public Task<ArtifactPushResult> PushPreparedAsync(ArtifactConfig artifact, PreparedArtifact prepared, ExecutionContext context, CancellationToken cancellationToken)
         {
@@ -510,7 +628,7 @@ public sealed class VerifiedArtifactHandoffTests : IDisposable
 
     }
 
-    private sealed class ReferenceProvider : IArtifactProvider, IPreparedArtifactProvider
+    private sealed class ReferenceProvider : IArtifactProvider, IPreparedArtifactPublisher
     {
         public string Type => "reference-test";
 
@@ -518,7 +636,7 @@ public sealed class VerifiedArtifactHandoffTests : IDisposable
             Task.FromResult(new PreparedArtifact(Type, artifact.Name,
                 [new PreparedArtifactOutput("registry-reference", "registry/Example@sha256:immutable", "immutable")]));
 
-        public Task ValidatePreparedAsync(ArtifactConfig artifact, PreparedArtifact prepared, ExecutionContext context, CancellationToken cancellationToken)
+        public Task ValidatePreparedAsync(ArtifactConfig artifact, PreparedArtifact prepared, ArtifactManifestEntry build, ExecutionContext context, CancellationToken cancellationToken)
         {
             Assert.Equal(Type, prepared.Type);
             Assert.Equal(artifact.Name, prepared.Name);
@@ -538,5 +656,21 @@ public sealed class VerifiedArtifactHandoffTests : IDisposable
 
         public Task<ArtifactPushResult> PushAsync(ArtifactConfig artifact, ExecutionContext context, CancellationToken cancellationToken) =>
             throw new InvalidOperationException("Use prepared publication.");
+    }
+
+    private sealed class VerificationOnlyProvider : IArtifactProvider, IPreparedArtifactProvider
+    {
+        private readonly ReferenceProvider _inner = new();
+        public string Type => _inner.Type;
+        public Task<PreparedArtifact> PrepareAsync(ArtifactConfig artifact, ExecutionContext context, CancellationToken cancellationToken) =>
+            _inner.PrepareAsync(artifact, context, cancellationToken);
+        public Task ValidatePreparedAsync(ArtifactConfig artifact, PreparedArtifact prepared, ArtifactManifestEntry build, ExecutionContext context, CancellationToken cancellationToken) =>
+            _inner.ValidatePreparedAsync(artifact, prepared, build, context, cancellationToken);
+        public Task<ArtifactBuildResult> BuildAsync(ArtifactConfig artifact, ExecutionContext context, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("No build in handoff.");
+        public Task<ArtifactTagResult> TagAsync(ArtifactConfig artifact, ExecutionContext context, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("No retag in handoff.");
+        public Task<ArtifactPushResult> PushAsync(ArtifactConfig artifact, ExecutionContext context, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("No ordinary push in verified publication.");
     }
 }

@@ -82,6 +82,85 @@ public sealed class NuGetArtifactProviderTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PackCapturesCompleteBuildEvidenceOnlyForFreshOutputs(bool stale)
+    {
+        var root = Path.Join(Path.GetTempPath(), $"rexo-nuget-evidence-{Guid.NewGuid():N}");
+        var output = Path.Join(root, "artifacts", "packages");
+        Directory.CreateDirectory(output);
+        var package = Path.Join(output, "Example.1.2.3.nupkg");
+        var symbols = Path.Join(output, "Example.1.2.3.snupkg");
+        try
+        {
+            if (stale) await File.WriteAllTextAsync(symbols, "old symbols");
+            var provider = new NuGetArtifactProvider(async (_, _, ct) =>
+            {
+                await File.WriteAllTextAsync(package, "new package", ct);
+                await File.WriteAllTextAsync(symbols, "new symbols", ct);
+                return (0, string.Empty);
+            });
+            var settings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>("""{"symbols":{"enabled":true}}""")!;
+            var context = ExecutionContext.Empty(root) with
+            {
+                Version = new VersionResult("1.2.3", 1, 2, 3, null, "sha", "sha", false, true),
+            };
+            var result = await provider.BuildAsync(new ArtifactConfig("nuget", "Example", settings), context, CancellationToken.None);
+            Assert.True(result.Success);
+            Assert.NotNull(result.HandoffOutputs);
+            Assert.Equal(stale ? 0 : 2, result.HandoffOutputs.Count);
+            if (!stale)
+            {
+                Assert.All(result.HandoffOutputs, outputEntry => Assert.Equal(64, outputEntry.Identity.Length));
+            }
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public async Task VerifiedPushUsesExactPackagesAndRejectsDuplicateSkipping()
+    {
+        var root = Path.Join(Path.GetTempPath(), $"rexo-nuget-push-{Guid.NewGuid():N}");
+        var output = Path.Join(root, "artifacts", "packages");
+        Directory.CreateDirectory(output);
+        try
+        {
+            await File.WriteAllTextAsync(Path.Join(output, "Example.1.2.3.nupkg"), "package");
+            await File.WriteAllTextAsync(Path.Join(output, "Example.1.2.3.snupkg"), "symbols");
+            var commands = new List<string>();
+            var provider = new NuGetArtifactProvider((args, _, _) =>
+            {
+                commands.Add(args);
+                return Task.FromResult((0, string.Empty));
+            });
+            var settings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                """{"symbols":{"enabled":true},"target":{"apiKeyEnv":"REXO_TEST_HANDOFF_KEY","source":"https://example.invalid"}}""")!;
+            var context = ExecutionContext.Empty(root) with
+            {
+                Version = new VersionResult("1.2.3", 1, 2, 3, null, "sha", "sha", false, true),
+                MappedSecretEnvironment = new Dictionary<string, string> { ["REXO_TEST_HANDOFF_KEY"] = "test-key" },
+            };
+            var artifact = new ArtifactConfig("nuget", "Example", settings);
+            var prepared = await provider.PrepareAsync(artifact, context, CancellationToken.None);
+            var result = await provider.PushPreparedAsync(artifact, prepared, context, CancellationToken.None);
+            Assert.True(result.Success);
+            Assert.Equal(2, commands.Count);
+            Assert.All(commands, command =>
+            {
+                Assert.DoesNotContain("--skip-duplicate", command, StringComparison.Ordinal);
+                Assert.DoesNotContain('*', command);
+            });
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
     [Fact]
     public async Task BuildAsyncEchoesCommandOnlyForFullModeAndKeepsToolOutputVisible()
     {

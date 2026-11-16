@@ -63,11 +63,21 @@ public static class PreparedArtifactFiles
         return fullPath;
     }
 
-    public static bool SameOutputs(PreparedArtifact expected, PreparedArtifact actual) =>
-        expected.Type == actual.Type && expected.Name == actual.Name &&
-        actual.Outputs is not null &&
-        expected.Outputs.OrderBy(output => output.Reference, StringComparer.Ordinal)
-            .SequenceEqual(actual.Outputs.OrderBy(output => output.Reference, StringComparer.Ordinal));
+    public static bool MatchesPaths(
+        PreparedArtifact prepared, ArtifactConfig artifact, IEnumerable<string> paths, string repositoryRoot)
+    {
+        var expected = paths.Select(path =>
+        {
+            var reference = Path.GetRelativePath(repositoryRoot, Path.GetFullPath(
+                Path.IsPathRooted(path) ? path : Path.Join(repositoryRoot, path))).Replace('\\', '/');
+            _ = ResolvePath(repositoryRoot, reference);
+            return reference;
+        }).OrderBy(path => path, StringComparer.Ordinal).ToArray();
+        return prepared.Type == artifact.Type && prepared.Name == artifact.Name && prepared.Outputs is not null &&
+            prepared.Outputs.All(output => output.Kind == "file") &&
+            expected.Length > 0 && expected.Distinct(StringComparer.Ordinal).Count() == expected.Length &&
+            expected.SequenceEqual(prepared.Outputs.Select(output => output.Reference).OrderBy(path => path, StringComparer.Ordinal));
+    }
 
     private static async Task<string> HashAsync(string path, CancellationToken cancellationToken)
     {

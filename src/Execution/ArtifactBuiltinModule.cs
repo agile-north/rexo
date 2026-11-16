@@ -70,7 +70,7 @@ internal sealed class ArtifactBuiltinModule : IConfigBuiltinModule
                 context.Config, ctx, context.Loader.ArtifactProviders, ct);
             foreach (var artifact in handoff.Artifacts)
             {
-                if (context.Loader.ArtifactProviders.Resolve(artifact.Type) is not IPreparedArtifactProvider)
+                if (context.Loader.ArtifactProviders.Resolve(artifact.Type) is not IPreparedArtifactPublisher)
                 {
                     throw new InvalidOperationException($"Artifact provider '{artifact.Type}' does not support prepared publication.");
                 }

@@ -538,6 +538,14 @@ public sealed class ConfigCommandLoader
             var contentSha256 = artifactLocation is null
                 ? null
                 : await HashArtifactFileAsync(artifactLocation, ctx.RepositoryRoot, cancellationToken);
+            var handoffOutputs = result.HandoffOutputs;
+            if (handoffOutputs is null && artifactLocation is not null && contentSha256 is not null)
+            {
+                var fullPath = Path.GetFullPath(Path.IsPathRooted(artifactLocation)
+                    ? artifactLocation : Path.Join(ctx.RepositoryRoot, artifactLocation));
+                var reference = Path.GetRelativePath(ctx.RepositoryRoot, fullPath).Replace('\\', '/');
+                handoffOutputs = [new PreparedArtifactOutput("file", reference, contentSha256)];
+            }
             manifestEntries.Add(new Core.Models.ArtifactManifestEntry(
                 artifactCfg.Type,
                 ResolveArtifactName(artifactCfg, config),
@@ -548,6 +556,7 @@ public sealed class ConfigCommandLoader
                 Location = artifactLocation,
                 ContentSha256 = contentSha256,
                 SourceProject = artifactCfg.SourceProject,
+                HandoffOutputs = handoffOutputs,
             });
         }
 
@@ -748,7 +757,7 @@ public sealed class ConfigCommandLoader
                 if (ctx.PreparedArtifacts.Count > 0)
                 {
                     var prepared = ctx.PreparedArtifacts.Single(entry => entry.Type == artifactCfg.Type && entry.Name == artifactName);
-                    if (provider is not IPreparedArtifactProvider preparedProvider)
+                    if (provider is not IPreparedArtifactPublisher preparedProvider)
                     {
                         throw new InvalidOperationException($"Provider '{artifactCfg.Type}' does not support prepared publication.");
                     }

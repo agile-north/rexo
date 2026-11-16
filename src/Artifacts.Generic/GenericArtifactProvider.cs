@@ -8,7 +8,7 @@ using Rexo.Core.Environment;
 using Rexo.Core.Models;
 
 /// <summary>Preview: Generic file artifact provider — zip / tar.gz packaging using built-in .NET compression.</summary>
-public sealed class GenericArtifactProvider : IArtifactProvider, IPreparedArtifactProvider
+public sealed class GenericArtifactProvider : IArtifactProvider, IPreparedArtifactPublisher
 {
     public static void Register(ArtifactProviderRegistry registry) =>
         registry.Register("generic", new GenericArtifactProvider());
@@ -18,31 +18,41 @@ public sealed class GenericArtifactProvider : IArtifactProvider, IPreparedArtifa
     public async Task<PreparedArtifact> PrepareAsync(
         ArtifactConfig artifact, ExecutionContext context, CancellationToken cancellationToken)
     {
-        var fileEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
-        var output = FeedAuthResolver.ResolveTargetValue("GENERIC_TARGET_OUTPUT",
-            GetSetting(artifact, "target.outputEnv"), GetSetting(artifact, "target.output"), fileEnv) ?? "artifacts/generic";
-        var version = context.Version?.SemVer
-            ?? throw new InvalidOperationException("Prepared generic publication requires a resolved version.");
-        var format = GetSetting(artifact, "format") ?? "zip";
         return await PreparedArtifactFiles.PrepareAsync(artifact,
-            [$"{output}/{artifact.Name}-{version}.{format}"], context.RepositoryRoot, cancellationToken);
+            [ResolvePreparedPath(artifact, context)], context.RepositoryRoot, cancellationToken);
     }
 
-    public async Task ValidatePreparedAsync(
+    private static async Task ValidatePreparedFilesAsync(
         ArtifactConfig artifact, PreparedArtifact prepared, ExecutionContext context, CancellationToken cancellationToken)
     {
-        var expected = await PrepareAsync(artifact, context, cancellationToken);
-        if (!PreparedArtifactFiles.SameOutputs(expected, prepared))
+        if (!PreparedArtifactFiles.MatchesPaths(prepared, artifact,
+            [ResolvePreparedPath(artifact, context)], context.RepositoryRoot))
         {
             throw new InvalidOperationException("Prepared generic outputs do not match the configured artifact and version.");
         }
         await PreparedArtifactFiles.ValidateAsync(prepared, context.RepositoryRoot, cancellationToken);
     }
 
+    private static string ResolvePreparedPath(ArtifactConfig artifact, ExecutionContext context)
+    {
+        var fileEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
+        var output = FeedAuthResolver.ResolveTargetValue("GENERIC_TARGET_OUTPUT",
+            GetSetting(artifact, "target.outputEnv"), GetSetting(artifact, "target.output"), fileEnv) ?? "artifacts/generic";
+        var version = context.Version?.SemVer
+            ?? throw new InvalidOperationException("Prepared generic publication requires a resolved version.");
+        var format = GetSetting(artifact, "format") ?? "zip";
+        return $"{output}/{artifact.Name}-{version}.{format}";
+    }
+
+    public Task ValidatePreparedAsync(
+        ArtifactConfig artifact, PreparedArtifact prepared, ArtifactManifestEntry build,
+        ExecutionContext context, CancellationToken cancellationToken) =>
+        ValidatePreparedFilesAsync(artifact, prepared, context, cancellationToken);
+
     public async Task<ArtifactPushResult> PushPreparedAsync(
         ArtifactConfig artifact, PreparedArtifact prepared, ExecutionContext context, CancellationToken cancellationToken)
     {
-        await ValidatePreparedAsync(artifact, prepared, context, cancellationToken);
+        await ValidatePreparedFilesAsync(artifact, prepared, context, cancellationToken);
         var fileEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
         var destination = FeedAuthResolver.ResolveTargetValue("GENERIC_TARGET_DESTINATION",
             GetSetting(artifact, "target.destinationEnv"), GetSetting(artifact, "target.destination"), fileEnv);

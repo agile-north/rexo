@@ -203,8 +203,11 @@ pipeline; this repository does not use it in its normal single-job lifecycle.
 repository-relative paths. It requires a successful, unpublished `release` run with
 the same commit, effective config hash, policy lock hash, resolved version and CI run
 identity. The version result's commit SHA must also match the run and current checkout.
-Providers describe their prepared outputs through `IPreparedArtifactProvider`;
-the receipt records artifact type/name and each output's kind, reference and identity.
+Providers describe and validate their prepared outputs through `IPreparedArtifactProvider`;
+`IPreparedArtifactPublisher` adds verified publication. The receipt records artifact
+type/name and each output's kind, reference and identity, matched against complete
+build-time output evidence. See the [provider guide](../artifacts/verified-handoff-providers.md)
+for compatibility and provider responsibilities.
 
 `builtin:push-artifact-handoff` accepts `with.path`, requires `--confirm`, verifies the
 entire inventory before pushing, and uses existing provider and push-policy gates.

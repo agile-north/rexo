@@ -104,7 +104,11 @@ public sealed class DockerOciHandoffTests : IDisposable
         await File.WriteAllTextAsync(Path.Join(_root, "artifacts", "packages", "Example.1.2.3.nupkg"), "package");
         var dockerBuild = await BuildAsync(Config(), registry);
         var dockerEntry = Assert.Single(Assert.IsType<List<ArtifactManifestEntry>>(dockerBuild.Outputs["__artifacts"]));
-        await WriteRunAsync(config, [new ArtifactManifestEntry("nuget", "Example", true, false, []), dockerEntry]);
+        var packageOutputs = (await new NuGetArtifactProvider().PrepareAsync(
+            new ArtifactConfig("nuget", "Example", new Dictionary<string, JsonElement>()),
+            Context(), CancellationToken.None)).Outputs;
+        await WriteRunAsync(config,
+            [new ArtifactManifestEntry("nuget", "Example", true, false, []) { HandoffOutputs = packageOutputs }, dockerEntry]);
         await VerifiedArtifactHandoff.SealAsync("run.json", "handoff.json", config, Context(), registry, CancellationToken.None);
 
         var builtins = new BuiltinRegistry();

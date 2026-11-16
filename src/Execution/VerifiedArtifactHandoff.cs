@@ -37,13 +37,14 @@ public static class VerifiedArtifactHandoff
             }
 
             var provider = ResolveProvider(providers, artifact.Type);
-            var prepared = (await PrepareAsync(provider, artifactConfig, context, cancellationToken))
+            var prepared = (await provider.PrepareAsync(artifactConfig, context, cancellationToken))
                 with { SourceProject = artifact.SourceProject };
             if (prepared.Type != artifactConfig.Type || prepared.Name != artifactConfig.Name)
             {
                 throw new InvalidOperationException("Provider returned prepared outputs for a different artifact.");
             }
-            await ValidatePreparedAsync(provider, artifactConfig, prepared, built[0], context, cancellationToken);
+            ValidateBuildOutputs(prepared, built[0], run.RepoRoot);
+            await provider.ValidatePreparedAsync(artifactConfig, prepared, built[0], context, cancellationToken);
             artifacts.Add(prepared);
         }
 
@@ -109,7 +110,9 @@ public static class VerifiedArtifactHandoff
             {
                 throw new InvalidOperationException($"Release evidence has no unique build result for '{artifactConfig.Name}'.");
             }
-            await ValidatePreparedAsync(ResolveProvider(providers, artifact.Type), artifactConfig, prepared, built[0], context, cancellationToken);
+            ValidateBuildOutputs(prepared, built[0], handoff.Run.RepoRoot);
+            await ResolveProvider(providers, artifact.Type).ValidatePreparedAsync(
+                artifactConfig, prepared, built[0], context, cancellationToken);
         }
 
         return handoff;
@@ -140,26 +143,59 @@ public static class VerifiedArtifactHandoff
         }
     }
 
-    private static IArtifactProvider ResolveProvider(ArtifactProviderRegistry providers, string type)
+    private static IPreparedArtifactProvider ResolveProvider(ArtifactProviderRegistry providers, string type)
     {
         var provider = providers.Resolve(type);
-        return provider is IPreparedArtifactProvider or ILocalArtifactHandoffProvider
-            ? provider
-            : throw new InvalidOperationException($"Artifact provider '{type}' does not support prepared publication or local handoff.");
+        return provider as IPreparedArtifactProvider
+            ?? throw new InvalidOperationException($"Artifact provider '{type}' does not support verified handoff.");
     }
 
-    private static Task<PreparedArtifact> PrepareAsync(
-        IArtifactProvider provider, ArtifactConfig artifact, ExecutionContext context, CancellationToken cancellationToken) =>
-        provider is ILocalArtifactHandoffProvider local
-            ? local.PrepareAsync(artifact, context, cancellationToken)
-            : ((IPreparedArtifactProvider)provider).PrepareAsync(artifact, context, cancellationToken);
+    private static void ValidateBuildOutputs(PreparedArtifact prepared, ArtifactManifestEntry build, string? buildRoot)
+    {
+        var outputs = prepared.Outputs;
+        if (outputs is null || outputs.Count == 0 ||
+            outputs.Any(output => output is null || string.IsNullOrWhiteSpace(output.Kind) ||
+                string.IsNullOrWhiteSpace(output.Reference) || string.IsNullOrWhiteSpace(output.Identity)) ||
+            outputs.Select(output => (output.Kind, output.Reference)).Distinct().Count() != outputs.Count)
+        {
+            throw new InvalidOperationException("Prepared artifact requires a nonempty, unique output inventory with identities.");
+        }
 
-    private static Task ValidatePreparedAsync(
-        IArtifactProvider provider, ArtifactConfig artifact, PreparedArtifact prepared, ArtifactManifestEntry build,
-        ExecutionContext context, CancellationToken cancellationToken) =>
-        provider is ILocalArtifactHandoffProvider local
-            ? local.ValidatePreparedAsync(artifact, prepared, build, context, cancellationToken)
-            : ((IPreparedArtifactProvider)provider).ValidatePreparedAsync(artifact, prepared, context, cancellationToken);
+        if (build.HandoffOutputs is { Count: > 0 } recorded)
+        {
+            if (recorded.Any(output => output is null || string.IsNullOrWhiteSpace(output.Kind) ||
+                string.IsNullOrWhiteSpace(output.Reference) || string.IsNullOrWhiteSpace(output.Identity)) ||
+                recorded.Select(output => (output.Kind, output.Reference)).Distinct().Count() != recorded.Count)
+            {
+                throw new InvalidOperationException("Build evidence has an invalid or ambiguous output inventory.");
+            }
+            var expected = recorded.OrderBy(output => output.Kind, StringComparer.Ordinal)
+                .ThenBy(output => output.Reference, StringComparer.Ordinal);
+            var actual = outputs.OrderBy(output => output.Kind, StringComparer.Ordinal)
+                .ThenBy(output => output.Reference, StringComparer.Ordinal);
+            if (expected.SequenceEqual(actual))
+            {
+                return;
+            }
+        }
+        else if (build.HandoffOutputs is null && outputs.Count == 1 && outputs[0].Kind == "file" &&
+                 !string.IsNullOrWhiteSpace(build.Location) && !string.IsNullOrWhiteSpace(build.ContentSha256))
+        {
+            var location = build.Location;
+            if (Path.IsPathRooted(location) && !string.IsNullOrWhiteSpace(buildRoot))
+            {
+                location = Path.GetRelativePath(buildRoot, location);
+            }
+            if (string.Equals(location.Replace('\\', '/'), outputs[0].Reference, StringComparison.Ordinal) &&
+                string.Equals(build.ContentSha256, outputs[0].Identity, StringComparison.Ordinal))
+            {
+                return;
+            }
+        }
+
+        throw new InvalidOperationException(
+            "Prepared artifact outputs do not match immutable build evidence; rebuild with fresh outputs if evidence is missing.");
+    }
 
     private static async Task ValidateLockAsync(RunManifest run, string root, CancellationToken cancellationToken)
     {

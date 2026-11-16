@@ -25,6 +25,35 @@ This folder contains provider-specific artifact documentation.
 | `terraform` | [terraform.md](terraform.md) |
 | `generic` | [generic.md](generic.md) |
 
+## Provider capabilities
+
+Standard build and push use the provider's normal commands and policies; they do not
+imply verified handoff or publication. Verified handoff prepares and validates the
+exact release outputs. Verified publication sends those previously verified outputs
+without rebuilding or discovering a replacement.
+
+| Type | Standard build | Standard push | Verified handoff | Verified publication |
+| --- | --- | --- | --- | --- |
+| `nuget` | Yes | Yes | Yes | Yes |
+| `generic` | Yes | Yes | Yes | Yes |
+| `docker` | Yes | Yes | OCI archive only | No |
+| `docker-compose` | Yes | Yes | No | No |
+| `helm-oci` | Yes | Yes | No | No |
+| `helm` | Yes | Yes | No | No |
+| `npm` | Yes | Yes | No | No |
+| `pypi` | Yes | Yes | No | No |
+| `maven` | Yes | Yes | No | No |
+| `gradle` | Yes | Yes | No | No |
+| `rubygems` | Yes | Yes | No | No |
+| `terraform` | Yes (plan) | Yes (apply) | No | No |
+
+Capabilities remain subject to each provider's configuration, tool availability and
+push policies. Docker OCI archive mode expressly refuses publication, including ordinary
+push; standard Docker push applies to its normal image mode. NuGet handoff requires
+fresh exact output paths, including symbols when enabled. A local file hash is not a
+remote registry digest; verified publication does not attest the remote registry's state.
+See the [provider implementation guide](verified-handoff-providers.md).
+
 ## Artifact lifecycle groups
 
 Set the top-level `group` on an artifact to select it independently during plan/build/tag/push

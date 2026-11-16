@@ -8,7 +8,7 @@ using Rexo.Core.Abstractions;
 using Rexo.Core.Environment;
 using Rexo.Core.Models;
 
-public sealed class NuGetArtifactProvider : IArtifactProvider, IPreparedArtifactProvider
+public sealed class NuGetArtifactProvider : IArtifactProvider, IPreparedArtifactPublisher
 {
     public static void Register(ArtifactProviderRegistry registry) =>
         registry.Register("nuget", new NuGetArtifactProvider());
@@ -26,6 +26,23 @@ public sealed class NuGetArtifactProvider : IArtifactProvider, IPreparedArtifact
     public async Task<PreparedArtifact> PrepareAsync(
         ArtifactConfig artifact, ExecutionContext context, CancellationToken cancellationToken)
     {
+        return await PreparedArtifactFiles.PrepareAsync(artifact,
+            ResolvePreparedPaths(artifact, context), context.RepositoryRoot, cancellationToken);
+    }
+
+    private static async Task ValidatePreparedFilesAsync(
+        ArtifactConfig artifact, PreparedArtifact prepared, ExecutionContext context, CancellationToken cancellationToken)
+    {
+        if (!PreparedArtifactFiles.MatchesPaths(prepared, artifact,
+            ResolvePreparedPaths(artifact, context), context.RepositoryRoot))
+        {
+            throw new InvalidOperationException("Prepared NuGet outputs do not match the configured package and version.");
+        }
+        await PreparedArtifactFiles.ValidateAsync(prepared, context.RepositoryRoot, cancellationToken);
+    }
+
+    private static IReadOnlyList<string> ResolvePreparedPaths(ArtifactConfig artifact, ExecutionContext context)
+    {
         var version = context.Version?.NuGetVersion ?? context.Version?.SemVer
             ?? throw new InvalidOperationException("Prepared NuGet publication requires a resolved version.");
         var output = GetSetting(artifact, "output") ?? "artifacts/packages";
@@ -39,31 +56,29 @@ public sealed class NuGetArtifactProvider : IArtifactProvider, IPreparedArtifact
             }
             paths.Add(symbols);
         }
-        return await PreparedArtifactFiles.PrepareAsync(artifact, paths, context.RepositoryRoot, cancellationToken);
+        return paths;
     }
 
-    public async Task ValidatePreparedAsync(
-        ArtifactConfig artifact, PreparedArtifact prepared, ExecutionContext context, CancellationToken cancellationToken)
-    {
-        var expected = await PrepareAsync(artifact, context, cancellationToken);
-        if (!PreparedArtifactFiles.SameOutputs(expected, prepared))
-        {
-            throw new InvalidOperationException("Prepared NuGet outputs do not match the configured package and version.");
-        }
-        await PreparedArtifactFiles.ValidateAsync(prepared, context.RepositoryRoot, cancellationToken);
-    }
+    public Task ValidatePreparedAsync(
+        ArtifactConfig artifact, PreparedArtifact prepared, ArtifactManifestEntry build,
+        ExecutionContext context, CancellationToken cancellationToken) =>
+        ValidatePreparedFilesAsync(artifact, prepared, context, cancellationToken);
 
     public async Task<ArtifactPushResult> PushPreparedAsync(
-        ArtifactConfig artifact, PreparedArtifact prepared, ExecutionContext context, CancellationToken cancellationToken)
+        ArtifactConfig artifact, PreparedArtifact prepared, ExecutionContext context, CancellationToken cancellationToken) =>
+        await PushPreparedCoreAsync(artifact, prepared, context, verified: true, cancellationToken);
+
+    private async Task<ArtifactPushResult> PushPreparedCoreAsync(
+        ArtifactConfig artifact, PreparedArtifact prepared, ExecutionContext context, bool verified, CancellationToken cancellationToken)
     {
-        await ValidatePreparedAsync(artifact, prepared, context, cancellationToken);
+        await ValidatePreparedFilesAsync(artifact, prepared, context, cancellationToken);
         var output = GetSetting(artifact, "output") ?? "artifacts/packages";
         var version = context.Version?.NuGetVersion ?? context.Version?.SemVer;
         var reference = Path.GetRelativePath(context.RepositoryRoot,
             ResolveRepositoryPath(context.RepositoryRoot, $"{output}/{artifact.Name}.{version}.nupkg")).Replace('\\', '/');
         var package = prepared.Outputs.Single(entry => entry.Reference == reference);
         var symbols = prepared.Outputs.SingleOrDefault(entry => entry.Reference != reference);
-        return await PushPackagesAsync(artifact, context, [package.Reference], symbols?.Reference, cancellationToken);
+        return await PushPackagesAsync(artifact, context, [package.Reference], symbols?.Reference, verified, cancellationToken);
     }
 
     public async Task<ArtifactBuildResult> BuildAsync(
@@ -74,6 +89,7 @@ public sealed class NuGetArtifactProvider : IArtifactProvider, IPreparedArtifact
         var project = GetSetting(artifact, "project") ?? string.Empty;
         var output = GetSetting(artifact, "output") ?? "artifacts/packages";
         var version = context.Version?.SemVer;
+        var handoffPaths = ResolveFreshHandoffPaths(artifact, context, output);
 
         var outputPath = ResolveRepositoryPath(context.RepositoryRoot, output);
         if (artifact.SourceProject is not null)
@@ -99,9 +115,26 @@ public sealed class NuGetArtifactProvider : IArtifactProvider, IPreparedArtifact
 
         var projectArgument = string.IsNullOrEmpty(project) ? string.Empty : QuoteArgument(project);
         var args = $"pack {projectArgument} --configuration Release --output {QuoteArgument(output)}";
+        var noRestore = GetSetting(artifact, "noRestore");
+        if (noRestore is not null)
+        {
+            if (!bool.TryParse(noRestore, out var skipRestore))
+            {
+                throw new InvalidOperationException("NuGet setting 'noRestore' must be a boolean.");
+            }
+            if (skipRestore)
+            {
+                args += " --no-restore";
+            }
+        }
         if (!string.IsNullOrEmpty(version))
         {
-            args += $" /p:Version={version}";
+            args += $" {QuoteArgument($"/p:Version={version}")}";
+        }
+        var commitSha = context.Version?.CommitSha;
+        if (!string.IsNullOrWhiteSpace(commitSha) && !string.Equals(commitSha, "unknown", StringComparison.OrdinalIgnoreCase))
+        {
+            args += $" {QuoteArgument($"/p:SourceRevisionId={commitSha}")}";
         }
         if (artifact.SourceProject is not null)
         {
@@ -112,19 +145,55 @@ public sealed class NuGetArtifactProvider : IArtifactProvider, IPreparedArtifact
 
         var result = await _runDotnetAsync(args, context.RepositoryRoot, cancellationToken);
         WriteToolOutput(result.Output);
+        IReadOnlyList<PreparedArtifactOutput> handoffOutputs = [];
+        if (result.ExitCode == 0 && handoffPaths is not null && !context.IsDryRun)
+        {
+            try
+            {
+                handoffOutputs = (await PreparedArtifactFiles.PrepareAsync(
+                    artifact, handoffPaths, context.RepositoryRoot, cancellationToken)).Outputs;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                Console.Error.WriteLine($"  NuGet handoff evidence unavailable: {ex.Message}");
+            }
+        }
 
         if (result.ExitCode == 0 && artifact.SourceProject is not null)
         {
             var prepared = await PrepareAsync(artifact, context, cancellationToken);
             var package = prepared.Outputs[0];
             return new ArtifactBuildResult(artifact.Name, true,
-                PreparedArtifactFiles.ResolvePath(context.RepositoryRoot, package.Reference));
+                PreparedArtifactFiles.ResolvePath(context.RepositoryRoot, package.Reference))
+                { HandoffOutputs = handoffOutputs };
         }
 
         return new ArtifactBuildResult(
             Name: artifact.Name,
             Success: result.ExitCode == 0,
-            Location: result.ExitCode == 0 ? outputPath : null);
+            Location: result.ExitCode == 0 ? outputPath : null)
+            { HandoffOutputs = handoffOutputs };
+    }
+
+    private static IReadOnlyList<string>? ResolveFreshHandoffPaths(
+        ArtifactConfig artifact, ExecutionContext context, string output)
+    {
+        var version = context.Version?.NuGetVersion ?? context.Version?.SemVer;
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            return null;
+        }
+        var paths = new List<string> { $"{output}/{artifact.Name}.{version}.nupkg" };
+        if (IsTrue(GetSetting(artifact.Settings, "symbols.enabled")))
+        {
+            var symbols = ResolveSymbolPattern(artifact, output, version);
+            if (symbols.Contains('*', StringComparison.Ordinal) || symbols.Contains('?', StringComparison.Ordinal))
+            {
+                return null;
+            }
+            paths.Add(symbols);
+        }
+        return paths.Any(path => File.Exists(ResolveRepositoryPath(context.RepositoryRoot, path))) ? null : paths;
     }
 
     public Task<ArtifactTagResult> TagAsync(
@@ -148,19 +217,24 @@ public sealed class NuGetArtifactProvider : IArtifactProvider, IPreparedArtifact
         if (artifact.SourceProject is not null)
         {
             var prepared = await PrepareAsync(artifact, context, cancellationToken);
-            return await PushPreparedAsync(artifact, prepared, context, cancellationToken);
+            return await PushPreparedCoreAsync(artifact, prepared, context, verified: false, cancellationToken);
         }
         var output = GetSetting(artifact, "output") ?? "artifacts/packages";
         var packageVersion = context.Version?.NuGetVersion ?? context.Version?.SemVer;
         var packageTargets = ResolvePackageTargets(context.RepositoryRoot, output, artifact.Name, packageVersion);
         var symbolPattern = ResolveSymbolPattern(artifact, output, packageVersion);
-        return await PushPackagesAsync(artifact, context, packageTargets, symbolPattern, cancellationToken);
+        return await PushPackagesAsync(artifact, context, packageTargets, symbolPattern, verified: false, cancellationToken);
     }
 
     private async Task<ArtifactPushResult> PushPackagesAsync(
         ArtifactConfig artifact, ExecutionContext context, IReadOnlyList<string> packageTargets,
-        string? symbolPattern, CancellationToken cancellationToken)
+        string? symbolPattern, bool verified, CancellationToken cancellationToken)
     {
+        if (verified && IsTrue(GetSetting(artifact.Settings, "symbols.enabled")) &&
+            (symbolPattern is null || !HasMatchingFiles(context.RepositoryRoot, symbolPattern)))
+        {
+            throw new InvalidOperationException("Verified NuGet symbol package is missing.");
+        }
         var fileEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
         var source = ResolveSource(artifact, fileEnv);
         var auth = ResolveAuth(artifact, source, GetSetting(artifact.Settings, "target.apiKeyEnv"), fileEnv);
@@ -172,7 +246,8 @@ public sealed class NuGetArtifactProvider : IArtifactProvider, IPreparedArtifact
 
         foreach (var packageTarget in packageTargets)
         {
-            var args = $"nuget push {QuoteArgument(packageTarget, alwaysQuote: true)} --source {QuoteArgument(source)} --skip-duplicate";
+            var args = $"nuget push {QuoteArgument(packageTarget, alwaysQuote: true)} --source {QuoteArgument(source)}";
+            if (!verified) args += " --skip-duplicate";
             if (!string.IsNullOrEmpty(auth.Secret))
             {
                 args += $" --api-key {auth.Secret}";
@@ -207,7 +282,8 @@ public sealed class NuGetArtifactProvider : IArtifactProvider, IPreparedArtifact
                 return new ArtifactPushResult(artifact.Name, false, Array.Empty<string>());
             }
 
-            var symbolArgs = $"nuget push {QuoteArgument(symbolPattern, alwaysQuote: true)} --source {QuoteArgument(symbolSource)} --skip-duplicate";
+            var symbolArgs = $"nuget push {QuoteArgument(symbolPattern, alwaysQuote: true)} --source {QuoteArgument(symbolSource)}";
+            if (!verified) symbolArgs += " --skip-duplicate";
             if (!string.IsNullOrEmpty(symbolAuth.Secret))
             {
                 symbolArgs += $" --api-key {symbolAuth.Secret}";
@@ -223,6 +299,11 @@ public sealed class NuGetArtifactProvider : IArtifactProvider, IPreparedArtifact
             }
 
             published.Add($"{symbolSource}/{artifact.Name} (symbols)");
+        }
+        else if (verified && pushSymbols)
+        {
+            Console.Error.WriteLine("Verified NuGet symbol package disappeared before publication.");
+            return new ArtifactPushResult(artifact.Name, false, published);
         }
 
         return new ArtifactPushResult(artifact.Name, true, published);

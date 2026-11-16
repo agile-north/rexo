@@ -65,7 +65,7 @@ public sealed class ConfigCommandLoader
                 : commandConfig;
 
             registry.Register(name, (invocation, ct) =>
-                ExecuteConfigCommandAsync(name, cmd, executionConfig, invocation, repositoryRoot, commandExecutor, ct));
+                ExecuteWithRunEvidenceAsync(name, cmd, executionConfig, environmentConfig, invocation, repositoryRoot, commandExecutor, ct));
         }
 
         foreach (var (alias, target) in config.Aliases ?? [])
@@ -107,7 +107,7 @@ public sealed class ConfigCommandLoader
                     ? environmentCommand
                     : commandConfig;
                 registry.Register(name, (invocation, ct) =>
-                    ExecuteConfigCommandAsync(name, cmd, executionConfig, invocation, repositoryRoot, commandExecutor, ct));
+                    ExecuteWithRunEvidenceAsync(name, cmd, executionConfig, environmentConfig, invocation, repositoryRoot, commandExecutor, ct));
             }
         }
 
@@ -146,6 +146,40 @@ public sealed class ConfigCommandLoader
         {
             module.Register(_builtinRegistry, context);
         }
+    }
+
+    private async Task<CommandResult> ExecuteWithRunEvidenceAsync(
+        string commandName,
+        RepoCommandConfig commandConfig,
+        RepoConfig config,
+        RepoConfig? environmentConfig,
+        CommandInvocation invocation,
+        string repositoryRoot,
+        ICommandExecutor commandExecutor,
+        CancellationToken cancellationToken)
+    {
+        if (invocation.CaptureRunManifest && commandName != "release")
+        {
+            return CommandResult.Fail(commandName, 9, "Run evidence can only be captured from the release command.");
+        }
+
+        var startedAt = DateTimeOffset.UtcNow;
+        var result = await ExecuteConfigCommandAsync(
+            commandName, commandConfig, config, invocation, repositoryRoot, commandExecutor, cancellationToken);
+        if (!invocation.CaptureRunManifest)
+        {
+            return result;
+        }
+
+        var manifest = await RunManifestFactory.CreateAsync(
+            result, commandName, repositoryRoot, startedAt, DateTimeOffset.UtcNow, config,
+            environmentConfig, invocation.EnvironmentSelection, CiDetector.Detect(),
+            typeof(ConfigCommandLoader).Assembly
+                .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+                .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
+                .FirstOrDefault()?.InformationalVersion,
+            cancellationToken);
+        return result with { CompletedRunManifest = manifest };
     }
 
     private async Task<CommandResult> ExecuteConfigCommandAsync(
@@ -504,6 +538,14 @@ public sealed class ConfigCommandLoader
             var contentSha256 = artifactLocation is null
                 ? null
                 : await HashArtifactFileAsync(artifactLocation, ctx.RepositoryRoot, cancellationToken);
+            var handoffOutputs = result.HandoffOutputs;
+            if (handoffOutputs is null && artifactLocation is not null && contentSha256 is not null)
+            {
+                var fullPath = Path.GetFullPath(Path.IsPathRooted(artifactLocation)
+                    ? artifactLocation : Path.Join(ctx.RepositoryRoot, artifactLocation));
+                var reference = Path.GetRelativePath(ctx.RepositoryRoot, fullPath).Replace('\\', '/');
+                handoffOutputs = [new PreparedArtifactOutput("file", reference, contentSha256)];
+            }
             manifestEntries.Add(new Core.Models.ArtifactManifestEntry(
                 artifactCfg.Type,
                 ResolveArtifactName(artifactCfg, config),
@@ -514,6 +556,7 @@ public sealed class ConfigCommandLoader
                 Location = artifactLocation,
                 ContentSha256 = contentSha256,
                 SourceProject = artifactCfg.SourceProject,
+                HandoffOutputs = handoffOutputs,
             });
         }
 
@@ -652,6 +695,20 @@ public sealed class ConfigCommandLoader
                 });
         }
 
+        try
+        {
+            foreach (var artifact in artifacts)
+            {
+                _artifactProviders.Resolve(artifact.Type)?.ValidatePush(
+                    ToArtifactConfig(artifact, config, outputRoot), ctx);
+            }
+        }
+        catch (InvalidOperationException ex)
+        {
+            return new StepResult(stepId, false, 6, TimeSpan.Zero,
+                new Dictionary<string, object?> { ["error"] = ex.Message });
+        }
+
         for (var index = 0; index < artifacts.Count; index++)
         {
             var artifactCfg = artifacts[index];
@@ -700,7 +757,7 @@ public sealed class ConfigCommandLoader
                 if (ctx.PreparedArtifacts.Count > 0)
                 {
                     var prepared = ctx.PreparedArtifacts.Single(entry => entry.Type == artifactCfg.Type && entry.Name == artifactName);
-                    if (provider is not IPreparedArtifactProvider preparedProvider)
+                    if (provider is not IPreparedArtifactPublisher preparedProvider)
                     {
                         throw new InvalidOperationException($"Provider '{artifactCfg.Type}' does not support prepared publication.");
                     }

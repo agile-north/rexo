@@ -21,6 +21,9 @@ public interface IArtifactProvider
         ExecutionContext context,
         CancellationToken cancellationToken);
 
+    /// <summary>Fails before any provider publishes when this artifact cannot be pushed.</summary>
+    void ValidatePush(ArtifactConfig artifact, ExecutionContext context) { }
+
     IReadOnlyList<string> GetPlannedTags(ArtifactConfig artifact, ExecutionContext context) =>
         Array.Empty<string>();
 }

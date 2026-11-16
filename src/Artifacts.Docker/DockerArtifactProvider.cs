@@ -10,7 +10,7 @@ using Rexo.Core.Environment;
 using Rexo.Core.Models;
 using Rexo.Templating;
 
-public sealed class DockerArtifactProvider : IArtifactProvider
+public sealed class DockerArtifactProvider : IArtifactProvider, IPreparedArtifactProvider
 {
     public static void Register(ArtifactProviderRegistry registry) =>
         registry.Register("docker", new DockerArtifactProvider());
@@ -32,6 +32,53 @@ public sealed class DockerArtifactProvider : IArtifactProvider
 
     public string Type => "docker";
 
+    public async Task<PreparedArtifact> PrepareAsync(
+        ArtifactConfig artifact, ExecutionContext context, CancellationToken cancellationToken)
+    {
+        var archive = GetArchivePath(artifact, context);
+        await OciArchiveValidator.ValidateAsync(archive.FullPath, cancellationToken);
+        return await PreparedArtifactFiles.PrepareAsync(artifact, [archive.RelativePath], context.RepositoryRoot, cancellationToken);
+    }
+
+    public async Task ValidatePreparedAsync(
+        ArtifactConfig artifact, PreparedArtifact prepared, ArtifactManifestEntry build,
+        ExecutionContext context, CancellationToken cancellationToken)
+    {
+        var archive = GetArchivePath(artifact, context);
+        if (prepared.Type != Type || prepared.Name != artifact.Name || prepared.Outputs.Count != 1)
+        {
+            throw new InvalidOperationException("Docker handoff inventory does not match the configured artifact.");
+        }
+        var output = prepared.Outputs[0];
+        if (output.Kind != "file" || output.Reference != archive.RelativePath ||
+            string.IsNullOrWhiteSpace(build.Location) || string.IsNullOrWhiteSpace(build.ContentSha256) ||
+            !string.Equals(Path.GetFullPath(build.Location, context.RepositoryRoot), archive.FullPath,
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal) ||
+            !string.Equals(build.ContentSha256, output.Identity, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Docker OCI archive does not match the recorded build output.");
+        }
+        await PreparedArtifactFiles.ValidateAsync(prepared, context.RepositoryRoot, cancellationToken);
+        await OciArchiveValidator.ValidateAsync(archive.FullPath, cancellationToken);
+    }
+
+    private static (string RelativePath, string FullPath) GetArchivePath(ArtifactConfig artifact, ExecutionContext context)
+    {
+        var path = GetSetting(artifact, "ociArchive");
+        if (string.IsNullOrWhiteSpace(path) || path.Contains(',') || path.Contains('"') ||
+            path.Contains('\r') || path.Contains('\n'))
+        {
+            throw new InvalidOperationException("Docker local handoff requires a portable settings.ociArchive path without commas or quotes.");
+        }
+        var fullPath = PreparedArtifactFiles.ResolvePath(context.RepositoryRoot, path);
+        var relativePath = Path.GetRelativePath(context.RepositoryRoot, fullPath).Replace('\\', '/');
+        if (!string.Equals(path, relativePath, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Docker OCI archive path must be a normalized repository-relative path.");
+        }
+        return (relativePath, fullPath);
+    }
+
     public async Task<ArtifactBuildResult> BuildAsync(
         ArtifactConfig artifact,
         ExecutionContext context,
@@ -41,6 +88,41 @@ public sealed class DockerArtifactProvider : IArtifactProvider
         {
             var dotEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
             var settings = ResolveBuildSettings(artifact, dotEnv, context);
+            if (GetSetting(artifact, "ociArchive") is not null)
+            {
+                var archive = GetArchivePath(artifact, context);
+                if (context.Version is null || string.IsNullOrWhiteSpace(context.CommitSha) ||
+                    !string.Equals(context.Version.CommitSha, context.CommitSha, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException("Docker OCI archive builds require a resolved version matching the repository commit.");
+                }
+                if (!string.Equals(settings.Runner, BuildxRunner, StringComparison.OrdinalIgnoreCase) ||
+                    settings.BuildOutputFlags.Count != 0 || settings.Stages.Count != 0)
+                {
+                    throw new InvalidOperationException("Docker OCI archive builds require runner 'buildx' without buildOutput or stages.");
+                }
+                if (context.IsDryRun)
+                {
+                    return new ArtifactBuildResult(artifact.Name, true, null);
+                }
+                if (File.Exists(archive.FullPath))
+                {
+                    throw new InvalidOperationException("Docker OCI archive already exists; choose a fresh output path.");
+                }
+                Directory.CreateDirectory(Path.GetDirectoryName(archive.FullPath)!);
+                var request = new DockerBuildRequest(settings.Dockerfile, settings.BuildContext, settings.Runner,
+                    settings.Platform, settings.BuildTarget, [$"type=oci,dest={archive.FullPath}"],
+                    settings.BuildArgFlags, settings.BuildSecretFlags, []);
+                var environment = BuildEnvironmentOverrides(dotEnv);
+                var result = await RunBuildRequestAsync(request, context, environment, cancellationToken);
+                if (result.ExitCode != 0)
+                {
+                    return new ArtifactBuildResult(artifact.Name, false, null);
+                }
+                _ = GetArchivePath(artifact, context);
+                await OciArchiveValidator.ValidateAsync(archive.FullPath, cancellationToken);
+                return new ArtifactBuildResult(artifact.Name, true, archive.RelativePath);
+            }
             var tags = BuildTags(settings.Image, artifact, context);
             var primaryTag = context.Version is not null
                 ? $"{settings.Image}:{GetVersionTag(context.Version)}"
@@ -101,6 +183,10 @@ public sealed class DockerArtifactProvider : IArtifactProvider
         ExecutionContext context,
         CancellationToken cancellationToken)
     {
+        if (GetSetting(artifact, "ociArchive") is not null)
+        {
+            return new ArtifactTagResult(artifact.Name, true, Array.Empty<string>());
+        }
         var dotEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
         var settings = ResolveBuildSettings(artifact, dotEnv, context);
         var image = settings.Image;
@@ -133,6 +219,14 @@ public sealed class DockerArtifactProvider : IArtifactProvider
         return BuildTags(settings.Image, artifact, context);
     }
 
+    public void ValidatePush(ArtifactConfig artifact, ExecutionContext context)
+    {
+        if (GetSetting(artifact, "ociArchive") is not null)
+        {
+            throw new InvalidOperationException("Docker OCI archive publication is not supported; no push was attempted.");
+        }
+    }
+
     public async Task<ArtifactPushResult> PushAsync(
         ArtifactConfig artifact,
         ExecutionContext context,
@@ -140,6 +234,7 @@ public sealed class DockerArtifactProvider : IArtifactProvider
     {
         try
         {
+            ValidatePush(artifact, context);
             var dotEnv = FeedAuthResolver.OverlayMappedEnvironment(RepositoryEnvironmentFiles.Load(context.RepositoryRoot), context.MappedSecretEnvironment);
             var settings = ResolveBuildSettings(artifact, dotEnv, context);
             var image = settings.Image;

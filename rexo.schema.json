@@ -2066,6 +2066,11 @@
           "description": "Build output option(s) passed to docker --output.",
           "$ref": "#/$defs/stringOrStringArray"
         },
+        "ociArchive": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Fresh repository-relative path for a locally verified OCI archive. Requires buildx; publication is disabled."
+        },
         "buildArgs": {
           "description": "Build arguments for docker --build-arg.",
           "$ref": "#/$defs/buildArgsValue"
@@ -2375,6 +2380,11 @@
         "output": {
           "type": "string",
           "description": "Package output directory for generated .nupkg files."
+        },
+        "noRestore": {
+          "type": "boolean",
+          "description": "Pass --no-restore to dotnet pack after dependencies have been restored.",
+          "default": false
         },
         "target": {
           "type": "object",

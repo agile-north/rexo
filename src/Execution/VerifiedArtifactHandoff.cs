@@ -43,7 +43,8 @@ public static class VerifiedArtifactHandoff
             {
                 throw new InvalidOperationException("Provider returned prepared outputs for a different artifact.");
             }
-            await provider.ValidatePreparedAsync(artifactConfig, prepared, context, cancellationToken);
+            ValidateBuildOutputs(prepared, built[0], run.RepoRoot);
+            await provider.ValidatePreparedAsync(artifactConfig, prepared, built[0], context, cancellationToken);
             artifacts.Add(prepared);
         }
 
@@ -103,12 +104,15 @@ public static class VerifiedArtifactHandoff
             {
                 throw new InvalidOperationException($"Handoff has no prepared output for '{artifactConfig.Name}'.");
             }
-            if (handoff.Run.Artifacts.Count(entry => entry.Type == artifact.Type && entry.Name == artifactConfig.Name &&
-                entry.SourceProject == artifact.SourceProject) != 1)
+            var built = handoff.Run.Artifacts.Where(entry => entry.Type == artifact.Type && entry.Name == artifactConfig.Name &&
+                entry.SourceProject == artifact.SourceProject).ToArray();
+            if (built.Length != 1)
             {
                 throw new InvalidOperationException($"Release evidence has no unique build result for '{artifactConfig.Name}'.");
             }
-            await ResolveProvider(providers, artifact.Type).ValidatePreparedAsync(artifactConfig, prepared, context, cancellationToken);
+            ValidateBuildOutputs(prepared, built[0], handoff.Run.RepoRoot);
+            await ResolveProvider(providers, artifact.Type).ValidatePreparedAsync(
+                artifactConfig, prepared, built[0], context, cancellationToken);
         }
 
         return handoff;
@@ -131,15 +135,67 @@ public static class VerifiedArtifactHandoff
             run.ConfigHash != CanonicalConfigHasher.Compute(config) ||
             context.Version is null || run.Version.SemVer != context.Version.SemVer ||
             run.Version.NuGetVersion != context.Version.NuGetVersion ||
+            !string.Equals(run.Version.CommitSha, run.CommitSha, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(context.Version.CommitSha, context.CommitSha, StringComparison.OrdinalIgnoreCase) ||
             (context.IsCi && (!run.IsCi || string.IsNullOrWhiteSpace(context.CiBuildId) || run.CiBuildId != context.CiBuildId)))
         {
             throw new InvalidOperationException("Handoff commit, config, version or CI run identity does not match this invocation.");
         }
     }
 
-    private static IPreparedArtifactProvider ResolveProvider(ArtifactProviderRegistry providers, string type) =>
-        providers.Resolve(type) as IPreparedArtifactProvider
-        ?? throw new InvalidOperationException($"Artifact provider '{type}' does not support prepared publication.");
+    private static IPreparedArtifactProvider ResolveProvider(ArtifactProviderRegistry providers, string type)
+    {
+        var provider = providers.Resolve(type);
+        return provider as IPreparedArtifactProvider
+            ?? throw new InvalidOperationException($"Artifact provider '{type}' does not support verified handoff.");
+    }
+
+    private static void ValidateBuildOutputs(PreparedArtifact prepared, ArtifactManifestEntry build, string? buildRoot)
+    {
+        var outputs = prepared.Outputs;
+        if (outputs is null || outputs.Count == 0 ||
+            outputs.Any(output => output is null || string.IsNullOrWhiteSpace(output.Kind) ||
+                string.IsNullOrWhiteSpace(output.Reference) || string.IsNullOrWhiteSpace(output.Identity)) ||
+            outputs.Select(output => (output.Kind, output.Reference)).Distinct().Count() != outputs.Count)
+        {
+            throw new InvalidOperationException("Prepared artifact requires a nonempty, unique output inventory with identities.");
+        }
+
+        if (build.HandoffOutputs is { Count: > 0 } recorded)
+        {
+            if (recorded.Any(output => output is null || string.IsNullOrWhiteSpace(output.Kind) ||
+                string.IsNullOrWhiteSpace(output.Reference) || string.IsNullOrWhiteSpace(output.Identity)) ||
+                recorded.Select(output => (output.Kind, output.Reference)).Distinct().Count() != recorded.Count)
+            {
+                throw new InvalidOperationException("Build evidence has an invalid or ambiguous output inventory.");
+            }
+            var expected = recorded.OrderBy(output => output.Kind, StringComparer.Ordinal)
+                .ThenBy(output => output.Reference, StringComparer.Ordinal);
+            var actual = outputs.OrderBy(output => output.Kind, StringComparer.Ordinal)
+                .ThenBy(output => output.Reference, StringComparer.Ordinal);
+            if (expected.SequenceEqual(actual))
+            {
+                return;
+            }
+        }
+        else if (build.HandoffOutputs is null && outputs.Count == 1 && outputs[0].Kind == "file" &&
+                 !string.IsNullOrWhiteSpace(build.Location) && !string.IsNullOrWhiteSpace(build.ContentSha256))
+        {
+            var location = build.Location;
+            if (Path.IsPathRooted(location) && !string.IsNullOrWhiteSpace(buildRoot))
+            {
+                location = Path.GetRelativePath(buildRoot, location);
+            }
+            if (string.Equals(location.Replace('\\', '/'), outputs[0].Reference, StringComparison.Ordinal) &&
+                string.Equals(build.ContentSha256, outputs[0].Identity, StringComparison.Ordinal))
+            {
+                return;
+            }
+        }
+
+        throw new InvalidOperationException(
+            "Prepared artifact outputs do not match immutable build evidence; rebuild with fresh outputs if evidence is missing.");
+    }
 
     private static async Task ValidateLockAsync(RunManifest run, string root, CancellationToken cancellationToken)
     {

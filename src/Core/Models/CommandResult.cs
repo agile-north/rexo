@@ -1,5 +1,7 @@
 namespace Rexo.Core.Models;
 
+using System.Text.Json.Serialization;
+
 public sealed record CommandResult(
     string Command,
     bool Success,
@@ -20,6 +22,10 @@ public sealed record CommandResult(
 
     /// <summary>Push policy decisions produced by <c>builtin:push-artifacts</c>.</summary>
     public IReadOnlyList<PushDecision> PushDecisions { get; init; } = Array.Empty<PushDecision>();
+
+    /// <summary>Completed nested release evidence for in-process handoff.</summary>
+    [JsonIgnore]
+    public RunManifest? CompletedRunManifest { get; init; }
 
     public bool ArtifactsAnyPushed => ArtifactPublicationSummary.From(Artifacts, PushDecisions).AnyPushed;
     public int ArtifactsPushedCount => ArtifactPublicationSummary.From(Artifacts, PushDecisions).PushedCount;

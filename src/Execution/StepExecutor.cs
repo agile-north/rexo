@@ -1381,6 +1381,9 @@ public sealed class StepExecutor : IStepExecutor, IDisposable
             EnvironmentSelection = context.EnvironmentSelection,
             MaxCommandDepth = context.MaxCommandDepth,
             EchoMode = context.CliEchoMode ?? stepDefinition.Echo,
+            CaptureRunManifest = stepDefinition.With is not null &&
+                stepDefinition.With.TryGetValue("captureRunManifest", out var capture) &&
+                bool.TryParse(_templateRenderer.Render(capture, context), out var captureRun) && captureRun,
         };
 
         var result = await _commandExecutor.ExecuteAsync(commandName, invocation, cancellationToken);
@@ -1446,6 +1449,11 @@ public sealed class StepExecutor : IStepExecutor, IDisposable
         if (result.Version is not null)
         {
             outputs["__version"] = result.Version;
+        }
+
+        if (result.CompletedRunManifest is not null)
+        {
+            outputs["__runManifest"] = result.CompletedRunManifest;
         }
 
         if (result.Artifacts.Count > 0)

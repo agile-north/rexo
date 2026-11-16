@@ -109,6 +109,50 @@ public sealed class VersioningTests
         Assert.Equal("my/gitversion:preview", image);
     }
 
+    [Theory]
+    [InlineData("0123456789abcdef0123456789abcdef01234567", true)]
+    [InlineData("ffffffffffffffffffffffffffffffffffffffff", false)]
+    [InlineData("unknown", false)]
+    public void RequiredGitVersionAcceptsOnlyMatchingFullCommit(string sha, bool accepted)
+    {
+        var context = MakeContext() with { CommitSha = "0123456789abcdef0123456789abcdef01234567" };
+        var json = $$"""{"SemVer":"1.2.3-beta.1","Major":1,"Minor":2,"Patch":3,"PreReleaseTag":"beta.1","Sha":"{{sha}}"}""";
+
+        var result = GitVersionVersionProvider.ParseGitVersionOutput(json, context, requireGitVersion: true);
+
+        Assert.Equal(accepted, result is not null);
+        if (result is not null)
+        {
+            Assert.Equal("1.2.3-beta.1", result.SemVer);
+            Assert.Equal(context.CommitSha, result.CommitSha);
+        }
+    }
+
+    [Fact]
+    public async Task RequiredGitVersionFailsInsteadOfReturningFallback()
+    {
+        var missingRoot = Path.Join(Path.GetTempPath(), $"rexo-missing-{Guid.NewGuid():N}");
+        var config = new VersioningConfig("gitversion", "1.0.0",
+            new Dictionary<string, string> { ["requireGitVersion"] = "true", ["useDocker"] = "false" });
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            new GitVersionVersionProvider().ResolveAsync(config, ExecutionContext.Empty(missingRoot), CancellationToken.None));
+
+        Assert.Contains("GitVersion did not produce", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("invalid")]
+    [InlineData("1.2.4")]
+    [InlineData("1.2.3-beta.01")]
+    public void RequiredGitVersionRejectsInvalidOrInconsistentSemVer(string semver)
+    {
+        const string sha = "0123456789abcdef0123456789abcdef01234567";
+        var json = $$"""{"SemVer":"{{semver}}","Major":1,"Minor":2,"Patch":3,"Sha":"{{sha}}"}""";
+        Assert.Null(GitVersionVersionProvider.ParseGitVersionOutput(
+            json, MakeContext() with { CommitSha = sha }, requireGitVersion: true));
+    }
+
     [Fact]
     public void VersionProviderRegistryContainsGitProvider()
     {

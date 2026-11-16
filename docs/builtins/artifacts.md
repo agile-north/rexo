@@ -202,8 +202,12 @@ pipeline; this repository does not use it in its normal single-job lifecycle.
 `builtin:seal-artifact-handoff` accepts `with.runManifest` and `with.path` as portable,
 repository-relative paths. It requires a successful, unpublished `release` run with
 the same commit, effective config hash, policy lock hash, resolved version and CI run
-identity. Providers describe their prepared outputs through `IPreparedArtifactProvider`;
-the receipt records artifact type/name and each output's kind, reference and identity.
+identity. The version result's commit SHA must also match the run and current checkout.
+Providers describe and validate their prepared outputs through `IPreparedArtifactProvider`;
+`IPreparedArtifactPublisher` adds verified publication. The receipt records artifact
+type/name and each output's kind, reference and identity, matched against complete
+build-time output evidence. See the [provider guide](../artifacts/verified-handoff-providers.md)
+for compatibility and provider responsibilities.
 
 `builtin:push-artifact-handoff` accepts `with.path`, requires `--confirm`, verifies the
 entire inventory before pushing, and uses existing provider and push-policy gates.
@@ -211,14 +215,51 @@ Missing/changed outputs, identity mismatches and denied pushes fail explicitly.
 Global `--dry-run` verifies evidence and simulates publication without calling providers.
 It does not invoke build/test/pack. Configured post-push hooks must be gated separately.
 
+`builtin:verify-artifact-handoff` accepts `with.path` and performs the same inventory,
+identity and provider checks without attempting publication.
+
 Consumers can configure separate seal/publish stages with these primitives.
 This repository uses the normal single-job release lifecycle instead.
+
+To run a completed `release`, persist its run manifest, and seal and verify its
+artifacts within one Rexo invocation, a separate command can delegate to it:
+
+```yaml
+commands:
+  prepare:
+    steps:
+      - id: completed-release
+        command: release
+        with:
+          captureRunManifest: "true"
+      - uses: builtin:seal-artifact-handoff
+        with:
+          fromStep: completed-release
+          runManifest: artifacts/release-manifest.json
+          path: artifacts/handoff.json
+      - uses: builtin:verify-artifact-handoff
+        with:
+          path: artifacts/handoff.json
+```
+
+The captured manifest represents the completed nested release, not the enclosing
+command. Sealing rejects a failed, skipped or uncaptured release and then applies
+all the ordinary unpublished-run and artifact verification gates. The release
+and subsequent steps share the invocation's version cache; this does not enable
+publication. Configure the release itself to avoid pushing until separately approved.
+The manifest and handoff paths must differ. Only consume either output after a
+successful non-dry-run invocation; a failed or dry-run invocation may leave
+older files in place.
+
 NuGet packages (including exact-path symbols) and generic
 archives implement the capability. Both use shared repository-contained file hashes,
 reject symbolic-link traversal, and publish only their validated outputs.
 Unsupported providers fail explicitly rather than falling back to build or discovery.
+Docker can produce a locally verified OCI archive as described in
+[Docker local handoff](../artifacts/docker.md#local-oci-handoff). Such archives
+cannot be published through either handoff or the regular artifact push path.
 Remote artifact providers can implement their own immutable reference validation and
-publication through the same interface; Docker/OCI support is not implemented here.
+publication through the prepared-publication interface.
 The receipt records the selected artifact group as well as the exact artifact inventory, and
 publication must use the same group. It is integrity evidence, not a signature or remote
 promotion/deployment record.

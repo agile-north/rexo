@@ -82,7 +82,7 @@ public sealed class NuGetProjectDiscoveryTests : IDisposable
     {
         await WriteAsync("Directory.Build.props", """
             <Project><PropertyGroup>
-              <PackageId Condition="'$(Configuration)' == 'Release' and '$(Version)' == '1.2.3'">Acme.$(MSBuildProjectName)</PackageId>
+              <PackageId Condition="'$(Configuration)' == 'Release' and '$(Version)' == '1.2.3' and '$(SourceRevisionId)' == 'commit'">Acme.$(MSBuildProjectName)</PackageId>
             </PropertyGroup></Project>
             """);
         await ProjectAsync("src/ActualContracts.csproj");
@@ -400,7 +400,13 @@ public sealed class NuGetProjectDiscoveryTests : IDisposable
             Success = true, CommandExecuted = "release", CommitSha = "commit", Version = Version,
             ConfigHash = CanonicalConfigHasher.Compute(config),
             Steps = [new StepManifestEntry("build", true, 0, 1)],
-            Artifacts = [new ArtifactManifestEntry("nuget", "One.Contracts", true, false, []) { SourceProject = "OneContracts.csproj" }],
+            Artifacts = [new ArtifactManifestEntry("nuget", "One.Contracts", true, false, [])
+            {
+                SourceProject = "OneContracts.csproj",
+                HandoffOutputs = (await new NuGetArtifactProvider().PrepareAsync(
+                    new ArtifactConfig("nuget", "One.Contracts", new Dictionary<string, JsonElement>()),
+                    context, CancellationToken.None)).Outputs,
+            }],
         };
         await WriteAsync("run.json", JsonSerializer.Serialize(run));
         await VerifiedArtifactHandoff.SealAsync("run.json", "handoff.json", config, context, Providers(), CancellationToken.None);

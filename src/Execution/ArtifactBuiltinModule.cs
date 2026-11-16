@@ -1,5 +1,8 @@
 namespace Rexo.Execution;
 
+using System.Text.Json;
+using Rexo.Artifacts;
+using Rexo.Core.Abstractions;
 using Rexo.Core.Models;
 
 internal sealed class ArtifactBuiltinModule : IConfigBuiltinModule
@@ -25,9 +28,32 @@ internal sealed class ArtifactBuiltinModule : IConfigBuiltinModule
                     new Dictionary<string, object?> { ["message"] = "Dry run: handoff not written." });
             }
 
+            var manifestPath = RequiredInput(step, "runManifest");
+            var handoffPath = RequiredInput(step, "path");
+            if (step.With is not null && step.With.TryGetValue("fromStep", out var fromStep))
+            {
+                if (!ctx.CompletedSteps.TryGetValue(fromStep, out var completed) || !completed.Success ||
+                    !completed.Outputs.TryGetValue("__runManifest", out var evidence) ||
+                    evidence is not RunManifest { CommandExecuted: "release", Success: true, ExitCode: 0 } manifest)
+                {
+                    throw new InvalidOperationException("fromStep must identify a completed successful release with captureRunManifest enabled.");
+                }
+
+                var destination = PreparedArtifactFiles.ResolvePath(ctx.RepositoryRoot, manifestPath);
+                var handoffDestination = PreparedArtifactFiles.ResolvePath(ctx.RepositoryRoot, handoffPath);
+                if (string.Equals(destination, handoffDestination,
+                    OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("Run manifest and handoff paths must be different.");
+                }
+                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+                await File.WriteAllTextAsync(destination,
+                    JsonSerializer.Serialize(manifest, ConfigCommandLoader.IndentedJsonOptions), ct);
+            }
+
             await VerifiedArtifactHandoff.SealAsync(
-                RequiredInput(step, "runManifest"),
-                RequiredInput(step, "path"),
+                manifestPath,
+                handoffPath,
                 context.Config, ctx, context.Loader.ArtifactProviders, ct);
             return new StepResult(step.Id ?? "seal-handoff", true, 0, TimeSpan.Zero,
                 new Dictionary<string, object?> { ["message"] = "Verified artifact handoff sealed." });
@@ -42,6 +68,13 @@ internal sealed class ArtifactBuiltinModule : IConfigBuiltinModule
             var handoff = await VerifiedArtifactHandoff.VerifyAsync(
                 RequiredInput(step, "path"),
                 context.Config, ctx, context.Loader.ArtifactProviders, ct);
+            foreach (var artifact in handoff.Artifacts)
+            {
+                if (context.Loader.ArtifactProviders.Resolve(artifact.Type) is not IPreparedArtifactPublisher)
+                {
+                    throw new InvalidOperationException($"Artifact provider '{artifact.Type}' does not support prepared publication.");
+                }
+            }
             var version = handoff.Run.Version!;
             var result = await context.Loader.PushArtifactsAsync(
                 step.Id ?? "push-handoff", context.Config, context.RepositoryRoot,
@@ -81,6 +114,14 @@ internal sealed class ArtifactBuiltinModule : IConfigBuiltinModule
             {
                 Outputs = new Dictionary<string, object?>(result.Outputs) { ["__version"] = version },
             };
+        }));
+
+        registry.Register("builtin:verify-artifact-handoff", (step, ctx, ct) => ExecuteHandoffAsync(step, async () =>
+        {
+            await VerifiedArtifactHandoff.VerifyAsync(
+                RequiredInput(step, "path"), context.Config, ctx, context.Loader.ArtifactProviders, ct);
+            return new StepResult(step.Id ?? "verify-handoff", true, 0, TimeSpan.Zero,
+                new Dictionary<string, object?> { ["message"] = "Artifact handoff verified." });
         }));
 
         registry.Register("builtin:build-artifacts", (step, ctx, ct) =>

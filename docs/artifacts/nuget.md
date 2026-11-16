@@ -11,6 +11,7 @@
 | --- | --- | --- |
 | `project` | `string` | Project path for `dotnet pack`. |
 | `output` | `string` | Package output directory. |
+| `noRestore` | `boolean` | Pass `--no-restore` to `dotnet pack`; restore dependencies beforehand (default `false`). |
 | `target.source` | `string` | Feed URL/name for push. |
 | `target.sourceEnv` | `string` | Env var name containing feed URL/name (default env key `NUGET_TARGET_SOURCE`). |
 | `target.apiKeyEnv` | `string` | Env var name containing API key/token (default env key `NUGET_API_KEY`). |
@@ -93,7 +94,10 @@ commands, rather than rediscovered after building. Declarative config output
 (`config resolved`) and config hashes still describe patterns, not local matches.
 
 Builds require a resolved repository version and pack each project separately,
-setting `Version` and `PackageVersion` from the resolved version. Plans, manifests
+setting `Version` and `PackageVersion` from the resolved version. When the resolved
+commit SHA is known, discovery and packing also pass it as `SourceRevisionId`.
+This applies to literal NuGet artifacts as well; their `PackageVersion` remains
+controlled by the project unless discovery is used. Plans, manifests
 and publication operate on individual packages, not one aggregate wildcard.
 Discovered build entries include `SourceProject`, the exact `.nupkg` location and
 its SHA-256. Publication selects the exact package/version; unrelated or stale

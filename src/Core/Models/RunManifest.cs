@@ -104,6 +104,10 @@ public sealed record ArtifactManifestEntry(
     bool Pushed,
     IReadOnlyList<string> Tags)
 {
+    /// <summary>Immutable output identities captured when the artifact was built.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<PreparedArtifactOutput>? HandoffOutputs { get; init; }
+
     /// <summary>Repository-relative project input for a discovered artifact.</summary>
     public string? SourceProject { get; init; }
 

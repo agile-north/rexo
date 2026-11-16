@@ -65,7 +65,7 @@ public sealed class ConfigCommandLoader
                 : commandConfig;
 
             registry.Register(name, (invocation, ct) =>
-                ExecuteConfigCommandAsync(name, cmd, executionConfig, invocation, repositoryRoot, commandExecutor, ct));
+                ExecuteWithRunEvidenceAsync(name, cmd, executionConfig, environmentConfig, invocation, repositoryRoot, commandExecutor, ct));
         }
 
         foreach (var (alias, target) in config.Aliases ?? [])
@@ -107,7 +107,7 @@ public sealed class ConfigCommandLoader
                     ? environmentCommand
                     : commandConfig;
                 registry.Register(name, (invocation, ct) =>
-                    ExecuteConfigCommandAsync(name, cmd, executionConfig, invocation, repositoryRoot, commandExecutor, ct));
+                    ExecuteWithRunEvidenceAsync(name, cmd, executionConfig, environmentConfig, invocation, repositoryRoot, commandExecutor, ct));
             }
         }
 
@@ -146,6 +146,40 @@ public sealed class ConfigCommandLoader
         {
             module.Register(_builtinRegistry, context);
         }
+    }
+
+    private async Task<CommandResult> ExecuteWithRunEvidenceAsync(
+        string commandName,
+        RepoCommandConfig commandConfig,
+        RepoConfig config,
+        RepoConfig? environmentConfig,
+        CommandInvocation invocation,
+        string repositoryRoot,
+        ICommandExecutor commandExecutor,
+        CancellationToken cancellationToken)
+    {
+        if (invocation.CaptureRunManifest && commandName != "release")
+        {
+            return CommandResult.Fail(commandName, 9, "Run evidence can only be captured from the release command.");
+        }
+
+        var startedAt = DateTimeOffset.UtcNow;
+        var result = await ExecuteConfigCommandAsync(
+            commandName, commandConfig, config, invocation, repositoryRoot, commandExecutor, cancellationToken);
+        if (!invocation.CaptureRunManifest)
+        {
+            return result;
+        }
+
+        var manifest = await RunManifestFactory.CreateAsync(
+            result, commandName, repositoryRoot, startedAt, DateTimeOffset.UtcNow, config,
+            environmentConfig, invocation.EnvironmentSelection, CiDetector.Detect(),
+            typeof(ConfigCommandLoader).Assembly
+                .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+                .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
+                .FirstOrDefault()?.InformationalVersion,
+            cancellationToken);
+        return result with { CompletedRunManifest = manifest };
     }
 
     private async Task<CommandResult> ExecuteConfigCommandAsync(

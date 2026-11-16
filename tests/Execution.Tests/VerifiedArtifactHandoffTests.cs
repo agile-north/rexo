@@ -1,6 +1,7 @@
 namespace Rexo.Execution.Tests;
 
 using System.Text.Json;
+using System.Diagnostics;
 using Rexo.Artifacts;
 using Rexo.Artifacts.NuGet;
 using Rexo.Artifacts.Generic;
@@ -23,7 +24,14 @@ public sealed class VerifiedArtifactHandoffTests : IDisposable
         NuGetVersion = "1.2.3",
     };
 
-    public void Dispose() => Directory.Delete(_root, true);
+    public void Dispose()
+    {
+        foreach (var file in Directory.EnumerateFiles(_root, "*", SearchOption.AllDirectories))
+        {
+            File.SetAttributes(file, File.GetAttributes(file) & ~FileAttributes.ReadOnly);
+        }
+        Directory.Delete(_root, true);
+    }
 
     [Fact]
     public async Task HandoffInventoryIsLimitedToSelectedGroup()
@@ -273,6 +281,117 @@ public sealed class VerifiedArtifactHandoffTests : IDisposable
             JsonSerializer.Serialize(run with { ConfigHash = CanonicalConfigHasher.Compute(config) }));
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             VerifiedArtifactHandoff.SealAsync("run.json", "handoff.json", config, Context(), Providers(), CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData(true, false, false, true)]
+    [InlineData(false, false, false, false)]
+    [InlineData(true, true, false, false)]
+    [InlineData(true, false, true, false)]
+    public async Task NestedReleaseCanBeSealedOnlyAfterSuccessfulCapturedCompletion(
+        bool capture, bool failRelease, bool samePaths, bool expectedSuccess)
+    {
+        Directory.CreateDirectory(_root);
+        await GitAsync("init", "--quiet");
+        await GitAsync("-c", "user.name=Rexo test", "-c", "user.email=test@example.invalid",
+            "-c", "commit.gpgsign=false", "commit", "--allow-empty", "--quiet", "-m", "test");
+        Directory.CreateDirectory(Path.Join(_root, "input"));
+        await File.WriteAllTextAsync(Path.Join(_root, "input", "payload.txt"), "payload");
+        var settings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+            """{"target":{"source":"input"}}""")!;
+        var releaseSteps = new List<RepoStepConfig>
+        {
+            new("version", Uses: "builtin:resolve-version"),
+            new("build", Uses: "builtin:build-artifacts"),
+        };
+        if (failRelease)
+        {
+            releaseSteps.Add(new RepoStepConfig("fail", Uses: "builtin:missing"));
+        }
+
+        var config = new RepoConfig("test", null, null)
+        {
+            Versioning = new RepoVersioningConfig("counted", "1.2.3"),
+            Artifacts = [new RepoArtifactConfig("generic", "Bundle", settings)],
+            Commands = new Dictionary<string, RepoCommandConfig>
+            {
+                ["release"] = new(null, [], releaseSteps),
+                ["prepare"] = new(null, [],
+                [
+                    new("version-first", Uses: "builtin:resolve-version"),
+                    new("release", Command: "release", ContinueOnError: true,
+                        With: new Dictionary<string, string> { ["captureRunManifest"] = capture.ToString() }),
+                    new("seal", Uses: "builtin:seal-artifact-handoff", With: new Dictionary<string, string>
+                    {
+                        ["fromStep"] = "release",
+                        ["runManifest"] = "artifacts/release.json",
+                        ["path"] = samePaths ? "artifacts/release.json" : "artifacts/handoff.json",
+                    }),
+                    new("verify", Uses: "builtin:verify-artifact-handoff",
+                        With: new Dictionary<string, string> { ["path"] = "artifacts/handoff.json" }),
+                ]),
+            },
+        };
+        var counter = new CountingVersionProvider();
+        var versions = VersionProviderRegistry.CreateDefault();
+        versions.Register("counted", counter);
+        var builtins = new BuiltinRegistry();
+        var registry = new CommandRegistry();
+        var executor = new DefaultCommandExecutor(registry);
+        var loader = new ConfigCommandLoader(builtins, new TemplateRenderer(), versions, Providers());
+        loader.LoadInto(registry, config, _root, executor);
+        var invocation = new CommandInvocation(new Dictionary<string, string>(),
+            new Dictionary<string, string?>(), false, null, _root);
+
+        var result = await executor.ExecuteAsync("prepare", invocation, CancellationToken.None);
+
+        Assert.Equal(expectedSuccess, result.Success);
+        Assert.Equal(1, counter.Calls);
+        Assert.Equal(expectedSuccess, File.Exists(Path.Join(_root, "artifacts", "release.json")));
+        Assert.Equal(expectedSuccess, File.Exists(Path.Join(_root, "artifacts", "handoff.json")));
+        if (expectedSuccess)
+        {
+            var manifest = JsonSerializer.Deserialize<RunManifest>(
+                await File.ReadAllTextAsync(Path.Join(_root, "artifacts", "release.json")))!;
+            Assert.True(manifest.Success);
+            Assert.Equal("release", manifest.CommandExecuted);
+            Assert.Equal(manifest.CommitSha, manifest.Version!.CommitSha);
+            Assert.Single(manifest.Artifacts);
+            Assert.DoesNotContain(manifest.Steps, step => step.StepId == "seal");
+            Assert.Equal("verify", result.Steps[^1].StepId);
+        }
+    }
+
+    private async Task GitAsync(params string[] arguments)
+    {
+        var start = new ProcessStartInfo("git")
+        {
+            WorkingDirectory = _root,
+            RedirectStandardError = true,
+            RedirectStandardOutput = true,
+        };
+        foreach (var argument in arguments)
+        {
+            start.ArgumentList.Add(argument);
+        }
+        using var process = Process.Start(start)!;
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        Assert.True(process.ExitCode == 0, await stdout + await stderr);
+    }
+
+    private sealed class CountingVersionProvider : IVersionProvider
+    {
+        private readonly FixedVersionProvider _inner = new();
+        public int Calls { get; private set; }
+
+        public Task<VersionResult> ResolveAsync(
+            VersioningConfig config, ExecutionContext context, CancellationToken cancellationToken)
+        {
+            Calls++;
+            return _inner.ResolveAsync(config, context, cancellationToken);
+        }
     }
 
     [Theory]

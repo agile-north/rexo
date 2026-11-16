@@ -15,6 +15,10 @@ public sealed record CommandInvocation(
     public string? PresentationEchoMode { get; init; }
     public EnvironmentSelectionResult? EnvironmentSelection { get; init; }
 
+    /// <summary>Capture completed release evidence for a delegating command.</summary>
+    [JsonIgnore]
+    public bool CaptureRunManifest { get; init; }
+
     /// <summary>Command names currently on the call stack, used for cross-command cycle detection.</summary>
     public IReadOnlyList<string> CallStack { get; init; } = [];
 

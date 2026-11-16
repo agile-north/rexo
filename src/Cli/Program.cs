@@ -1277,103 +1277,10 @@ public static class Program
         var manifestConfig = usesEnvironment && outputSettings.EnvironmentConfig is not null
             ? outputSettings.EnvironmentConfig
             : config;
-        var configHash = manifestConfig is null ? null : CanonicalConfigHasher.Compute(manifestConfig);
-        var environmentConfigHash = outputSettings.EnvironmentConfig is null
-            ? null
-            : CanonicalConfigHasher.Compute(outputSettings.EnvironmentConfig);
-        var policyLockPath = Path.Join(workingDir, ".rexo", "rexo.lock.yaml");
-        string? policyLockHash = null;
-        if (File.Exists(policyLockPath))
-        {
-            await using var lockStream = File.OpenRead(policyLockPath);
-            policyLockHash = Convert.ToHexString(await SHA256.HashDataAsync(lockStream, cancellationToken)).ToLowerInvariant();
-        }
-
-        var gitInfo = await GitDetector.DetectAsync(workingDir, cancellationToken);
-
-        var manifest = new RunManifest
-        {
-            ToolVersion = GetToolVersion(),
-            RepoName = Path.GetFileName(workingDir.TrimEnd(Path.DirectorySeparatorChar)),
-            RepoRoot = workingDir,
-            Branch = gitInfo.Branch,
-            CommitSha = gitInfo.CommitSha,
-            RemoteUrl = gitInfo.RemoteUrl,
-            CommandExecuted = commandName,
-            Environment = outputSettings.EnvironmentSelection?.EnvironmentName,
-            EnvironmentSelectionSource = outputSettings.EnvironmentSelection?.SelectionSource,
-            SourceBranch = outputSettings.EnvironmentSelection?.SourceBranch,
-            SourceBranchOrigin = outputSettings.EnvironmentSelection?.BranchSource,
-            MatchedBranchPattern = outputSettings.EnvironmentSelection?.MatchedPattern,
-            EnvironmentSelectionExplicit = outputSettings.EnvironmentSelection?.IsExplicit,
-            EnvironmentSelectionOverrodeAutomaticMatches = outputSettings.EnvironmentSelection?.OverrodeAutomaticSelection,
-            Success = result.Success,
-            ExitCode = result.ExitCode,
-            StartedAt = startedAt,
-            CompletedAt = completedAt,
-            ConfigHash = configHash,
-            EnvironmentConfigHash = environmentConfigHash,
-            PolicyLockHash = policyLockHash,
-            Version = result.Version,
-            AssemblyVersion = result.Version?.AssemblyVersion,
-            InformationalVersion = result.Version?.InformationalVersion,
-            NuGetVersion = result.Version?.NuGetVersion,
-            IsCi = ciInfo.IsCi,
-            CiProvider = ciInfo.Provider,
-            CiBuildId = ciInfo.BuildId,
-            CiRunNumber = ciInfo.RunNumber,
-            CiWorkflowName = ciInfo.WorkflowName,
-            CiActor = ciInfo.Actor,
-            CiTag = ciInfo.Tag,
-            CiBuildUrl = ciInfo.BuildUrl,
-            Steps = result.Steps
-                .Select(s =>
-                {
-                    var fileOutputs = s.Outputs.TryGetValue("__fileOutputs", out var fo)
-                        && fo is IReadOnlyDictionary<string, IReadOnlyList<string>> dict
-                        ? dict
-                        : new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
-
-                    static string? GetStringOutput(IReadOnlyDictionary<string, object?> outputs, string key) =>
-                        outputs.TryGetValue(key, out var value) ? value?.ToString() : null;
-
-                    static bool? GetBoolOutput(IReadOnlyDictionary<string, object?> outputs, string key)
-                    {
-                        if (!outputs.TryGetValue(key, out var value) || value is null)
-                        {
-                            return null;
-                        }
-
-                        if (value is bool boolValue)
-                        {
-                            return boolValue;
-                        }
-
-                        return bool.TryParse(value.ToString(), out var parsed) ? parsed : null;
-                    }
-
-                    return new StepManifestEntry(s.StepId, s.Success, s.ExitCode, s.Duration.TotalMilliseconds)
-                    {
-                        FileOutputs = fileOutputs,
-                        ExecutionMode = GetStringOutput(s.Outputs, "__executionMode"),
-                        RequestedExecutionMode = GetStringOutput(s.Outputs, "__requestedExecutionMode"),
-                        ContainerImage = GetStringOutput(s.Outputs, "__containerImage"),
-                        ContainerWorkingDirectory = GetStringOutput(s.Outputs, "__containerWorkingDirectory"),
-                        ContainerFallbackPolicy = GetStringOutput(s.Outputs, "__containerFallbackPolicy"),
-                        ContainerFallbackAllowed = GetBoolOutput(s.Outputs, "__containerFallbackAllowed"),
-                        ContainerFallbackUsed = GetBoolOutput(s.Outputs, "__containerFallbackUsed"),
-                        ContainerFallbackReason = GetStringOutput(s.Outputs, "__containerFallbackReason"),
-                    };
-                })
-                .ToArray(),
-            Artifacts = result.Artifacts,
-            PushDecisions = result.PushDecisions,
-            Errors = result.StructuredErrors
-                .Select(e => e.Message)
-                .Where(m => m is not null)
-                .Select(m => m!)
-                .ToArray(),
-        };
+        var manifest = await RunManifestFactory.CreateAsync(
+            result, commandName, workingDir, startedAt, completedAt, manifestConfig,
+            outputSettings.EnvironmentConfig, outputSettings.EnvironmentSelection, ciInfo,
+            GetToolVersion(), cancellationToken);
 
         if (manifestPath is not null)
         {

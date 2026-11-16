@@ -217,6 +217,37 @@ identity and provider checks without attempting publication.
 
 Consumers can configure separate seal/publish stages with these primitives.
 This repository uses the normal single-job release lifecycle instead.
+
+To run a completed `release`, persist its run manifest, and seal and verify its
+artifacts within one Rexo invocation, a separate command can delegate to it:
+
+```yaml
+commands:
+  prepare:
+    steps:
+      - id: completed-release
+        command: release
+        with:
+          captureRunManifest: "true"
+      - uses: builtin:seal-artifact-handoff
+        with:
+          fromStep: completed-release
+          runManifest: artifacts/release-manifest.json
+          path: artifacts/handoff.json
+      - uses: builtin:verify-artifact-handoff
+        with:
+          path: artifacts/handoff.json
+```
+
+The captured manifest represents the completed nested release, not the enclosing
+command. Sealing rejects a failed, skipped or uncaptured release and then applies
+all the ordinary unpublished-run and artifact verification gates. The release
+and subsequent steps share the invocation's version cache; this does not enable
+publication. Configure the release itself to avoid pushing until separately approved.
+The manifest and handoff paths must differ. Only consume either output after a
+successful non-dry-run invocation; a failed or dry-run invocation may leave
+older files in place.
+
 NuGet packages (including exact-path symbols) and generic
 archives implement the capability. Both use shared repository-contained file hashes,
 reject symbolic-link traversal, and publish only their validated outputs.

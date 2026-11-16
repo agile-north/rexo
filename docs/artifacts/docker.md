@@ -42,7 +42,8 @@ layout, referenced manifests and blob hashes as well as the entire archive hash.
 Transfer the archive and receipt together. This local file hash is **not** a
 registry digest, signature or proof of a later published image. Run image tests
 against the verified archive with tooling that supports OCI archive import; the
-handoff itself does not load or execute containers.
+handoff itself does not load or execute containers. Some Docker image stores
+reject OCI archives with `docker load`; use an OCI-capable runtime or image store.
 
 Archive mode rejects both ordinary and verified publication before any configured
 artifact is pushed. It cannot yet publish the verified image or guarantee

@@ -99,9 +99,26 @@ public sealed class NuGetArtifactProvider : IArtifactProvider, IPreparedArtifact
 
         var projectArgument = string.IsNullOrEmpty(project) ? string.Empty : QuoteArgument(project);
         var args = $"pack {projectArgument} --configuration Release --output {QuoteArgument(output)}";
+        var noRestore = GetSetting(artifact, "noRestore");
+        if (noRestore is not null)
+        {
+            if (!bool.TryParse(noRestore, out var skipRestore))
+            {
+                throw new InvalidOperationException("NuGet setting 'noRestore' must be a boolean.");
+            }
+            if (skipRestore)
+            {
+                args += " --no-restore";
+            }
+        }
         if (!string.IsNullOrEmpty(version))
         {
-            args += $" /p:Version={version}";
+            args += $" {QuoteArgument($"/p:Version={version}")}";
+        }
+        var commitSha = context.Version?.CommitSha;
+        if (!string.IsNullOrWhiteSpace(commitSha) && !string.Equals(commitSha, "unknown", StringComparison.OrdinalIgnoreCase))
+        {
+            args += $" {QuoteArgument($"/p:SourceRevisionId={commitSha}")}";
         }
         if (artifact.SourceProject is not null)
         {

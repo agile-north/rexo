@@ -30,6 +30,58 @@ public sealed class NuGetArtifactProviderTests
         "artifacts/packages/Acme.Core.Extensions.Http.nuspec",
     ];
 
+    [Theory]
+    [InlineData(true, "abc123", true)]
+    [InlineData(false, "unknown", false)]
+    public async Task PackUsesResolvedVersionAndKnownSourceRevision(bool noRestore, string sha, bool expectRevision)
+    {
+        var root = Path.Join(Path.GetTempPath(), $"rexo-nuget-pack-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            string? arguments = null;
+            var provider = new NuGetArtifactProvider((args, _, _) =>
+            {
+                arguments = args;
+                return Task.FromResult((0, string.Empty));
+            });
+            var settings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+                $$"""{"project":"src/example.csproj","noRestore":{{noRestore.ToString().ToLowerInvariant()}}}""")!;
+            var version = new VersionResult("1.2.3-beta.1", 1, 2, 3, "beta.1", sha, sha, true, false);
+
+            var result = await provider.BuildAsync(new ArtifactConfig("nuget", "Example", settings),
+                ExecutionContext.Empty(root) with { Version = version }, CancellationToken.None);
+
+            Assert.True(result.Success);
+            Assert.Contains("/p:Version=1.2.3-beta.1", arguments, StringComparison.Ordinal);
+            Assert.Equal(noRestore, arguments!.Contains("--no-restore", StringComparison.Ordinal));
+            Assert.Equal(expectRevision, arguments.Contains("/p:SourceRevisionId=abc123", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public async Task PackRejectsInvalidNoRestoreSetting()
+    {
+        var root = Path.Join(Path.GetTempPath(), $"rexo-nuget-pack-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        try
+        {
+            var provider = new NuGetArtifactProvider((_, _, _) => throw new InvalidOperationException("Unexpected invocation"));
+            var settings = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>("""{"noRestore":"maybe"}""")!;
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                provider.BuildAsync(new ArtifactConfig("nuget", "Example", settings), ExecutionContext.Empty(root), CancellationToken.None));
+            Assert.Contains("noRestore", error.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
     [Fact]
     public async Task BuildAsyncEchoesCommandOnlyForFullModeAndKeepsToolOutputVisible()
     {

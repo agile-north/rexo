@@ -82,7 +82,7 @@ public sealed class NuGetProjectDiscoveryTests : IDisposable
     {
         await WriteAsync("Directory.Build.props", """
             <Project><PropertyGroup>
-              <PackageId Condition="'$(Configuration)' == 'Release' and '$(Version)' == '1.2.3'">Acme.$(MSBuildProjectName)</PackageId>
+              <PackageId Condition="'$(Configuration)' == 'Release' and '$(Version)' == '1.2.3' and '$(SourceRevisionId)' == 'commit'">Acme.$(MSBuildProjectName)</PackageId>
             </PropertyGroup></Project>
             """);
         await ProjectAsync("src/ActualContracts.csproj");

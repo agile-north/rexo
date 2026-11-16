@@ -51,6 +51,7 @@ internal static class NuGetProjectDiscovery
                 Discovery = discovery,
                 Version = context.Version?.SemVer,
                 PackageVersion = context.Version?.NuGetVersion,
+                SourceRevisionId = context.Version?.CommitSha,
                 Output = output,
             });
             var projects = await context.ArtifactDiscoveryCache.GetOrAdd(key, _ =>
@@ -168,6 +169,11 @@ internal static class NuGetProjectDiscovery
         {
             start.ArgumentList.Add($"-property:Version={context.Version.SemVer}");
             start.ArgumentList.Add($"-property:PackageVersion={context.Version.NuGetVersion ?? context.Version.SemVer}");
+            if (!string.IsNullOrWhiteSpace(context.Version.CommitSha) &&
+                !string.Equals(context.Version.CommitSha, "unknown", StringComparison.OrdinalIgnoreCase))
+            {
+                start.ArgumentList.Add($"-property:SourceRevisionId={context.Version.CommitSha}");
+            }
         }
         if (framework is not null)
         {

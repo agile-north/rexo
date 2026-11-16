@@ -165,6 +165,7 @@ public sealed class VerifiedArtifactHandoffTests : IDisposable
     [InlineData("commit")]
     [InlineData("config")]
     [InlineData("version")]
+    [InlineData("version-commit")]
     [InlineData("ci-run")]
     [InlineData("lock")]
     public async Task VerificationRejectsChangedEvidence(string change)
@@ -190,6 +191,9 @@ public sealed class VerifiedArtifactHandoffTests : IDisposable
                 break;
             case "version":
                 context = context with { Version = _version with { SemVer = "2.0.0" } };
+                break;
+            case "version-commit":
+                context = context with { Version = _version with { CommitSha = "different" } };
                 break;
             case "ci-run":
                 context = context with { CiBuildId = "different" };

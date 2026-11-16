@@ -202,7 +202,8 @@ pipeline; this repository does not use it in its normal single-job lifecycle.
 `builtin:seal-artifact-handoff` accepts `with.runManifest` and `with.path` as portable,
 repository-relative paths. It requires a successful, unpublished `release` run with
 the same commit, effective config hash, policy lock hash, resolved version and CI run
-identity. Providers describe their prepared outputs through `IPreparedArtifactProvider`;
+identity. The version result's commit SHA must also match the run and current checkout.
+Providers describe their prepared outputs through `IPreparedArtifactProvider`;
 the receipt records artifact type/name and each output's kind, reference and identity.
 
 `builtin:push-artifact-handoff` accepts `with.path`, requires `--confirm`, verifies the

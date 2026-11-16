@@ -131,6 +131,8 @@ public static class VerifiedArtifactHandoff
             run.ConfigHash != CanonicalConfigHasher.Compute(config) ||
             context.Version is null || run.Version.SemVer != context.Version.SemVer ||
             run.Version.NuGetVersion != context.Version.NuGetVersion ||
+            !string.Equals(run.Version.CommitSha, run.CommitSha, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(context.Version.CommitSha, context.CommitSha, StringComparison.OrdinalIgnoreCase) ||
             (context.IsCi && (!run.IsCi || string.IsNullOrWhiteSpace(context.CiBuildId) || run.CiBuildId != context.CiBuildId)))
         {
             throw new InvalidOperationException("Handoff commit, config, version or CI run identity does not match this invocation.");

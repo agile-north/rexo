@@ -15,6 +15,7 @@ Configure how Rexo resolves semantic versions and selects version providers.
     "tagPrefix": "v",                 // for minver provider
     "minimumMajorMinor": "1.0",       // for minver provider
     "useDocker": "true",              // gitversion/nbgv/minver — enable Docker fallback (default true)
+    "requireGitVersion": "true",     // gitversion only — fail instead of using a fallback
     "dockerImage": "gittools/gitversion:6.0.0"  // override the Docker image for this provider; template expressions are rendered first
   }
 }
@@ -31,6 +32,12 @@ Configure how Rexo resolves semantic versions and selects version providers.
 | `gitversion` | `gitversion /output json` | Parses SemVer2 fields from JSON output; Docker fallback via `gittools/gitversion:6.0.0` |
 | `minver` | `dotnet minver` | Single-line SemVer output; Docker fallback via .NET SDK image |
 | `nbgv` | `nbgv get-version -f json` | Parses `SemVer2`, `Version`, `GitCommitId`; Docker fallback via .NET SDK image |
+
+For release workflows using GitVersion, set `settings.requireGitVersion` to `"true"`.
+Rexo then requires GitVersion's `SemVer`, numeric version fields and full
+hexadecimal `Sha` matching the detected repository commit. If no host or enabled Docker
+provider succeeds, resolution fails instead of producing the configured fallback
+version. The default remains `"false"` for existing configurations.
 
 ---
 

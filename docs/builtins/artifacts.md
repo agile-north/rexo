@@ -212,14 +212,20 @@ Missing/changed outputs, identity mismatches and denied pushes fail explicitly.
 Global `--dry-run` verifies evidence and simulates publication without calling providers.
 It does not invoke build/test/pack. Configured post-push hooks must be gated separately.
 
+`builtin:verify-artifact-handoff` accepts `with.path` and performs the same inventory,
+identity and provider checks without attempting publication.
+
 Consumers can configure separate seal/publish stages with these primitives.
 This repository uses the normal single-job release lifecycle instead.
 NuGet packages (including exact-path symbols) and generic
 archives implement the capability. Both use shared repository-contained file hashes,
 reject symbolic-link traversal, and publish only their validated outputs.
 Unsupported providers fail explicitly rather than falling back to build or discovery.
+Docker can produce a locally verified OCI archive as described in
+[Docker local handoff](../artifacts/docker.md#local-oci-handoff). Such archives
+cannot be published through either handoff or the regular artifact push path.
 Remote artifact providers can implement their own immutable reference validation and
-publication through the same interface; Docker/OCI support is not implemented here.
+publication through the prepared-publication interface.
 The receipt records the selected artifact group as well as the exact artifact inventory, and
 publication must use the same group. It is integrity evidence, not a signature or remote
 promotion/deployment record.

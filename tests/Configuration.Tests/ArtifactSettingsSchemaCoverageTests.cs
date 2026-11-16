@@ -82,6 +82,7 @@ public sealed class ArtifactSettingsSchemaCoverageTests
                   "settings": {
                     "project": "src/Core/Core.csproj",
                     "output": "artifacts/packages",
+                    "noRestore": true,
                     "target": {
                       "source": "https://api.nuget.org/v3/index.json",
                       "sourceEnv": "NUGET_TARGET_SOURCE",
@@ -97,10 +98,32 @@ public sealed class ArtifactSettingsSchemaCoverageTests
         {
             var config = await RepoConfigurationLoader.LoadAsync(configPath, CancellationToken.None);
             Assert.Equal(2, config.Artifacts?.Count);
+            Assert.True(config.Artifacts![1].Settings!["noRestore"].GetBoolean());
         }
         finally
         {
             Environment.SetEnvironmentVariable("REXO_OVERLAY", originalOverlay);
+            DeleteDirectory(dir);
+        }
+    }
+
+    [Fact]
+    public async Task LoadAsyncAcceptsDockerOciArchive()
+    {
+        var dir = CreateTempDirectory();
+        try
+        {
+            var path = Path.Join(dir, "rexo.json");
+            await File.WriteAllTextAsync(path, """
+                {"$schema":"rexo.schema.json","schemaVersion":"1.0","name":"example",
+                 "artifacts":[{"type":"docker","name":"app","settings":{
+                   "runner":"buildx","ociArchive":"artifacts/app.oci.tar"}}]}
+                """);
+            var config = await RepoConfigurationLoader.LoadAsync(path, CancellationToken.None);
+            Assert.Equal("artifacts/app.oci.tar", Assert.Single(config.Artifacts!).Settings!["ociArchive"].GetString());
+        }
+        finally
+        {
             DeleteDirectory(dir);
         }
     }

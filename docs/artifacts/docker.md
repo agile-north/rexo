@@ -16,6 +16,38 @@ Docker has the largest settings surface (targets, push gates, classification, ta
 
 `buildArgs` values are rendered with the same template context used elsewhere before Rexo passes them to Docker.
 
+### Local OCI handoff
+
+For a no-push candidate, configure an OCI archive:
+
+```yaml
+settings:
+  runner: buildx
+  image: example/app
+  ociArchive: artifacts/app.oci.tar
+```
+
+The path must be a normalized, repository-relative path without symlinks, commas or
+quotes, and must not already exist. Buildx must support the OCI exporter (for example,
+a configured `docker-container` builder). This mode cannot be combined with
+`buildOutput` or stages. Rexo exports an archive instead of creating local tags,
+records its SHA-256 in the release manifest, and does not perform registry login.
+Buildx may still access configured base images and build dependencies; use an
+offline Dockerfile and builder when network access is prohibited.
+
+`builtin:seal-artifact-handoff` binds the archive to the recorded build hash,
+configuration, version and commit. `builtin:verify-artifact-handoff` accepts
+`with.path` and verifies the handoff without publication. Rexo checks the OCI
+layout, referenced manifests and blob hashes as well as the entire archive hash.
+Transfer the archive and receipt together. This local file hash is **not** a
+registry digest, signature or proof of a later published image. Run image tests
+against the verified archive with tooling that supports OCI archive import; the
+handoff itself does not load or execute containers.
+
+Archive mode rejects both ordinary and verified publication before any configured
+artifact is pushed. It cannot yet publish the verified image or guarantee
+registry tag immutability. Existing non-archive Docker behavior is unchanged.
+
 ## Auth
 
 Docker login resolution is shared by Docker and Docker Compose providers:

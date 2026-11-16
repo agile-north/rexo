@@ -1,5 +1,6 @@
 namespace Rexo.Execution;
 
+using Rexo.Core.Abstractions;
 using Rexo.Core.Models;
 
 internal sealed class ArtifactBuiltinModule : IConfigBuiltinModule
@@ -42,6 +43,13 @@ internal sealed class ArtifactBuiltinModule : IConfigBuiltinModule
             var handoff = await VerifiedArtifactHandoff.VerifyAsync(
                 RequiredInput(step, "path"),
                 context.Config, ctx, context.Loader.ArtifactProviders, ct);
+            foreach (var artifact in handoff.Artifacts)
+            {
+                if (context.Loader.ArtifactProviders.Resolve(artifact.Type) is not IPreparedArtifactProvider)
+                {
+                    throw new InvalidOperationException($"Artifact provider '{artifact.Type}' does not support prepared publication.");
+                }
+            }
             var version = handoff.Run.Version!;
             var result = await context.Loader.PushArtifactsAsync(
                 step.Id ?? "push-handoff", context.Config, context.RepositoryRoot,
@@ -81,6 +89,14 @@ internal sealed class ArtifactBuiltinModule : IConfigBuiltinModule
             {
                 Outputs = new Dictionary<string, object?>(result.Outputs) { ["__version"] = version },
             };
+        }));
+
+        registry.Register("builtin:verify-artifact-handoff", (step, ctx, ct) => ExecuteHandoffAsync(step, async () =>
+        {
+            await VerifiedArtifactHandoff.VerifyAsync(
+                RequiredInput(step, "path"), context.Config, ctx, context.Loader.ArtifactProviders, ct);
+            return new StepResult(step.Id ?? "verify-handoff", true, 0, TimeSpan.Zero,
+                new Dictionary<string, object?> { ["message"] = "Artifact handoff verified." });
         }));
 
         registry.Register("builtin:build-artifacts", (step, ctx, ct) =>

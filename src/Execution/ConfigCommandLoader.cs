@@ -652,6 +652,20 @@ public sealed class ConfigCommandLoader
                 });
         }
 
+        try
+        {
+            foreach (var artifact in artifacts)
+            {
+                _artifactProviders.Resolve(artifact.Type)?.ValidatePush(
+                    ToArtifactConfig(artifact, config, outputRoot), ctx);
+            }
+        }
+        catch (InvalidOperationException ex)
+        {
+            return new StepResult(stepId, false, 6, TimeSpan.Zero,
+                new Dictionary<string, object?> { ["error"] = ex.Message });
+        }
+
         for (var index = 0; index < artifacts.Count; index++)
         {
             var artifactCfg = artifacts[index];

@@ -37,13 +37,13 @@ public static class VerifiedArtifactHandoff
             }
 
             var provider = ResolveProvider(providers, artifact.Type);
-            var prepared = (await provider.PrepareAsync(artifactConfig, context, cancellationToken))
+            var prepared = (await PrepareAsync(provider, artifactConfig, context, cancellationToken))
                 with { SourceProject = artifact.SourceProject };
             if (prepared.Type != artifactConfig.Type || prepared.Name != artifactConfig.Name)
             {
                 throw new InvalidOperationException("Provider returned prepared outputs for a different artifact.");
             }
-            await provider.ValidatePreparedAsync(artifactConfig, prepared, context, cancellationToken);
+            await ValidatePreparedAsync(provider, artifactConfig, prepared, built[0], context, cancellationToken);
             artifacts.Add(prepared);
         }
 
@@ -103,12 +103,13 @@ public static class VerifiedArtifactHandoff
             {
                 throw new InvalidOperationException($"Handoff has no prepared output for '{artifactConfig.Name}'.");
             }
-            if (handoff.Run.Artifacts.Count(entry => entry.Type == artifact.Type && entry.Name == artifactConfig.Name &&
-                entry.SourceProject == artifact.SourceProject) != 1)
+            var built = handoff.Run.Artifacts.Where(entry => entry.Type == artifact.Type && entry.Name == artifactConfig.Name &&
+                entry.SourceProject == artifact.SourceProject).ToArray();
+            if (built.Length != 1)
             {
                 throw new InvalidOperationException($"Release evidence has no unique build result for '{artifactConfig.Name}'.");
             }
-            await ResolveProvider(providers, artifact.Type).ValidatePreparedAsync(artifactConfig, prepared, context, cancellationToken);
+            await ValidatePreparedAsync(ResolveProvider(providers, artifact.Type), artifactConfig, prepared, built[0], context, cancellationToken);
         }
 
         return handoff;
@@ -139,9 +140,26 @@ public static class VerifiedArtifactHandoff
         }
     }
 
-    private static IPreparedArtifactProvider ResolveProvider(ArtifactProviderRegistry providers, string type) =>
-        providers.Resolve(type) as IPreparedArtifactProvider
-        ?? throw new InvalidOperationException($"Artifact provider '{type}' does not support prepared publication.");
+    private static IArtifactProvider ResolveProvider(ArtifactProviderRegistry providers, string type)
+    {
+        var provider = providers.Resolve(type);
+        return provider is IPreparedArtifactProvider or ILocalArtifactHandoffProvider
+            ? provider
+            : throw new InvalidOperationException($"Artifact provider '{type}' does not support prepared publication or local handoff.");
+    }
+
+    private static Task<PreparedArtifact> PrepareAsync(
+        IArtifactProvider provider, ArtifactConfig artifact, ExecutionContext context, CancellationToken cancellationToken) =>
+        provider is ILocalArtifactHandoffProvider local
+            ? local.PrepareAsync(artifact, context, cancellationToken)
+            : ((IPreparedArtifactProvider)provider).PrepareAsync(artifact, context, cancellationToken);
+
+    private static Task ValidatePreparedAsync(
+        IArtifactProvider provider, ArtifactConfig artifact, PreparedArtifact prepared, ArtifactManifestEntry build,
+        ExecutionContext context, CancellationToken cancellationToken) =>
+        provider is ILocalArtifactHandoffProvider local
+            ? local.ValidatePreparedAsync(artifact, prepared, build, context, cancellationToken)
+            : ((IPreparedArtifactProvider)provider).ValidatePreparedAsync(artifact, prepared, context, cancellationToken);
 
     private static async Task ValidateLockAsync(RunManifest run, string root, CancellationToken cancellationToken)
     {

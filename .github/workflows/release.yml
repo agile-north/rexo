@@ -37,13 +37,13 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Install GitVersion
-        uses: gittools/actions/gitversion/setup@v3
+        uses: gittools/actions/gitversion/setup@v5
         with:
           versionSpec: '6.x'
 
       - name: Compute version
         id: gitversion
-        uses: gittools/actions/gitversion/execute@v3
+        uses: gittools/actions/gitversion/execute@v5
 
       - name: NuGet login
         id: nuget-login
